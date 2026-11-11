@@ -89,6 +89,10 @@ async function load(): Promise<void> {
       message.value = library.length > 0
         ? '当前测试路线的第二幕可按已有打卡进度阅读，其余章节待剧情服务接入。'
         : '当前开发环境尚未接入剧情服务。可从已打卡的澳门测试路线查看第二幕。'
+    } else if (library.every(item => item.local === true)) {
+      message.value = library.length > 0
+        ? '当前探索版本只包含第二幕。其他章节需从已发布文化任务的路线开始。'
+        : '当前账号暂无已接入剧情的探索。可在路线详情查看文化任务。'
     }
   } catch (error) {
     entries.value = []
@@ -107,7 +111,9 @@ function chapterLabel(act: number): string {
   const entry = chapterFor(act)
   if (entry?.unlocked === true) return entry.started ? '继续阅读 ›' : '阅读 ›'
   if (loadFailed.value) return '待重试'
-  return olderService.value && entry == null ? '待接入' : '随路线解锁'
+  if (entry != null) return '随路线解锁'
+  if (session.value == null) return '登录后查看'
+  return olderService.value ? '待接入' : '当前探索暂无'
 }
 function openOpening(): void { openPage('/packages/story/reader/reader?act=1') }
 function openChapter(act: number): void {
