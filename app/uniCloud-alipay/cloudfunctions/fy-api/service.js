@@ -41,7 +41,7 @@ function validateDraft(p) {
 function routeView(v, version) {
   return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version,
     activities:cultureSummary(v.culture), chapters:(v.culture?.chapters ?? []).map(chapter => chapterGuide(v.culture, chapter)),
-    cultureUpgrade:Array.isArray(v.cultureUpgrade)}
+    cultureUpgrade:Array.isArray(v.cultureUpgrade), cultureSourceRoutes:v.cultureUpgrade ?? []}
 }
 function createService({repo,now=Date.now,allowTestContent=true}) {
   const attachCulture = createCultureUpgrade({ repo, allowTestContent })
@@ -108,7 +108,9 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         const v=await repo.get('fy-versions',r.version)
         if(v) result.push(routeView(v, r.version))
       }
-      return result
+      const sources = new Set(result.filter(route => route.testOnly && route.cultureUpgrade)
+        .flatMap(route => route.cultureSourceRoutes))
+      return result.filter(route => !route.testOnly || route.cultureUpgrade || !sources.has(route.id))
     },
     async start(u,p) {
       if (!u?.uid||!id(p.routeId)||!id(p.requestId)) fail('INVALID_REQUEST')

@@ -7,7 +7,7 @@ import type { RouteNode, RouteSummary, MapViewport } from './types.uts'
 export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
 export type ActivitySummary = { id: string, title: string }
 export type ChapterGuide = { act: number, title: string, activityId?: string | null, gateText: string }
-export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean }
+export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean, cultureSourceRoutes?: string[] }
 export type RunProgress = { runId: string, routeId: string, version: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, activities?: string[] }
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)
@@ -22,7 +22,15 @@ export async function refreshCatalog(): Promise<void> {
     if (runId != null && runId.length > 0) {
       try {
         const progress = await secured<RunProgress>('progress', { runId })
-        if (session.value?.uid === uid && uni.getStorageSync(key) === runId) activeRun.value = progress
+        const combined = published.value.find(route => route.cultureSourceRoutes?.includes(progress.routeId) === true)
+        const selected = combined == null ? progress : await secured<RunProgress | null>('routeProgress', { routeId: combined.id })
+        if (session.value?.uid === uid && uni.getStorageSync(key) === runId) {
+          activeRun.value = selected
+          if (combined != null) {
+            if (selected == null) uni.removeStorageSync(key)
+            else uni.setStorageSync(key, selected.runId)
+          }
+        }
       } catch (_) { if (session.value == null) activeRun.value = null }
     }
   } else { activeRun.value = null }
@@ -63,7 +71,7 @@ export function listRoutes(): RouteSummary[] {
   if (run != null) {
     const i = routes.findIndex(r => r.id === run.routeId)
     if (i >= 0) routes[i] = run.snapshot
-    else routes.push(run.snapshot)
+    else if (!published.value.some(route => route.cultureSourceRoutes?.includes(run.routeId) === true)) routes.push(run.snapshot)
   }
   return routes.map(r => summarizeRoute(r, run?.routeId === r.id ? run : null))
 }

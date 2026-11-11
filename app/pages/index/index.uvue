@@ -36,7 +36,7 @@ import RouteMap from '@/components/exploration/RouteMap.uvue'
 import MapSideActions from '@/components/exploration/MapSideActions.uvue'
 import CurrentRoutePanel from '@/components/exploration/CurrentRoutePanel.uvue'
 import { demoEnabled } from '@/features/demo-mode.uts'
-import { findNode, findRoute, listNodes, refreshCatalog } from '@/features/exploration/catalog.uts'
+import { findNode, findRoute, listNodes, published, refreshCatalog } from '@/features/exploration/catalog.uts'
 import { mapState, dispatchMapEvent } from '@/features/exploration/map-store.uts'
 import type { MapPosition, MapViewport } from '@/features/exploration/types.uts'
 import { openCheckin, openPage } from '@/features/navigation.uts'
@@ -50,7 +50,15 @@ const railBottom = computed(() => 'calc(' + (selectedNode.value != null ? 180 : 
 const commandedViewport = shallowRef<MapViewport>(mapState.value.viewport)
 const currentLocation = shallowRef<MapPosition | null>(null)
 const locating = ref(false)
-onShow(() => { refreshCatalog() })
+onShow(async () => {
+  await refreshCatalog()
+  const selected = mapState.value.routeId
+  if (selected == null) return
+  const combined = published.value.find(item => item.cultureSourceRoutes?.includes(selected) === true)
+  if (combined != null) {
+    dispatchMapEvent({ type: 'select-route', routeId: combined.id, viewport: findRoute(combined.id)?.viewport ?? combined.viewport })
+  }
+})
 
 watch(() => mapState.value.routeId, id => {
   if (id != null) commandedViewport.value = mapState.value.viewport
