@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto')
 const { validateCulture, cultureSummary, chapterGuide, completedActivities, activityIds } = require('./culture')
 const { createCultureService } = require('./culture-service')
 const { createCultureUpgrade } = require('./culture-upgrade')
+const { seatNodes, seatActivities } = require('./partnership-service')
 const fail = code => { throw new Error(code) }
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const text = (v, max=120) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
@@ -58,13 +59,31 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     if (!node) fail('NOT_FOUND')
     return {run,node}
   }
+  async function checkinWindow(db, run, runId) {
+    if (run.purpose !== 'pk') return
+    const match = await db.get('fy-matches', run.matchId)
+    if (match?.status !== 'running' || match.runs?.[run.uid] !== runId) fail('NOT_PENDING')
+    if (now() > match.startedAt + 24 * 3600 * 1000) fail('EXPIRED')
+  }
   async function runProgress(u, runId, run) {
     run = await attachCulture(run, runId)
     const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
-    const completed = checks.map(check => check.nodeId)
     const snapshot = routeView(run.snapshot, run.version)
-    const activities = completedActivities(run)
-    return { runId, routeId: run.routeId, version: run.version, snapshot, completed, activities,
+    const purpose = run.purpose ?? 'solo'
+    if (purpose === 'coop') {
+      const team = await repo.get('fy-teams', run.teamId)
+      if (team?.runs?.[u.uid] !== runId) fail('NOT_FOUND')
+      const seat = team.seats.macau === u.uid ? 'macau' : 'hunan'
+      const nodes = seatNodes(run, seat)
+      const activities = seatActivities(run, seat)
+      snapshot.nodes = snapshot.nodes.filter(node => nodes.includes(node.id))
+      snapshot.activities = snapshot.activities.filter(activity => activities.includes(activity.id))
+    }
+    if (purpose === 'pk') snapshot.activities = []
+    const completed = checks.map(check => check.nodeId).filter(id => snapshot.nodes.some(node => node.id === id))
+    const doneActivities = completedActivities(run)
+    const activities = snapshot.activities.filter(activity => doneActivities.includes(activity.id)).map(activity => activity.id)
+    return { runId, routeId: run.routeId, version: run.version, purpose, snapshot, completed, activities,
       done: completed.length + activities.length, total: snapshot.nodes.length + snapshot.activities.length }
   }
   return {
@@ -126,11 +145,16 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         return {id:runId}
       })
     },
-    async mediaBinding(u,p) { return binding(repo,u,p) },
+    async mediaBinding(u,p) {
+      const bound = await binding(repo,u,p)
+      await checkinWindow(repo, bound.run, p.runId)
+      return bound
+    },
     // Only called with server-generated metadata after authenticated byte upload.
     async registerMedia(u,p) {
       if (!text(p.fileID, 2048)) fail('MEDIA_UPLOAD_FAILED')
-      await binding(repo,u,p)
+      const { run } = await binding(repo,u,p)
+      await checkinWindow(repo, run, p.runId)
       await repo.put('fy-media',p.id,{uid:u.uid,runId:p.runId,nodeId:p.nodeId,requestId:p.requestId,fileID:p.fileID,mime:p.mime,createdAt:now(),used:false})
       return {id:p.id}
     },
@@ -150,6 +174,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         if(request&&(request.runId!==p.runId||request.nodeId!==p.nodeId)) fail('REQUEST_CONFLICT')
         const old=await db.get('fy-checkins',cid)
         if (old) return {id:cid,alreadyCompleted:true}
+        await checkinWindow(db, run, p.runId)
         if (!coord(p.latitude,p.longitude)) fail('INVALID_LOCATION')
         if (distance(node,p)>node.radius) fail('OUTSIDE_RANGE')
         if(typeof p.note!=='undefined'&&(typeof p.note!=='string'||p.note.length>1000)) fail('INVALID_NOTE')
@@ -173,17 +198,28 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       if (!u?.uid) fail('AUTH_REQUIRED')
       if (!id(p.routeId)) fail('INVALID_ROUTE')
       const runs = await repo.list('fy-runs', { uid: u.uid, routeId: p.routeId })
-      const run = runs.sort((a, b) => b.createdAt - a.createdAt)[0]
+      const run = runs.filter(run => (run.purpose ?? 'solo') === 'solo').sort((a, b) => b.createdAt - a.createdAt)[0]
       return run == null ? null : runProgress(u, run._id, run)
     },
     async nodeRecord(u, p) {
       if (!u?.uid) fail('AUTH_REQUIRED')
       if (!id(p.routeId) || !id(p.nodeId)) fail('INVALID_NODE')
-      const records = await repo.list('fy-diary', { uid: u.uid, routeId: p.routeId, nodeId: p.nodeId })
-      const record = records.sort((a, b) => b.createdAt - a.createdAt)[0]
-      if (!record) return null
-      const { title, createdAt, note, mediaId } = record
-      return { title, createdAt, note, mediaId }
+      const query = { uid: u.uid, routeId: p.routeId, nodeId: p.nodeId }
+      if (p.runId != null) {
+        const run = await owned(repo, u, p.runId)
+        if (run.routeId !== p.routeId) fail('NOT_FOUND')
+        query.runId = p.runId
+      }
+      const records = await repo.list('fy-diary', query)
+      for (const record of records.sort((a, b) => b.createdAt - a.createdAt)) {
+        if (p.runId == null) {
+          const run = await repo.get('fy-runs', record.runId)
+          if ((run?.purpose ?? 'solo') !== 'solo') continue
+        }
+        const { title, createdAt, note, mediaId } = record
+        return { title, createdAt, note, mediaId }
+      }
+      return null
     },
     async diary(u) { if (!u?.uid) fail('AUTH_REQUIRED'); return (await repo.list('fy-diary',{uid:u.uid})).sort((a,b)=>b.createdAt-a.createdAt) }
   }

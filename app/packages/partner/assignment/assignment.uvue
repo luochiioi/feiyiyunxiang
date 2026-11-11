@@ -1,0 +1,69 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="失败任务" :show-back="true" />
+    <view class="content">
+      <template v-if="task != null">
+        <view class="card green">
+          <text class="title">{{ taskTitle }}</text>
+          <text class="body">PK 失败后分配的任务。完成后即可参加下一场。</text>
+        </view>
+        <view class="card">
+          <text class="heading">处理方式</text>
+          <text class="body">可以立即完成。分配满 72 小时后，也可以主动拒绝。</text>
+          <text class="muted">{{ rejectHint }}</text>
+        </view>
+        <button class="primary" :disabled="busy" @click="finish">完成任务</button>
+        <button v-if="rejectEnabled" class="secondary" :disabled="busy" @click="decline">拒绝任务</button>
+      </template>
+      <view v-else class="card">
+        <text class="body">没有待处理的失败任务。</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+
+import { computed, ref } from 'vue'
+import { decodePageId } from '@/features/navigation.uts'
+import { showError } from '@/features/api.uts'
+import { loadAssignment, finishAssignment, declineAssignment, partnerView } from '@/features/partner/partner.uts'
+
+type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string }
+
+const assignmentId = ref<string | null>(null)
+const task = ref<AssignmentCard | null>(null)
+const busy = ref(false)
+
+onLoad(query => { assignmentId.value = decodePageId(query['assignmentId'] ?? null) })
+
+const view = computed(() => partnerView({ assignment: task.value, now: Date.now() }))
+const rejectEnabled = computed(() => view.value.rejectEnabled)
+const taskTitle = computed(() => task.value?.nodeTitle ?? '失败任务')
+const rejectHint = computed(() => rejectEnabled.value ? '已满 72 小时，可以主动拒绝。' : '未满 72 小时，暂时只能完成，不能拒绝。')
+
+onShow(async () => {
+  try {
+    const value = await loadAssignment() as AssignmentCard | null
+    task.value = value != null && (assignmentId.value == null || value.id === assignmentId.value) ? value : null
+  } catch (_) { showError() }
+})
+
+async function finish(): Promise<void> {
+  if (busy.value || task.value == null) return
+  busy.value = true
+  try { await finishAssignment(task.value!.id); task.value = null; uni.showToast({ title: '任务已完成', icon: 'success' }) }
+  catch (_) { showError() } finally { busy.value = false }
+}
+async function decline(): Promise<void> {
+  if (busy.value || task.value == null || !rejectEnabled.value) return
+  busy.value = true
+  try { await declineAssignment(task.value!.id); task.value = null; uni.showToast({ title: '已拒绝任务', icon: 'success' }) }
+  catch (_) { showError() } finally { busy.value = false }
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+</style>

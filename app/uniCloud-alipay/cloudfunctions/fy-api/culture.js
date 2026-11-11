@@ -135,7 +135,7 @@ function validPath(chapter, path) {
 }
 
 function cultureSummary(culture) {
-  return activityIds.filter(id => culture?.[id]).map(id => ({ id, title: culture[id].title }))
+  return activityIds.filter(id => culture?.[id]).map(id => ({ id, title: culture[id].title, after: culture[id].after }))
 }
 
 function chapterGuide(culture, chapter) {

@@ -25,6 +25,17 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
   }
 
   return {
+    async myPk(u) {
+      member(u)
+      const match = await activeMatch(repo, u.uid)
+      if (match == null) return null
+      return {
+        id: match._id, status: match.status, routeId: match.routeId, invitedBy: match.invitedBy,
+        ready: match.ready, startedAt: match.startedAt ?? null, expiresAt: match.expiresAt,
+        myRunId: match.status === 'running' ? match.runs[u.uid] : null
+      }
+    },
+
     async invitePk(u, p) {
       member(u)
       if (!codeOf(p.code) || !requestOf(p.requestId) || !requestOf(p.routeId)) fail('INVALID_REQUEST')

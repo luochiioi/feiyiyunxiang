@@ -83,9 +83,11 @@ function createCultureService({ repo, owned, key, now, attachCulture }) {
         const status = await activityStatus(db, run, p.runId, 'learning')
         requireValue(status.unlocked, 'ACTIVITY_LOCKED')
         requireValue(status.cards.some(card => card.id === p.cardId), 'INVALID_CARD')
-        if (status.read.includes(p.cardId)) return status.read
-        const read = [...status.read, p.cardId]
-        await setCulture(db, run, p.runId, { cards: read })
+        const alreadyRead = status.read.includes(p.cardId)
+        const read = alreadyRead ? status.read : [...status.read, p.cardId]
+        const completesSeat = run.purpose === 'coop' && read.length === status.cards.length && !run.culture?.learning
+        if (completesSeat) await setCulture(db, run, p.runId, { cards: read, learning: true })
+        else if (!alreadyRead) await setCulture(db, run, p.runId, { cards: read })
         return read
       })
     },
@@ -102,7 +104,7 @@ function createCultureService({ repo, owned, key, now, attachCulture }) {
       const runs = await repo.list('fy-runs', { uid: u.uid })
       const latest = new Map()
       for (const run of runs.sort((a, b) => b.createdAt - a.createdAt)) {
-        if (!latest.has(run.routeId)) latest.set(run.routeId, run)
+        if ((run.purpose ?? 'solo') === 'solo' && !latest.has(run.routeId)) latest.set(run.routeId, run)
       }
       const items = await Promise.all(Array.from(latest.values(), async original => {
         const run = await attachCulture(original, original._id)

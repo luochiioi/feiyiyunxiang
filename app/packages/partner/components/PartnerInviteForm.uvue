@@ -1,0 +1,59 @@
+<template>
+  <view class="card">
+    <text class="heading">{{ coop ? '发起合作' : '发起好友 PK' }}</text>
+    <text class="body">选择路线</text>
+    <text v-if="routes.length === 0" class="muted">暂无已发布的路线。</text>
+    <view v-for="item in routes" :key="item.id" class="choice">
+      <button class="secondary" :class="{ selected: routeId === item.id }" :disabled="busy || !item.enabled" @click="routeId = item.id">{{ item.name }}</button>
+      <text v-if="!item.enabled" class="muted">该路线未配置两地席位</text>
+    </view>
+    <text class="body">选择好友</text>
+    <text v-if="friends.length === 0" class="muted">暂无好友，请先在旅伴页添加好友。</text>
+    <button v-for="friend in friends" :key="friend.code" class="secondary" :class="{ selected: friendCode === friend.code }" :disabled="busy" @click="friendCode = friend.code">{{ friend.nickname }} · {{ friend.code }}</button>
+    <template v-if="coop">
+      <text class="body">我的席位</text>
+      <view class="row">
+        <view class="seat-choice">
+          <button class="secondary" :class="{ selected: seat === 'macau' }" :disabled="busy" @click="seat = 'macau'">澳门</button>
+        </view>
+        <view class="seat-choice">
+          <button class="secondary" :class="{ selected: seat === 'hunan' }" :disabled="busy" @click="seat = 'hunan'">湖南</button>
+        </view>
+      </view>
+    </template>
+    <text v-if="!enabled" class="muted">有未处理的失败任务，完成或拒绝后才能发起 PK。</text>
+    <button class="primary" :disabled="!canInvite" @click="invite">{{ coop ? '发起合作' : '发起 PK' }}</button>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, ref } from 'vue'
+import { published } from '@/features/exploration/catalog.uts'
+import { coopRouteEnabled } from '@/features/partner/partner.uts'
+import type { PartnerFriend } from '@/features/partner/partner.uts'
+
+const props = defineProps<{ coop: boolean, friends: PartnerFriend[], busy: boolean, enabled: boolean }>()
+const emit = defineEmits<{ (event: 'invite', code: string, routeId: string, seat: string): void }>()
+const routeId = ref('')
+const friendCode = ref('')
+const seat = ref('macau')
+const routes = computed(() => published.value.map(route => ({
+  id: route.id,
+  name: route.name,
+  enabled: !props.coop || coopRouteEnabled(route.activities ?? [])
+})))
+const canInvite = computed(() => !props.busy && props.enabled &&
+  routes.value.some(route => route.id === routeId.value && route.enabled) &&
+  props.friends.some(friend => friend.code === friendCode.value))
+
+function invite(): void {
+  if (canInvite.value) emit('invite', friendCode.value, routeId.value, seat.value)
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.choice { display: flex; flex-direction: column; gap: 4px; }
+.seat-choice { flex: 1; min-width: 0; }
+.selected { background: #e2eddb; color: #304d2d; box-shadow: inset 0 0 0 2px #52704a; }
+</style>

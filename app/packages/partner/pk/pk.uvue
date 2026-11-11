@@ -1,0 +1,152 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="好友 PK" :show-back="true" />
+    <view class="content">
+      <view class="card green">
+        <text class="title">可选玩法</text>
+        <text class="body">双方各自完成同一路线的全部节点。完成全部打卡后，率先提交结算的一方获胜。失败方收到一项失败任务，完成或拒绝后才能参加下一场。</text>
+      </view>
+      <view class="card">
+        <text class="heading">规则</text>
+        <text class="body">邀请 24 小时内有效。双方都点就绪后开始计时，超过 24 小时未完成则本场作废，不产生失败任务。</text>
+        <text class="muted">用时以服务端记录为准，不看本地计时。</text>
+      </view>
+      <view v-if="loading" class="card"><text class="body">正在读取 PK…</text></view>
+      <view v-else-if="loadFailed" class="card">
+        <text class="body">暂时无法读取 PK 信息。</text>
+        <button class="secondary" @click="load">重试</button>
+      </view>
+      <template v-else-if="match != null">
+        <view class="card">
+          <text class="heading">本场</text>
+          <text class="body">状态 {{ statusText }}</text>
+          <text v-if="startedAt.length > 0" class="muted">开始于 {{ startedAt }}</text>
+        </view>
+        <button v-if="canAnswer" class="primary" :disabled="busy" @click="answer(true)">接受邀请</button>
+        <button v-if="canAnswer" class="secondary" :disabled="busy" @click="answer(false)">拒绝邀请</button>
+        <button v-if="status === 'preparing'" class="primary" :disabled="busy || alreadyReady" @click="ready">{{ alreadyReady ? '已就绪，等待对方' : '我已就绪' }}</button>
+        <template v-if="status === 'running'">
+          <button v-if="match.myRunId != null" class="primary" :disabled="busy" @click="explore">开始探索</button>
+          <button class="secondary" :disabled="busy" @click="settle">结算 PK</button>
+        </template>
+        <button class="secondary" :disabled="busy" @click="load">刷新对局</button>
+      </template>
+      <PartnerInviteForm v-else :coop="false" :friends="friends" :busy="busy" :enabled="pkEnabled" @invite="invite" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import PartnerInviteForm from '../components/PartnerInviteForm.uvue'
+import { computed, ref } from 'vue'
+import { openRouteDetail } from '@/features/navigation.uts'
+import { session, showError } from '@/features/api.uts'
+import { answerPk, loadAssignment, loadInviteFriends, loadMyPk, markReady, partnerView, settlePk, startPk } from '@/features/partner/partner.uts'
+import type { PartnerFriend, PkView } from '@/features/partner/partner.uts'
+
+const match = ref<PkView | null>(null)
+const friends = ref<PartnerFriend[]>([])
+const busy = ref(false)
+const loading = ref(false)
+const loadFailed = ref(false)
+const pkEnabled = ref(false)
+const status = computed(() => match.value?.status ?? '')
+const statusText = computed(() => status.value === 'running' ? '进行中' : status.value === 'preparing' ? '等待双方就绪' : '待接受')
+const canAnswer = computed(() => status.value === 'invited' && match.value?.invitedBy !== session.value?.uid)
+const alreadyReady = computed(() => match.value?.ready.includes(session.value?.uid ?? '') === true)
+const startedAt = computed(() => {
+  const value = match.value?.startedAt
+  return value == null ? '' : new Date(value).toLocaleString()
+})
+
+onShow(() => { if (!busy.value) load() })
+
+async function load(): Promise<void> {
+  if (loading.value) return
+  loading.value = true
+  loadFailed.value = false
+  try {
+    match.value = await loadMyPk()
+    if (match.value == null) {
+      const assignment = await loadAssignment()
+      pkEnabled.value = partnerView({
+        assignment: assignment == null ? null : {
+          status: assignment['status'] as string,
+          rejectAvailableAt: assignment['rejectAvailableAt'] as number
+        }
+      }).pkEnabled
+      friends.value = await loadInviteFriends()
+    }
+  } catch (_) { loadFailed.value = true }
+  finally { loading.value = false }
+}
+
+async function invite(code: string, routeId: string, _seat: string): Promise<void> {
+  if (busy.value || !pkEnabled.value) return
+  busy.value = true
+  try {
+    await startPk(code, routeId)
+    await load()
+  } catch (error) {
+    match.value = await loadMyPk().catch(() => null)
+    if (match.value == null) showPkError(error as Error)
+  }
+  finally { busy.value = false }
+}
+
+async function answer(accept: boolean): Promise<void> {
+  const id = match.value?.id
+  if (busy.value || id == null || !canAnswer.value) return
+  busy.value = true
+  try {
+    await answerPk(id, accept)
+    await load()
+  } catch (error) { showPkError(error as Error) }
+  finally { busy.value = false }
+}
+
+async function ready(): Promise<void> {
+  const id = match.value?.id
+  if (busy.value || id == null || status.value !== 'preparing' || alreadyReady.value) return
+  busy.value = true
+  try {
+    await markReady(id)
+    await load()
+  } catch (error) { showPkError(error as Error) }
+  finally { busy.value = false }
+}
+
+function explore(): void {
+  const value = match.value
+  if (value != null && value.myRunId != null) openRouteDetail(value.routeId, value.myRunId)
+}
+
+async function settle(): Promise<void> {
+  const id = match.value?.id
+  if (busy.value || id == null) return
+  busy.value = true
+  try {
+    const result = await settlePk(id)
+    await load()
+    const title = result.expired ? '本场 PK 已超时' : result.winner === session.value?.uid ? '你赢得了本场 PK' : '旅伴赢得了本场 PK'
+    uni.showToast({ title, icon: 'none' })
+  } catch (error) { showPkError(error as Error) }
+  finally { busy.value = false }
+}
+
+function showPkError(error: Error): void {
+  if (error.message === 'ASSIGNMENT_PENDING') {
+    pkEnabled.value = false
+    uni.showToast({ title: '请先处理失败任务', icon: 'none' })
+  } else if (error.message === 'NOT_READY') {
+    uni.showToast({ title: '完成路线全部节点后可结算', icon: 'none' })
+  } else if (error.message === 'EXPIRED') {
+    uni.showToast({ title: '本场 PK 已超时', icon: 'none' })
+  } else showError()
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+</style>

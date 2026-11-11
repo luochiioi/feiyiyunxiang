@@ -1,0 +1,58 @@
+import { requestId, secured } from '@/features/api.uts'
+import { catalogError, refreshCatalog } from '@/features/exploration/catalog.uts'
+
+export { coopRouteEnabled, partnerView } from './partner-view.uts'
+export type { PartnerInput, PartnerView } from './partner-view.uts'
+
+export type PartnerFriend = { code: string, nickname: string }
+type SeatProgress = { done: number, total: number }
+export type CoopView = {
+  id: string, status: string, routeId: string, mySeat: string, myRunId: string | null, invitedByMe: boolean,
+  partner: PartnerFriend | null, myProgress?: SeatProgress, partnerProgress?: SeatProgress
+}
+export type PkView = {
+  id: string, status: string, routeId: string, invitedBy: string, ready: string[],
+  startedAt: number | null, expiresAt: number, myRunId: string | null
+}
+type InviteResult = { id: string }
+
+export function loadFriends(): Promise<UTSJSONObject[]> { return secured<UTSJSONObject[]>('friends') }
+export function loadAssignment(): Promise<UTSJSONObject | null> { return secured<UTSJSONObject | null>('assignment') }
+export function loadCoop(teamId: string): Promise<CoopView> { return secured<CoopView>('coopStatus', { teamId }) }
+export function loadMyCoop(): Promise<CoopView | null> { return secured<CoopView | null>('myCoop') }
+export function loadMyPk(): Promise<PkView | null> { return secured<PkView | null>('myPk') }
+export function startCoop(code: string, routeId: string, seat: string): Promise<InviteResult> {
+  return secured<InviteResult>('inviteCoop', { code, routeId, seat, requestId: requestId() })
+}
+export function startPk(code: string, routeId: string): Promise<InviteResult> {
+  return secured<InviteResult>('invitePk', { code, routeId, requestId: requestId() })
+}
+export async function loadInviteFriends(): Promise<PartnerFriend[]> {
+  const [rows] = await Promise.all([loadFriends(), refreshCatalog()])
+  if (catalogError.value) throw new Error('CATALOG_UNAVAILABLE')
+  return rows.filter(row => row['kind'] !== 'incoming').map(row => ({
+    code: row['code'] as string, nickname: row['nickname'] as string
+  }))
+}
+export function sendFriendRequest(code: string, requestId: string): Promise<UTSJSONObject> {
+  return secured<UTSJSONObject>('requestFriend', { code, requestId })
+}
+export function answerFriendRequest(requestId: string, accept: boolean): Promise<UTSJSONObject> {
+  return secured<UTSJSONObject>('respondFriend', { requestId, accept })
+}
+export function answerCoop(teamId: string, accept: boolean): Promise<UTSJSONObject> {
+  return secured<UTSJSONObject>('respondCoop', { teamId, accept })
+}
+export function answerPk(matchId: string, accept: boolean): Promise<UTSJSONObject> {
+  return secured<UTSJSONObject>('respondPk', { matchId, accept })
+}
+export function markReady(matchId: string): Promise<UTSJSONObject> { return secured<UTSJSONObject>('readyPk', { matchId }) }
+export function settlePk(matchId: string): Promise<{ winner: string | null, expired: boolean }> {
+  return secured<{ winner: string | null, expired: boolean }>('settlePk', { matchId })
+}
+export function finishAssignment(assignmentId: string): Promise<UTSJSONObject> {
+  return secured<UTSJSONObject>('completeAssignment', { assignmentId })
+}
+export function declineAssignment(assignmentId: string): Promise<UTSJSONObject> {
+  return secured<UTSJSONObject>('rejectAssignment', { assignmentId })
+}

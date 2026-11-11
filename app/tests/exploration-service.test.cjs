@@ -49,7 +49,7 @@ test('Macau route gates its private tile work on a real check-in and pins the ac
   await s.saveDraft(admin, { ...draft, culture })
   await s.publish(admin, { id: draft.id, revision: 1 })
   const { id: runId } = await s.start(a, { routeId: draft.id, requestId: 'macau-test' })
-  assert.deepEqual((await s.catalog())[0].activities, [{ id: 'tile', title: culture.tile.title }])
+  assert.deepEqual((await s.catalog())[0].activities, [{ id: 'tile', title: culture.tile.title, after: ['n1'] }])
   assert.equal((await s.progress(a, { runId })).total, 2)
   const selection = { runId, pattern: 'sail', palette: 'cobalt' }
   await assert.rejects(s.saveTile(a, selection), /ACTIVITY_LOCKED/)

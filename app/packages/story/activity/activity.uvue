@@ -40,7 +40,7 @@
             <template v-if="pickedOptionId === option.id">
               <text v-if="message.length > 0" class="body">{{ message }}</text>
               <text v-if="status.done" class="body">{{ status.explanation }}</text>
-              <button v-if="status.done" class="secondary" @click="showStory">查看已解锁章节</button>
+              <button v-if="status.done && scopedRunId == null" class="secondary" @click="showStory">查看已解锁章节</button>
             </template>
           </view>
           <text v-if="status.done && pickedOptionId.length === 0" class="body">{{ status.explanation }}</text>
@@ -59,7 +59,7 @@
           </view>
         </template>
         <text v-if="message.length > 0 && (!quizActivity || pickedOptionId.length === 0)" class="muted">{{ message }}</text>
-        <button v-if="activityComplete && (!quizActivity || pickedOptionId.length === 0)" class="secondary" @click="showStory">查看已解锁章节</button>
+        <button v-if="scopedRunId == null && activityComplete && (!quizActivity || pickedOptionId.length === 0)" class="secondary" @click="showStory">查看已解锁章节</button>
       </view>
     </view>
   </view>
@@ -71,7 +71,7 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import TilePreview from '../components/TilePreview.uvue'
 import StitchSample from '../components/StitchSample.uvue'
 import { secured, session } from '@/features/api.uts'
-import { refreshCatalog, startRoute } from '@/features/exploration/catalog.uts'
+import { loadRun, refreshCatalog, startRoute } from '@/features/exploration/catalog.uts'
 import { decodePageId, openPage } from '@/features/navigation.uts'
 
 type Selection = { pattern: string, palette: string }
@@ -91,11 +91,13 @@ const validEntry = ref(false)
 const openedCard = ref('')
 const busy = ref(false)
 const message = ref('微信登录后可继续任务并保存进度。')
+const scopedRunId = ref<string | null>(null)
 let routeId = ''
 let runId = ''
 let draftKey = ''
 onLoad(query => {
   routeId = decodePageId(query['routeId'] ?? null) ?? ''
+  scopedRunId.value = decodePageId(query['runId'] ?? null)
   activityId.value = decodePageId(query['activityId'] ?? null) ?? ''
   validEntry.value = routeId.length > 0 && ['tile', 'tileQuiz', 'quiz', 'learning'].includes(activityId.value)
   if (!validEntry.value) {
@@ -109,7 +111,8 @@ async function load(): Promise<void> {
   busy.value = true
   message.value = '正在读取任务…'
   try {
-    const run = await startRoute(routeId)
+    const run = scopedRunId.value == null ? await startRoute(routeId) : await loadRun(routeId, scopedRunId.value!)
+    if (scopedRunId.value != null && run.snapshot.activities?.some(item => item.id === activityId.value) !== true) throw new Error('NOT_FOUND')
     runId = run.runId
     const result = await secured<ActivityStatus>('activityStatus', { runId, activityId: activityId.value })
     if (activityId.value === 'tile') {

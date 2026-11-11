@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const fail = code => { throw new Error(code) }
 const { pkMethods } = require('./pk-service')
+const { completedActivities } = require('./culture')
 const HOUR = 3600 * 1000
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
@@ -12,6 +13,42 @@ function createPartnershipService({ repo, now = Date.now }) {
 
   function card(profile) {
     return { code: profile.code, nickname: profile.nickname, avatar: profile.avatar }
+  }
+
+  async function seatProgress(team, uid) {
+    const runId = team.runs[uid]
+    const [run, checks] = await Promise.all([
+      repo.get('fy-runs', runId),
+      repo.list('fy-checkins', { runId, uid })
+    ])
+    if (!run) fail('NOT_FOUND')
+    const seat = team.seats.macau === uid ? 'macau' : 'hunan'
+    const nodes = seatNodes(run, seat)
+    const activities = seatActivities(run, seat)
+    const completed = completedActivities(run)
+    return {
+      done: nodes.filter(id => checks.some(check => check.nodeId === id)).length +
+        activities.filter(id => completed.includes(id)).length,
+      total: nodes.length + activities.length
+    }
+  }
+
+  async function coopView(team, uid) {
+    const mine = team.seats.macau === uid ? 'macau' : 'hunan'
+    const other = team.members.find(id => id !== uid)
+    const partnerProfile = (await repo.list('fy-profiles', { uid: other }))[0]
+    const view = { id: team._id, status: team.status, mySeat: mine, routeId: team.routeId, version: team.version,
+      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: partnerProfile ? card(partnerProfile) : null }
+    if (team.status === 'active') {
+      const [myProgress, partnerProgress] = await Promise.all([seatProgress(team, uid), seatProgress(team, other)])
+      Object.assign(view, { myProgress, partnerProgress })
+    }
+    if (team.status === 'done') {
+      const result = await repo.get('fy-results', key(team._id, 'result'))
+      view.result = { partnerLabel: mine === 'macau' ? '湖南旅伴' : '澳门旅伴', work: result.work, completedAt: result.completedAt }
+      view.public = { partnerLabel: view.result.partnerLabel, completedAt: result.completedAt }
+    }
+    return view
   }
 
   async function freshCode(db) {
@@ -28,6 +65,13 @@ function createPartnershipService({ repo, now = Date.now }) {
     if (!request) fail('NOT_FOUND')
     return request.friendId
   }
+
+  async function pendingFriendId(db, u, requestId) {
+    const rows = await db.list('fy-friends', { to: u.uid, status: 'pending' })
+    const match = rows.find(row => row.requestId === requestId && row.expiresAt > now())
+    return match?._id ?? null
+  }
+
 
   return {
     async ensureProfile(u) {
@@ -65,7 +109,7 @@ function createPartnershipService({ repo, now = Date.now }) {
         if (current && current.status === 'accepted') return { id: friendId }
         if (current && current.status === 'pending' && current.expiresAt > now()) fail('CONFLICT')
         await db.put('fy-friends', friendId, {
-          from: u.uid, to: target.uid, status: 'pending', createdAt: now(), expiresAt: now() + 24 * HOUR
+          from: u.uid, to: target.uid, status: 'pending', requestId: p.requestId, createdAt: now(), expiresAt: now() + 24 * HOUR
         })
         await db.put('fy-requests', requestKey, { friendId, role: 'from' })
         await db.put('fy-requests', key(target.uid, 'friend-in', p.requestId), { friendId, role: 'to' })
@@ -76,7 +120,7 @@ function createPartnershipService({ repo, now = Date.now }) {
     async respondFriend(u, p) {
       member(u)
       if (!requestOf(p.requestId) || typeof p.accept !== 'boolean') fail('INVALID_REQUEST')
-      const friendId = await friendIdFor(repo, u, p.requestId)
+      const friendId = await friendIdFor(repo, u, p.requestId) ?? await pendingFriendId(repo, u, p.requestId)
       return repo.tx(async db => {
         const row = await db.get('fy-friends', friendId)
         if (!row || row.to !== u.uid) fail('NOT_FOUND')
@@ -106,12 +150,16 @@ function createPartnershipService({ repo, now = Date.now }) {
     async friends(u) {
       member(u)
       const rows = await repo.list('fy-friends', {})
-      const mine = rows.filter(row => row.status === 'accepted' && (row.from === u.uid || row.to === u.uid))
+      const mine = rows.filter(row => (row.from === u.uid || row.to === u.uid)
+        && (row.status === 'accepted' || (row.status === 'pending' && row.to === u.uid && row.expiresAt > now())))
       const cards = []
       for (const row of mine) {
         const other = row.from === u.uid ? row.to : row.from
         const profile = (await repo.list('fy-profiles', { uid: other }))[0]
-        if (profile) cards.push(card(profile))
+        if (!profile) continue
+        const item = card(profile)
+        if (row.status === 'pending') { item.kind = 'incoming'; item.id = row.requestId }
+        cards.push(item)
       }
       return cards
     },
@@ -194,18 +242,13 @@ function createPartnershipService({ repo, now = Date.now }) {
 
     async coopStatus(u, p) {
       member(u)
-      const team = await loadTeam(repo, p.teamId, u.uid)
-      const mine = team.seats.macau === u.uid ? 'macau' : 'hunan'
-      const other = team.members.find(uid => uid !== u.uid)
-      const partnerProfile = (await repo.list('fy-profiles', { uid: other }))[0]
-      const view = { id: p.teamId, status: team.status, mySeat: mine, routeId: team.routeId, version: team.version,
-        myRunId: team.runs?.[u.uid] ?? null, partner: partnerProfile ? card(partnerProfile) : null }
-      if (team.status === 'done') {
-        const result = await repo.get('fy-results', key(p.teamId, 'result'))
-        view.result = { partnerLabel: mine === 'macau' ? '湖南旅伴' : '澳门旅伴', work: result.work, completedAt: result.completedAt }
-        view.public = { partnerLabel: view.result.partnerLabel, completedAt: result.completedAt }
-      }
-      return view
+      return coopView(await loadTeam(repo, p.teamId, u.uid), u.uid)
+    },
+
+    async myCoop(u) {
+      member(u)
+      const team = await activeTeam(repo, u.uid)
+      return team == null ? null : coopView(team, u.uid)
     },
 
     async settleCoop(u, p) {
@@ -269,4 +312,4 @@ function seatActivities(run, seat) {
   return ids.filter(id => run.snapshot.culture?.[id])
 }
 
-module.exports = { createPartnershipService }
+module.exports = { createPartnershipService, seatNodes, seatActivities }

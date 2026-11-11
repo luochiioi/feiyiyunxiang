@@ -90,19 +90,44 @@ const coopDraft = {
   }
 }
 
-async function coopReady() {
+async function coopReady(accept = true, draft = coopDraft) {
   const f = await ready()
   f.service = createService({ repo: f.repo, now: () => f.now(), allowTestContent: true })
   const admin = { uid: 'admin', admin: true }
-  await f.service.saveDraft(admin, coopDraft)
+  await f.service.saveDraft(admin, draft)
   await f.service.publish(admin, { id: 'combined', revision: 1 })
   f.routeId = 'combined'
   await f.p.requestFriend(f.a, { code: f.codes.b, requestId: 'fr-coop' })
   await f.p.respondFriend(f.b, { requestId: 'fr-coop', accept: true })
   f.team = await f.p.inviteCoop(f.a, { code: f.codes.b, routeId: f.routeId, requestId: 'co-1' })
-  await f.p.respondCoop(f.b, { teamId: f.team.id, accept: true })
+  if (accept) await f.p.respondCoop(f.b, { teamId: f.team.id, accept: true })
   return f
 }
+
+test('both members can discover a coop invite and see the two seats progress', async () => {
+  const f = await coopReady(false)
+  assert.equal(await f.p.myCoop(f.c), null)
+  const inviter = await f.p.myCoop(f.a)
+  const invitee = await f.p.myCoop(f.b)
+  assert.equal(inviter.id, f.team.id)
+  assert.equal(inviter.status, 'invited')
+  assert.equal(inviter.invitedByMe, true)
+  assert.equal(invitee.invitedByMe, false)
+  assert.deepEqual(invitee, await f.p.coopStatus(f.b, { teamId: f.team.id }))
+  await f.p.respondCoop(f.b, { teamId: invitee.id, accept: true })
+  await finishSeat(f, f.a, 'macau')
+  const active = await f.p.myCoop(f.b)
+  assert.equal(active.status, 'active')
+  assert.equal(active.myProgress.done, 0)
+  assert.deepEqual(active.partnerProgress, { done: 2, total: 2 })
+  const run = await f.service.progress(f.b, { runId: active.myRunId })
+  assert.deepEqual(run.snapshot.nodes.map(node => node.id), ['n2'])
+  assert.deepEqual(run.snapshot.activities.map(activity => activity.id), ['quiz'])
+  assert.equal(await f.service.routeProgress(f.b, { routeId: f.routeId }), null)
+  assert.deepEqual((await f.service.catalog()).find(route => route.id === f.routeId).activities.map(activity => activity.after), [['n1'], ['n2']])
+  await f.p.leaveCoop(f.b, { teamId: active.id })
+  assert.equal(await f.p.myCoop(f.a), null)
+})
 
 async function finishSeat(f, user, seat) {
   const team = await f.repo.get('fy-teams', f.team.id)
@@ -146,6 +171,19 @@ test('coop settles only after both seats finish their nodes and culture tasks', 
   await assert.rejects(f.p.settleCoop(f.a, { teamId: f.team.id }), /NOT_READY/)
 })
 
+test('reading the last Hunan card completes that seat for coop settlement', async () => {
+  const cards = ['line', 'color', 'layer', 'direction'].map(id => ({ id, title: id, hotspot: '观察', body: '针法示意' }))
+  const draft = { ...coopDraft, culture: { ...coopDraft.culture, learning: { title: '针法学习', after: ['n2'], cards } } }
+  const f = await coopReady(true, draft)
+  await finishSeat(f, f.a, 'macau')
+  await finishSeat(f, f.b, 'hunan')
+  const { myRunId: runId } = await f.p.myCoop(f.b)
+  await assert.rejects(f.p.settleCoop(f.b, { teamId: f.team.id }), /NOT_READY/)
+  for (const { id: cardId } of cards) await f.service.readCard(f.b, { runId, cardId })
+  assert.deepEqual((await f.p.myCoop(f.b)).myProgress, { done: 3, total: 3 })
+  assert.equal((await f.p.settleCoop(f.b, { teamId: f.team.id })).alreadySettled, false)
+})
+
 test('leaving ends the team without deleting the partner run', async () => {
   const f = await coopReady()
   const before = (await f.repo.list('fy-runs', {})).length
@@ -169,7 +207,7 @@ test('coop invite only reaches friends and expires after 24 hours', async () => 
   assert.equal((await f.repo.list('fy-runs', { purpose: 'coop' })).length, 0)
 })
 
-async function pkStarted() {
+async function pkStarted(start = true) {
   const f = await ready()
   f.service = createService({ repo: f.repo, now: () => f.now(), allowTestContent: true })
   const admin = { uid: 'admin', admin: true }
@@ -178,12 +216,48 @@ async function pkStarted() {
   await f.p.requestFriend(f.a, { code: f.codes.b, requestId: 'fr-pk' })
   await f.p.respondFriend(f.b, { requestId: 'fr-pk', accept: true })
   f.match = await f.p.invitePk(f.a, { code: f.codes.b, routeId: 'combined', requestId: 'pk-1' })
+  if (!start) return f
   await f.p.respondPk(f.b, { matchId: f.match.id, accept: true })
   await f.p.readyPk(f.a, { matchId: f.match.id })
   await f.p.readyPk(f.b, { matchId: f.match.id })
   f.startedAt = (await f.repo.get('fy-matches', f.match.id)).startedAt
   return f
 }
+
+test('PK discovery exposes only the running member run and keeps solo progress separate', async () => {
+  const f = await pkStarted(false)
+  assert.equal(await f.p.myPk(f.c), null)
+  const invited = await f.p.myPk(f.b)
+  assert.equal(invited.id, f.match.id)
+  assert.equal(invited.status, 'invited')
+  assert.equal(invited.invitedBy, f.a.uid)
+  assert.equal(invited.expiresAt, f.now() + 24 * 3600 * 1000)
+  const solo = await f.service.start(f.b, { routeId: 'combined', requestId: 'solo-run' })
+  f.advance(1)
+  await f.p.respondPk(f.b, { matchId: invited.id, accept: true })
+  await f.p.readyPk(f.a, { matchId: invited.id })
+  const preparing = await f.p.myPk(f.b)
+  assert.deepEqual(preparing.ready, [f.a.uid])
+  assert.equal(preparing.myRunId, null)
+  const runId = (await f.repo.get('fy-matches', invited.id)).runs[f.b.uid]
+  const point = { routeId: 'combined', nodeId: 'n1', requestId: 'pk-check', runId }
+  await assert.rejects(f.service.mediaBinding(f.b, point), /NOT_PENDING/)
+  await f.p.readyPk(f.b, { matchId: invited.id })
+  const running = await f.p.myPk(f.b)
+  assert.equal(running.startedAt, f.now())
+  assert.equal(running.myRunId, runId)
+  const pk = await f.service.progress(f.b, { runId })
+  assert.deepEqual(pk.snapshot.activities, [])
+  assert.equal((await f.service.routeProgress(f.b, { routeId: 'combined' })).runId, solo.id)
+  await f.service.registerMedia(f.b, { ...point, id: 'pk-photo', fileID: 'private' })
+  await f.service.checkin(f.b, { ...point, mediaId: 'pk-photo', latitude: 22, longitude: 113 })
+  assert.equal(await f.service.nodeRecord(f.b, { routeId: point.routeId, nodeId: point.nodeId }), null)
+  assert.equal((await f.service.nodeRecord(f.b, point)).mediaId, 'pk-photo')
+  await assert.rejects(f.service.nodeRecord(f.a, point), /NOT_FOUND/)
+  assert.deepEqual((await f.service.progress(f.b, { runId: solo.id })).completed, [])
+  await f.p.forfeitPk(f.b, { matchId: invited.id })
+  assert.equal(await f.p.myPk(f.b), null)
+})
 
 async function completeAllNodes(f, user) {
   const match = await f.repo.get('fy-matches', f.match.id)

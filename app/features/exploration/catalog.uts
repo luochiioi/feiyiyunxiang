@@ -5,10 +5,10 @@ import { demoNodes, demoRoutes } from './demo-fixtures.uts'
 import { visibleMapNodes } from './map-markers.uts'
 import type { RouteNode, RouteSummary, MapViewport } from './types.uts'
 export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
-export type ActivitySummary = { id: string, title: string }
+export type ActivitySummary = { id: string, title: string, after?: string[] }
 export type ChapterGuide = { act: number, title: string, activityId?: string | null, gateText: string }
 export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean, cultureSourceRoutes?: string[] }
-export type RunProgress = { runId: string, routeId: string, version: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, activities?: string[] }
+export type RunProgress = { runId: string, routeId: string, version: string, purpose?: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, activities?: string[] }
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)
 export const catalogError = shallowRef(false)
@@ -23,10 +23,11 @@ export async function refreshCatalog(): Promise<void> {
       try {
         const progress = await secured<RunProgress>('progress', { runId })
         const combined = published.value.find(route => route.cultureSourceRoutes?.includes(progress.routeId) === true)
-        const selected = combined == null ? progress : await secured<RunProgress | null>('routeProgress', { routeId: combined.id })
+        const partnerRun = (progress.purpose ?? 'solo') !== 'solo'
+        const selected = partnerRun ? null : (combined == null ? progress : await secured<RunProgress | null>('routeProgress', { routeId: combined.id }))
         if (session.value?.uid === uid && uni.getStorageSync(key) === runId) {
           activeRun.value = selected
-          if (combined != null) {
+          if (partnerRun || combined != null) {
             if (selected == null) uni.removeStorageSync(key)
             else uni.setStorageSync(key, selected.runId)
           }
@@ -35,13 +36,19 @@ export async function refreshCatalog(): Promise<void> {
     }
   } else { activeRun.value = null }
 }
+export async function loadRun(routeId: string, runId: string): Promise<RunProgress> {
+  const progress = await secured<RunProgress>('progress', { runId })
+  if (progress.routeId !== routeId) throw new Error('NOT_FOUND')
+  return progress
+}
+
 export async function startRoute(routeId: string): Promise<RunProgress> {
   if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
   const uid = session.value!.uid
   const runKey = 'fy-run-' + uid
   const pendingKey = 'fy-start-' + uid + '-' + routeId
   const selected = activeRun.value
-  if (selected != null && selected.routeId === routeId && uni.getStorageSync(runKey) === selected.runId) return selected
+  if (selected != null && (selected.purpose ?? 'solo') === 'solo' && selected.routeId === routeId && uni.getStorageSync(runKey) === selected.runId) return selected
   let progress = await secured<RunProgress | null>('routeProgress', { routeId })
   if (progress == null) {
     let rid = uni.getStorageSync(pendingKey) as string

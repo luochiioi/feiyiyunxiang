@@ -53,6 +53,18 @@
 - `admin/pages/`、`admin/features/`：路线剧情发布、审核、评论词库、用户和活动异常处理；调用服务端权限接口。
 - `docs/superpowers/plans/`：各阶段任务、已执行检查和交接说明；不存放密钥。
 
+## 阶段五追加：合作与 PK 的发起入口
+
+阶段四交付的合作详情页与 PK 页只有"进行中"视图，没有发起入口。旅伴页的「查看合作」「进入 PK」不带 `teamId`/`matchId`，详情页 `onShow` 判断标识为空就直接显示"还没有进行中的"，再跳到没有发起按钮的路线列表页。`invitePk` 云端动作前端从未调用。阶段五补上发起入口，与社区审核并行，不依赖社区部分。
+
+- 合作详情页（`app/packages/partner/coop/coop.uvue`）无进行中合作时，显示"选路线 → 选好友 → 选席位（默认澳门）→ 发起"。路线来自 `catalog`，不能拆成澳门/湖南两席的路线禁用并说明原因，避免选了才收到 `INVALID_ROUTE`。发起调用已有的 `inviteCoop({ code, routeId, requestId, seat })`，成功后用返回的 `teamId` 加载本页详情。
+- PK 页（`app/packages/partner/pk/pk.uvue`）同样改为"选路线 → 选好友 → 发起"，路线无席位限制，调用已有的 `invitePk({ code, routeId, requestId })`。同时补上 PK 页 `onShow` 真正读取对局状态，替换现在写死的 `status: 'preparing'`。
+- 旅伴页（`app/packages/partner/partner/partner.uvue`）邀请码文字右侧加「复制」按钮，用 `uni.setClipboardData`。
+- 云端需要补两个只读动作，否则页面找不到对局：现有 `coopStatus` 必须传 `teamId`，被邀请的一方无从得知；PK 完全没有读取对局的动作。新增 `myCoop(u)`、`myPk(u)`，返回当前用户处于 `invited`/`active`（PK 另含 `preparing`/`running`）的那一个团队或对局的视图，没有则返回 `null`；两个动作加进 `index.js` 的 `serviceActions`。结算、邀请、响应的现有逻辑不改。
+- 客户端适配器加在 `app/features/partner/partner.uts`，沿用 `secured` 与 `requestId()`。PK 页还缺 `respondPk`、`settlePk`、`forfeitPk`、`cancelPk` 的适配器，按需补上。
+- 实施前先核实：合作/PK 创建的 run 带 `purpose: 'coop'|'pk'`，需确认路线详情和打卡页能否打开这类 run，以及 `progress`/`routeProgress` 是否会把它们和普通探索 run 混在一起。不能打开则这一节要把"开始探索"入口也补上，范围会变大，先向用户报告再做。
+- 验收：无进行中合作时能在合作页直接发起并看到"待接受"；对方接受后双方看到进度。PK 同理，且有未处理失败任务时发起按钮不可用。
+
 ## 首先执行的计划
 
 - [ ] 审阅 [阶段一 页面复用与微信运行](2026-11-11-stage-1-map-shell.md)。

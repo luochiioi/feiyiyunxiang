@@ -26,9 +26,13 @@
             <text class="muted">{{ progress?.activities?.includes(item.id) === true ? '已完成' : '查看任务' }} ›</text>
           </view>
         </view>
-        <button class="secondary" @click="openStory">查看剧情章节</button>
-        <button class="secondary" @click="showOnMap">在地图查看路线</button>
+        <button v-if="runId == null" class="secondary" @click="openStory">查看剧情章节</button>
+        <button v-if="runId == null" class="secondary" @click="showOnMap">在地图查看路线</button>
       </template>
+      <view v-else-if="runId != null" class="card">
+        <text class="body">{{ loading ? '正在读取探索进度…' : '暂时无法读取这次探索。' }}</text>
+        <button v-if="!loading" class="secondary" @click="load">重试</button>
+      </view>
       <view v-else class="card"><text class="body">找不到这条路线。</text><button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看路线列表</button></view>
     </view>
   </view>
@@ -40,24 +44,42 @@ import DemoNotice from '@/components/DemoNotice.uvue'
 
 import { computed, ref } from 'vue'
 import ProgressBar from '@/components/ProgressBar.uvue'
-import { activeRun, findRoute, listNodes, published, refreshCatalog, startRoute, summarizeRoute } from '@/features/exploration/catalog.uts'
+import { activeRun, findRoute, listNodes, loadRun, published, refreshCatalog, startRoute, summarizeRoute } from '@/features/exploration/catalog.uts'
 import type { RunProgress } from '@/features/exploration/catalog.uts'
 import { api, session, showError } from '@/features/api.uts'
 import { dispatchMapEvent } from '@/features/exploration/map-store.uts'
 import { decodePageId, openCheckin, openCultureActivity, openPage, returnToMap } from '@/features/navigation.uts'
 const id = ref<string | null>(null)
+const runId = ref<string | null>(null)
 const progress = ref<RunProgress | null>(null)
 const busy = ref(false)
-onLoad(query => { id.value = decodePageId(query['routeId'] ?? null) })
-const content = computed(() => progress.value?.snapshot ?? published.value.find(item => item.id === id.value) ?? null)
-const route = computed(() => content.value == null ? findRoute(id.value) : summarizeRoute(content.value!, progress.value))
+const loading = ref(false)
+onLoad(query => {
+  id.value = decodePageId(query['routeId'] ?? null)
+  runId.value = decodePageId(query['runId'] ?? null)
+})
+const content = computed(() => progress.value?.snapshot ?? (runId.value == null ? published.value.find(item => item.id === id.value) ?? null : null))
+const route = computed(() => {
+  if (content.value != null) return summarizeRoute(content.value!, progress.value)
+  return runId.value == null ? findRoute(id.value) : null
+})
 const activities = computed(() => content.value?.activities ?? [])
 const nodes = computed(() => {
   const snapshot = progress.value?.snapshot
   if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked }))
   return snapshot.nodes.map(node => ({ id: snapshot.id + ':' + node.id, title: node.title, checked: progress.value!.completed.includes(node.id) }))
 })
-onShow(async () => {
+onShow(() => { load() })
+async function load(): Promise<void> {
+  if (loading.value) return
+  if (runId.value != null) {
+    if (id.value == null) return
+    loading.value = true
+    try { progress.value = await loadRun(id.value!, runId.value!) }
+    catch (_) { progress.value = null }
+    finally { loading.value = false }
+    return
+  }
   await refreshCatalog()
   if (id.value == null || session.value == null) { progress.value = null; return }
   const uid = session.value!.uid
@@ -65,7 +87,7 @@ onShow(async () => {
     const value = await api<RunProgress | null>('routeProgress', { routeId: id.value! })
     if (session.value?.uid === uid) progress.value = value
   } catch (_) { if (session.value?.uid !== uid) progress.value = null }
-})
+}
 async function selectViewedRun(): Promise<boolean> {
   if (busy.value) return false
   const value = progress.value
@@ -76,11 +98,15 @@ async function selectViewedRun(): Promise<boolean> {
   finally { busy.value = false }
 }
 async function openPoint(nodeId: string): Promise<void> {
+  if (runId.value != null) {
+    openCheckin(nodeId, runId.value)
+    return
+  }
   if (await selectViewedRun()) openCheckin(nodeId)
 }
 function openActivity(activityId: string): void {
   if (id.value == null) return
-  openCultureActivity(id.value!, activityId)
+  openCultureActivity(id.value!, activityId, runId.value)
 }
 function openStory(): void {
   if (id.value != null) openPage('/packages/story/story/story?routeId=' + encodeURIComponent(id.value!))

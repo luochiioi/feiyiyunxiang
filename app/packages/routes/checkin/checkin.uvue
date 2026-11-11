@@ -39,6 +39,10 @@
         <button v-else class="secondary" @click="prepare">重试加载打卡</button>
         <text v-if="status.length > 0" class="body">{{ status }}</text>
       </template>
+      <view v-else-if="scopedRunId != null" class="card">
+        <text class="body">{{ busy ? '正在加载打卡点…' : status }}</text>
+        <button v-if="!busy" class="secondary" @click="prepare">重试加载打卡</button>
+      </view>
       <view v-else class="card"><text class="body">点位不可用，请从已发布路线进入。</text></view>
     </view>
   </view>
@@ -46,16 +50,24 @@
 <script setup lang="uts">
 import { ref, computed } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import { findNode, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
+import { findNode, loadRun, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
 import type { PublishedNode, RunProgress } from '@/features/exploration/catalog.uts'
-import type { MapPosition } from '@/features/exploration/types.uts'
+import type { MapPosition, RouteNode } from '@/features/exploration/types.uts'
 import { distanceMeters, locationFailureCode, validLocation } from '@/features/exploration/checkin-location.uts'
 import { login, secured, session, requestId } from '@/features/api.uts'
 import { decodePageId } from '@/features/navigation.uts'
 type Draft = { requestId: string, base64: string, mime: string, note: string, mediaId: string }
 type NodeRecord = { createdAt: number, note: string, mediaId: string }
 const id = ref<string | null>(null)
-const node = computed(() => findNode(id.value))
+const scopedRunId = ref<string | null>(null)
+const scopedRun = ref<RunProgress | null>(null)
+const node = computed<RouteNode | null>(() => {
+  if (scopedRunId.value == null) return findNode(id.value)
+  const run = scopedRun.value
+  if (run == null) return null
+  const point = run.snapshot.nodes.find(item => run.routeId + ':' + item.id === id.value)
+  return point == null ? null : { ...point, id: run.routeId + ':' + point.id, routeId: run.routeId, markerId: 0, checked: run.completed.includes(point.id) }
+})
 const loading = ref(false)
 const ready = ref(false), busy = ref(false), completed = ref(false)
 const record = ref<NodeRecord | null>(null), recordPhoto = ref(''), photoFailed = ref(false)
@@ -67,6 +79,11 @@ let draftKey = ''
 let exploration: RunProgress | null = null
 onLoad(async query => {
   id.value = decodePageId(query['nodeId'] ?? null)
+  scopedRunId.value = decodePageId(query['runId'] ?? null)
+  if (scopedRunId.value != null) {
+    await prepare()
+    return
+  }
   if (id.value != null && node.value == null) {
     loading.value = true
     await refreshCatalog()
@@ -80,13 +97,19 @@ function saveDraft(): void {
   uni.setStorageSync(draftKey, JSON.stringify(draft))
 }
 async function prepare(): Promise<void> {
-  const item = node.value
-  if (busy.value || item == null || session.value == null) return
+  if (busy.value || (scopedRunId.value == null && (node.value == null || session.value == null))) return
   busy.value = true
   status.value = ''
   try {
+    if (scopedRunId.value != null) {
+      const parts = id.value?.split(':') ?? []
+      if (parts.length !== 2) throw new Error('NOT_FOUND')
+      scopedRun.value = await loadRun(parts[0], scopedRunId.value!)
+    }
+    const item = node.value
+    if (item == null) throw new Error('NOT_FOUND')
     if (await loadRecord()) return
-    exploration = await startRoute(item.routeId)
+    exploration = scopedRun.value ?? await startRoute(item.routeId)
     draftKey = 'fy-draft-' + session.value!.uid + '-' + exploration!.runId + '-' + id.value
     const saved = uni.getStorageSync(draftKey) as string
     draft = { requestId: requestId(), base64: '', mime: '', note: '', mediaId: '' }
@@ -113,7 +136,11 @@ async function loadRecord(): Promise<boolean> {
   const item = node.value
   const owner = session.value?.uid
   if (item == null || owner == null) return false
-  const saved = await secured<NodeRecord | null>('nodeRecord', { routeId: item.routeId, nodeId: item.id.split(':')[1] })
+  const nodeId = item.id.split(':')[1]
+  const payload: UTSJSONObject = scopedRunId.value == null
+    ? { routeId: item.routeId, nodeId }
+    : { routeId: item.routeId, nodeId, runId: scopedRunId.value! }
+  const saved = await secured<NodeRecord | null>('nodeRecord', payload)
   if (session.value?.uid !== owner) throw new Error('AUTH_REQUIRED')
   if (saved == null) return false
   record.value = saved

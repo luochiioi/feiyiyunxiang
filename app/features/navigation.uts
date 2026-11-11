@@ -10,16 +10,20 @@ export function decodePageId(value: string | null): string | null {
   try { return decodeURIComponent(value) } catch (_) { return null }
 }
 
-export function openCheckin(nodeId: string): void {
-  openPage('/packages/routes/checkin/checkin?nodeId=' + encodeURIComponent(nodeId))
+function runQuery(runId: string | null): string {
+  return runId == null ? '' : '&runId=' + encodeURIComponent(runId)
 }
 
-export function openRouteDetail(routeId: string): void {
-  openPage('/packages/routes/route-detail/route-detail?routeId=' + encodeURIComponent(routeId))
+export function openCheckin(nodeId: string, runId: string | null = null): void {
+  openPage('/packages/routes/checkin/checkin?nodeId=' + encodeURIComponent(nodeId) + runQuery(runId))
 }
 
-export function openCultureActivity(routeId: string, activityId: string): void {
-  openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(routeId) + '&activityId=' + encodeURIComponent(activityId))
+export function openRouteDetail(routeId: string, runId: string | null = null): void {
+  openPage('/packages/routes/route-detail/route-detail?routeId=' + encodeURIComponent(routeId) + runQuery(runId))
+}
+
+export function openCultureActivity(routeId: string, activityId: string, runId: string | null = null): void {
+  openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(routeId) + '&activityId=' + encodeURIComponent(activityId) + runQuery(runId))
 }
 
 export function returnToMap(): void {

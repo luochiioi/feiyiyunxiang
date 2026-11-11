@@ -2,24 +2,127 @@
   <view class="screen">
     <AppPageHeader title="旅伴" :show-back="true" />
     <view class="content">
-      <DemoNotice :pending="true" description="本页只检查入口和返回。好友、两地合作及 PK 在阶段四实现。" />
+      <view class="card green">
+        <text class="title">两地同行</text>
+        <text class="body">澳门与湖南的探索者先添加好友，再组队完成各自的本地任务，共同解锁成果。</text>
+      </view>
 
-      <view class="card green"><text class="title">两地同行</text><text class="body">澳门与湖南的探索者先添加好友，再组队完成各自的本地任务，共同解锁成果。</text></view>
-      <view class="card"><text class="heading">好友与合作</text><text class="body">当前没有好友或合作记录。好友邀请与队伍将在微信登录接通后上线。</text></view>
-      <view class="card"><text class="heading">好友 PK</text><text class="body">可选玩法。按服务端记录的完成用时判定；失败任务可立即完成，分配满 72 小时后可主动拒绝。完成或拒绝后可参加下一场。</text><text class="muted">PK 功能尚未开放。</text></view>
-      <button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看两地路线</button>
+      <view class="card">
+        <text class="heading">我的好友</text>
+        <view class="row">
+          <text class="muted">我的邀请码 {{ myCode.length > 0 ? myCode : '获取中…' }}</text>
+          <button v-if="myCode.length > 0" class="secondary inline" @click="copyCode">复制</button>
+        </view>
+        <text v-if="loadError.length > 0" class="muted">读取失败：{{ loadError }}</text>
+        <view class="row">
+          <input class="code-input" v-model="code" maxlength="8" placeholder="输入对方邀请码" />
+          <button class="primary inline" :disabled="busy" @click="addFriend">添加</button>
+        </view>
+        <view v-for="item in incoming" :key="item.id" class="row spread divider">
+          <text class="body">{{ item.nickname }} 请求加为好友</text>
+          <view class="row">
+            <button class="secondary inline" :disabled="busy" @click="answer(item.id, true)">接受</button>
+            <button class="secondary inline" :disabled="busy" @click="answer(item.id, false)">拒绝</button>
+          </view>
+        </view>
+        <view v-for="item in friends" :key="item.code" class="row spread divider">
+          <text class="body">{{ item.nickname }}</text><text class="muted">邀请码 {{ item.code }}</text>
+        </view>
+        <text v-if="friends.length === 0 && incoming.length === 0" class="muted">还没有好友。用邀请码互相添加后，才能发起合作或 PK。</text>
+      </view>
+
+      <view class="card">
+        <text class="heading">合作</text>
+        <text class="body">与好友组队，各自完成所在地的节点与文化任务，成果只对外展示席位标签。</text>
+        <button class="secondary" @click="openPage('/packages/partner/coop/coop')">查看合作</button>
+      </view>
+
+      <view class="card">
+        <text class="heading">好友 PK</text>
+        <text class="body">完成路线全部打卡后，率先提交结算的一方获胜。失败方会收到一项失败任务。</text>
+        <text v-if="!pkEnabled" class="muted">有未处理的失败任务，完成或拒绝后才能参加下一场。</text>
+        <button class="secondary" :disabled="!pkEnabled" @click="openPage('/packages/partner/pk/pk')">进入 PK</button>
+      </view>
+
+      <view v-if="assignment != null" class="card">
+        <text class="heading">失败任务</text>
+        <text class="body">{{ assignmentTitle }}</text>
+        <text class="muted">{{ rejectHint }}</text>
+        <button class="secondary" @click="openPage('/packages/partner/assignment/assignment?assignmentId=' + assignmentId)">查看任务</button>
+      </view>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import DemoNotice from '@/components/DemoNotice.uvue'
 
+import { computed, ref } from 'vue'
 import { openPage } from '@/features/navigation.uts'
+import { showError, requestId, secured } from '@/features/api.uts'
+import { loadFriends, loadAssignment, sendFriendRequest, answerFriendRequest, partnerView } from '@/features/partner/partner.uts'
+
+type FriendCard = { code: string, nickname: string }
+type IncomingRequest = { id: string, code: string, nickname: string }
+type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string }
+
+const friends = ref<FriendCard[]>([])
+const incoming = ref<IncomingRequest[]>([])
+const myCode = ref('')
+const code = ref('')
+const busy = ref(false)
+const loadError = ref('')
+const assignment = ref<AssignmentCard | null>(null)
+
+const view = computed(() => partnerView({ assignment: assignment.value, now: Date.now() }))
+const pkEnabled = computed(() => view.value.pkEnabled)
+const assignmentId = computed(() => assignment.value?.id ?? '')
+const assignmentTitle = computed(() => assignment.value?.nodeTitle ?? '失败任务')
+const rejectHint = computed(() => view.value.rejectEnabled ? '已满 72 小时，可以主动拒绝。' : '分配满 72 小时后可主动拒绝，此前只能完成。')
+
+onShow(async () => {
+  loadError.value = ''
+  try {
+    myCode.value = (await secured<UTSJSONObject>('ensureProfile', {}) as UTSJSONObject)['code'] as string
+  } catch (e) { loadError.value = '邀请码 ' + (e as Error).message; return }
+  try {
+    const rows = await loadFriends()
+    friends.value = rows.filter(row => row['kind'] !== 'incoming').map(row => ({ code: row['code'] as string, nickname: row['nickname'] as string }))
+    incoming.value = rows.filter(row => row['kind'] === 'incoming').map(row => ({ id: row['id'] as string, code: row['code'] as string, nickname: row['nickname'] as string }))
+  } catch (e) { loadError.value = '好友列表 ' + (e as Error).message; return }
+  try {
+    assignment.value = await loadAssignment() as AssignmentCard | null
+  } catch (e) { loadError.value = '失败任务 ' + (e as Error).message }
+})
+
+function copyCode(): void {
+  if (myCode.value.length > 0) uni.setClipboardData({ data: myCode.value, fail: () => showError() })
+}
+
+async function addFriend(): Promise<void> {
+  if (busy.value || code.value.trim().length === 0) return
+  busy.value = true
+  try {
+    await sendFriendRequest(code.value.trim().toUpperCase(), requestId())
+    code.value = ''
+    uni.showToast({ title: '好友请求已发送', icon: 'success' })
+  } catch (_) { showError() } finally { busy.value = false }
+}
+
+async function answer(requestId: string, accept: boolean): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await answerFriendRequest(requestId, accept)
+    const accepted = incoming.value.find(item => item.id === requestId)
+    incoming.value = incoming.value.filter(item => item.id !== requestId)
+    if (accept && accepted != null) friends.value = friends.value.concat([{ code: accepted.code, nickname: accepted.nickname }])
+  } catch (_) { showError() } finally { busy.value = false }
+}
 </script>
 
 <style scoped>
 @import '@/styles/page.css';
-
+.code-input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border-radius: 13px; background: #f4ead8; font-size: 14px; }
+.inline { width: auto; padding: 6px 14px; }
 </style>

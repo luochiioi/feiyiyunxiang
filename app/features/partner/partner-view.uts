@@ -1,0 +1,35 @@
+import type { ActivitySummary } from '../exploration/catalog.uts'
+
+export type PartnerInput = {
+  assignment?: { status: string, rejectAvailableAt: number } | null,
+  result?: { partnerLabel: string, partnerNickname: string } | null,
+  audience?: string,
+  now?: number
+}
+
+export type PartnerView = {
+  pkEnabled: boolean,
+  coopEnabled: boolean,
+  rejectEnabled: boolean,
+  partnerText: string
+}
+
+// Pure view rules shared by the partner pages. Time comes from the server payload, never a local timer.
+export function partnerView(input: PartnerInput): PartnerView {
+  const now = input.now ?? Date.now()
+  const assignment = input.assignment ?? null
+  const locked = assignment != null && (assignment.status === 'pending' || assignment.status === 'doing')
+  const result = input.result ?? null
+  const member = input.audience === 'member'
+  return {
+    pkEnabled: !locked,
+    coopEnabled: true,
+    rejectEnabled: locked && now >= assignment!.rejectAvailableAt,
+    partnerText: result == null ? '' : (member ? result.partnerNickname : result.partnerLabel)
+  }
+}
+export function coopRouteEnabled(activities: ActivitySummary[]): boolean {
+  const macau = activities.some(activity => ['tile', 'tileQuiz'].includes(activity.id) && (activity.after?.length ?? 0) > 0)
+  const hunan = activities.some(activity => ['quiz', 'learning'].includes(activity.id) && (activity.after?.length ?? 0) > 0)
+  return macau && hunan
+}

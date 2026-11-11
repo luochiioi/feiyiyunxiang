@@ -3,7 +3,7 @@ const { completedActivities, validPath } = require('./culture')
 
 function createCultureUpgrade({ repo, allowTestContent }) {
   return async function attachCulture(run, runId) {
-    if (!allowTestContent || run.snapshot.testOnly !== true || run.cultureVersion) return run
+    if ((run.purpose ?? 'solo') !== 'solo' || !allowTestContent || run.snapshot.testOnly !== true || run.cultureVersion) return run
     let version = run.version
     let edition = run.snapshot
     if (!edition.culture) {
@@ -15,7 +15,7 @@ function createCultureUpgrade({ repo, allowTestContent }) {
     if (edition?.testOnly !== true || !Array.isArray(edition.cultureUpgrade)) return run
     const sourceRuns = edition.cultureUpgrade.length === 0 ? [] : await repo.list('fy-runs', { uid: run.uid })
     const sources = edition.cultureUpgrade.map(routeId => sourceRuns
-      .filter(item => item.uid === run.uid && item.routeId === routeId && item.snapshot.testOnly === true)
+      .filter(item => (item.purpose ?? 'solo') === 'solo' && item.uid === run.uid && item.routeId === routeId && item.snapshot.testOnly === true)
       .sort((a, b) => b.createdAt - a.createdAt)[0]).filter(Boolean)
     return repo.tx(async db => {
       const current = await db.get('fy-runs', runId)
