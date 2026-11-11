@@ -1,4 +1,5 @@
 const { createHash } = require('node:crypto')
+const { requireValue, validateCulture, cultureSummary, tileWork } = require('./culture')
 const fail = code => { throw new Error(code) }
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const text = (v, max=120) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
@@ -21,7 +22,12 @@ function validateDraft(p) {
     ids.add(n.id)
     return {id:n.id,title:n.title,description:n.description,latitude:n.latitude,longitude:n.longitude,radius:n.radius}
   })
-  return {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:{latitude:p.viewport.latitude,longitude:p.viewport.longitude,scale:p.viewport.scale},nodes}
+  const value = {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:{latitude:p.viewport.latitude,longitude:p.viewport.longitude,scale:p.viewport.scale},nodes}
+  if (p.culture != null) value.culture = validateCulture(p.culture, ids)
+  return value
+}
+function routeView(v, version) {
+  return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version,activities:cultureSummary(v.culture)}
 }
 function createService({repo,now=Date.now,allowTestContent=true}) {
   async function owned(db,u,runId) {
@@ -40,7 +46,20 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
   async function runProgress(u, runId, run) {
     const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
     const completed = checks.map(check => check.nodeId)
-    return { runId, routeId: run.routeId, version: run.version, snapshot: run.snapshot, completed, done: completed.length, total: run.snapshot.nodes.length }
+    const snapshot = routeView(run.snapshot, run.version)
+    const activities = run.culture?.tile ? ['tile'] : []
+    return { runId, routeId: run.routeId, version: run.version, snapshot, completed, activities,
+      done: completed.length + activities.length, total: snapshot.nodes.length + snapshot.activities.length }
+  }
+  async function tileStatus(db, run, runId) {
+    const definition = run.snapshot.culture?.tile
+    requireValue(definition, 'NOT_FOUND')
+    for (const nodeId of definition.after) {
+      if (!await db.get('fy-checkins', key(runId, nodeId))) {
+        return { title: definition.title, unlocked: false, work: null }
+      }
+    }
+    return { title: definition.title, unlocked: true, work: run.culture?.tile ?? null }
   }
   return {
     async drafts(u) { adminOnly(u); return repo.list('fy-drafts',{}) },
@@ -74,7 +93,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       for (const r of routes) {
         if (r.testOnly&&!allowTestContent) continue
         const v=await repo.get('fy-versions',r.version)
-        if(v) result.push({id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version:r.version})
+        if(v) result.push(routeView(v, r.version))
       }
       return result
     },
@@ -134,6 +153,27 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     },
     async progress(u,p) {
       return runProgress(u, p.runId, await owned(repo, u, p.runId))
+    },
+    async tileStatus(u, p) {
+      return tileStatus(repo, await owned(repo, u, p.runId), p.runId)
+    },
+    async saveTile(u, p) {
+      const work = tileWork(p, now())
+      return repo.tx(async db => {
+        const run = await owned(db, u, p.runId)
+        const status = await tileStatus(db, run, p.runId)
+        requireValue(status.unlocked, 'ACTIVITY_LOCKED')
+        if (status.work) return status.work
+        await db.put('fy-runs', p.runId, { ...run, culture: { ...run.culture, tile: work }, revision: run.revision + 1 })
+        return work
+      })
+    },
+    async works(u) {
+      if (!u?.uid) fail('AUTH_REQUIRED')
+      const runs = await repo.list('fy-runs', { uid: u.uid })
+      return runs.filter(run => run.culture?.tile).map(run => ({
+        runId: run._id, routeName: run.snapshot.name, ...run.culture.tile
+      })).sort((a, b) => b.savedAt - a.savedAt)
     },
     async routeProgress(u, p) {
       if (!u?.uid) fail('AUTH_REQUIRED')

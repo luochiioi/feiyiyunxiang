@@ -12,12 +12,14 @@
       <text class="route-name">{{ nextNode == null ? '当前没有待打卡点' : '下一站 · ' + nextNode.title }}</text>
       <text class="route-meta">{{ nextNode == null ? '可在路线详情查看任务' : '两地旅伴各自完成本地任务' }}</text>
       <button v-if="nextNode != null" class="task-button" @click="emit('continue-task', nextNode.id)">前往私密打卡</button>
+      <button v-else class="task-button" @click="openRouteDetail(route.id)">查看路线任务</button>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
 import type { RouteNode, RouteSummary } from '@/features/exploration/types.uts'
+import { openRouteDetail } from '@/features/navigation.uts'
 defineProps<{ route: RouteSummary | null, nextNode: RouteNode | null, expanded: boolean }>()
 const emit = defineEmits<{ (event: 'toggle'): void, (event: 'continue-task', nodeId: string): void }>()
 </script>

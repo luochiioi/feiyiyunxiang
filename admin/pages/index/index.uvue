@@ -44,6 +44,10 @@
               <button :disabled="busy" @click="removeNode(index)">删除节点</button>
             </view>
             <button :disabled="busy" @click="addNode">增加定位照片节点</button>
+            <text class="heading">文化内容</text>
+            <text class="hint">选填。解锁条件使用上面的节点编号。</text>
+            <textarea class="content-source" v-model="cultureSource" :maxlength="-1" placeholder="文化内容 JSON" />
+            <button :disabled="busy" @click="fillTile">载入澳门配色模板</button>
             <view class="toolbar"><button class="primary" :disabled="busy" @click="save">保存草稿</button><button :disabled="busy || draft.revision === 0" @click="publish">保存并发布此版本</button></view>
             <text class="hint">发布后生成固定版本；正在探索的用户继续使用原版本。</text>
           </view>
@@ -64,6 +68,7 @@ const editingAccount = ref(false), newUsername = ref('')
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 const drafts = ref<Draft[]>([])
 const editing = ref(false)
+const cultureSource = ref('')
 const draft = ref<Draft>({ id: '', name: '', region: '', description: '', revision: 0, testOnly: true, museum: { name: '', description: '' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] })
 function numeric(value: string): number { return Number(value) }
 async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; await load() } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
@@ -125,14 +130,25 @@ async function saveAccount(): Promise<void> {
   } finally { busy.value = false }
 }
 async function load(): Promise<void> { try { drafts.value = await api<Draft[]>('drafts'); message.value = '' } catch (_) { message.value = '读取失败或会话已过期。编辑内容仍保留。' } }
-function edit(item: Draft): void { draft.value = JSON.parse<Draft>(JSON.stringify(item))!; editing.value = true }
-function newDraft(): void { draft.value = { id: 'route-' + Date.now(), name: '开发测试路线', region: '澳门', description: '仅用于开发联调，不代表真实馆方路线', revision: 0, testOnly: true, museum: { name: '开发测试馆', description: '资料待核实' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] }; editing.value = true; addNode() }
+function edit(item: Draft): void {
+  const raw = JSON.stringify(item)
+  draft.value = JSON.parse<Draft>(raw)!
+  const value = JSON.parse<UTSJSONObject>(raw)!['culture']
+  cultureSource.value = value == null ? '' : JSON.stringify(value, null, 2)
+  editing.value = true
+}
+function newDraft(): void { draft.value = { id: 'route-' + Date.now(), name: '开发测试路线', region: '澳门', description: '仅用于开发联调，不代表真实馆方路线', revision: 0, testOnly: true, museum: { name: '开发测试馆', description: '资料待核实' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] }; cultureSource.value = ''; editing.value = true; addNode() }
+function fillTile(): void {
+  cultureSource.value = JSON.stringify({ tile: { title: '蓝白瓷砖配色', after: draft.value.nodes.map(node => node.id) } }, null, 2)
+}
 function addNode(): void { draft.value?.nodes.push({ id: 'node-' + Date.now(), title: '测试节点', description: '定位与照片', latitude: 0, longitude: 0, radius: 100 }) }
 function removeNode(index: number): void { draft.value?.nodes.splice(index, 1) }
 async function saveValue(): Promise<void> {
   if (draft.value == null || draft.value!.nodes.length === 0) throw new Error('INVALID_NODES')
   draft.value!.viewport.latitude = draft.value!.nodes[0].latitude; draft.value!.viewport.longitude = draft.value!.nodes[0].longitude
-  const result = await api<{ revision: number }>('saveDraft', JSON.parse<UTSJSONObject>(JSON.stringify(draft.value))!)
+  const payload = JSON.parse<UTSJSONObject>(JSON.stringify(draft.value))!
+  payload['culture'] = cultureSource.value.trim().length === 0 ? null : JSON.parse<UTSJSONObject>(cultureSource.value)
+  const result = await api<{ revision: number }>('saveDraft', payload)
   draft.value!.revision = result.revision
 }
 async function save(): Promise<void> { if (busy.value) return; busy.value = true; try { await saveValue(); message.value = '草稿已保存。' } catch (_) { message.value = '保存失败：请检查必填内容、坐标，或刷新确认修订冲突。当前编辑内容已保留。' } finally { busy.value = false } }
@@ -159,6 +175,7 @@ button { margin:0; font-size:14px; }
 .editor { flex:1; min-width:0; }
 input,textarea { border:1px solid #d7dfce; padding:10px; box-sizing:border-box; border-radius:9px; width:100%; background:white; }
 textarea { height:90px; }
+.content-source { height: 240px; font-family: monospace; }
 .node { display:flex; flex-direction:column; gap:10px; padding:18px; border:1px solid #e0e6d6; border-radius:12px; }
 .coords { display:flex; flex-direction:row; gap:12px; }.coords>view { flex:1; min-width:0; }
 .heading { font-weight:700; font-size:16px; }

@@ -15,8 +15,15 @@
         </view>
         <view class="card">
           <text class="heading">探索任务</text>
-          <view v-for="node in nodes" :key="node.id" class="row spread divider menu-row" @click="openCheckin(node.id)">
+          <view v-for="node in nodes" :key="node.id" class="row spread divider menu-row" @click="openPoint(node.id)">
             <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : '去打卡' }} ›</text>
+          </view>
+        </view>
+        <view v-if="activities.length > 0" class="card">
+          <text class="heading">文化任务</text>
+          <view v-for="item in activities" :key="item.id" class="row spread divider menu-row" @click="openActivity(item.id)">
+            <text class="body">{{ item.title }}</text>
+            <text class="muted">{{ progress?.activities?.includes(item.id) === true ? '已完成' : '查看任务' }} ›</text>
           </view>
         </view>
         <button class="secondary" @click="showOnMap">在地图查看路线</button>
@@ -32,14 +39,45 @@ import DemoNotice from '@/components/DemoNotice.uvue'
 
 import { computed, ref } from 'vue'
 import ProgressBar from '@/components/ProgressBar.uvue'
-import { findRoute, listNodes, refreshCatalog } from '@/features/exploration/catalog.uts'
+import { activeRun, findRoute, listNodes, published, refreshCatalog, startRoute, summarizeRoute } from '@/features/exploration/catalog.uts'
+import type { RunProgress } from '@/features/exploration/catalog.uts'
+import { api, session, showError } from '@/features/api.uts'
 import { dispatchMapEvent } from '@/features/exploration/map-store.uts'
 import { decodePageId, openCheckin, openPage, returnToMap } from '@/features/navigation.uts'
 const id = ref<string | null>(null)
+const progress = ref<RunProgress | null>(null)
+const busy = ref(false)
 onLoad(query => { id.value = decodePageId(query['routeId'] ?? null) })
-const route = computed(() => findRoute(id.value))
-const nodes = computed(() => route.value == null ? [] : listNodes(route.value!.id))
-onShow(() => { refreshCatalog() })
+const content = computed(() => progress.value?.snapshot ?? published.value.find(item => item.id === id.value) ?? null)
+const route = computed(() => content.value == null ? findRoute(id.value) : summarizeRoute(content.value!, progress.value))
+const activities = computed(() => content.value?.activities ?? [])
+const nodes = computed(() => {
+  const snapshot = progress.value?.snapshot
+  if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked }))
+  return snapshot.nodes.map(node => ({ id: snapshot.id + ':' + node.id, title: node.title, checked: progress.value!.completed.includes(node.id) }))
+})
+onShow(async () => {
+  await refreshCatalog()
+  if (id.value == null || session.value == null) { progress.value = null; return }
+  const uid = session.value!.uid
+  try {
+    const value = await api<RunProgress | null>('routeProgress', { routeId: id.value! })
+    if (session.value?.uid === uid) progress.value = value
+  } catch (_) { if (session.value?.uid !== uid) progress.value = null }
+})
+async function openPoint(nodeId: string): Promise<void> {
+  if (busy.value) return
+  if (progress.value != null && activeRun.value?.runId !== progress.value!.runId) {
+    busy.value = true
+    try { await startRoute(progress.value!.routeId) } catch (_) { showError(); return }
+    finally { busy.value = false }
+  }
+  openCheckin(nodeId)
+}
+function openActivity(activityId: string): void {
+  if (id.value == null) return
+  openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(id.value!) + '&activityId=' + encodeURIComponent(activityId))
+}
 function showOnMap(): void {
   const item = route.value
   if (item == null) return

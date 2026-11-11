@@ -1,0 +1,47 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="文化作品" :show-back="true" />
+    <view class="content">
+      <view v-if="works.length === 0" class="card">
+        <text class="body">{{ message }}</text>
+        <button v-if="canRetry" class="primary" :disabled="busy" @click="load">{{ session == null ? '微信登录' : '重试' }}</button>
+      </view>
+      <view v-for="work in works" :key="work.runId" class="card">
+        <text class="heading">{{ work.routeName }}</text>
+        <TilePreview :pattern="work.pattern" :palette="work.palette" />
+        <text class="muted">蓝白瓷砖配色 · 仅自己可见</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import TilePreview from '../components/TilePreview.uvue'
+import { secured, session } from '@/features/api.uts'
+type Work = { runId: string, routeName: string, pattern: string, palette: string }
+const works = ref<Work[]>([])
+const message = ref('登录后查看自己的作品。')
+const busy = ref(false)
+const canRetry = ref(true)
+onShow(() => { if (session.value != null) load() })
+async function load(): Promise<void> {
+  if (busy.value) return
+  works.value = []
+  busy.value = true
+  canRetry.value = false
+  message.value = '正在读取作品…'
+  try {
+    works.value = await secured<Work[]>('works')
+    message.value = '还没有作品。完成澳门路线的蓝白瓷砖配色后可在这里回看。'
+  } catch (_) {
+    canRetry.value = true
+    message.value = '作品读取失败，请重试。'
+  } finally { busy.value = false }
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+</style>

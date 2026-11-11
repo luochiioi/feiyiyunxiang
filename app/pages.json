@@ -50,6 +50,12 @@
       "pages": [
         {
           "path": "story/story"
+        },
+        {
+          "path": "activity/activity"
+        },
+        {
+          "path": "works/works"
         }
       ]
     },

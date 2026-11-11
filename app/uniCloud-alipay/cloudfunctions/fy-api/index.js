@@ -4,7 +4,7 @@ const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
 const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCredentials } = require('./admin-session')
 const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -86,10 +86,10 @@ exports.main=async(event,context)=>{
       if (!Buffer.isBuffer(fileContent) || fileContent.length < 28) throw new Error('SERVICE_UNAVAILABLE')
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
     } else {
-      const methods={saveDraft:'saveDraft',publish:'publish',drafts:'drafts',start:'start',checkin:'checkin',progress:'progress',routeProgress:'routeProgress',diary:'diary',nodeRecord:'nodeRecord'}
-      const method=methods[action]
-      if(!method)throw new Error('NOT_FOUND')
-      data=await service[method](user,p)
+      const methods = new Set(['saveDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
+        'diary', 'nodeRecord', 'tileStatus', 'saveTile', 'works'])
+      if(!methods.has(action))throw new Error('NOT_FOUND')
+      data=await service[action](user,p)
     }
     return {code:'OK',data}
   } catch(e) {

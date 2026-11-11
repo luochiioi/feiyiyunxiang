@@ -38,3 +38,31 @@ test('point entry restores its private record and existing route progress by own
   assert.deepEqual(progress.completed, [point.nodeId])
   assert.equal(await f.s.routeProgress(f.b, { routeId: point.routeId }), null)
 })
+
+test('Macau route gates its private tile work on a real check-in and pins the activity version', async () => {
+  const { s, admin, a, b } = setup()
+  const culture = { tile: { title: '蓝白瓷砖配色', after: ['n1'] } }
+  await assert.rejects(s.saveDraft(admin, { ...draft, culture: { tile: { ...culture.tile, after: ['missing'] } } }), /INVALID_TILE_GATE/)
+  await s.saveDraft(admin, { ...draft, culture })
+  await s.publish(admin, { id: draft.id, revision: 1 })
+  const { id: runId } = await s.start(a, { routeId: draft.id, requestId: 'macau-test' })
+  assert.deepEqual((await s.catalog())[0].activities, [{ id: 'tile', title: culture.tile.title }])
+  assert.equal((await s.progress(a, { runId })).total, 2)
+  const selection = { runId, pattern: 'sail', palette: 'cobalt' }
+  await assert.rejects(s.saveTile(a, selection), /ACTIVITY_LOCKED/)
+  await assert.rejects(s.tileStatus(b, { runId }), /NOT_FOUND/)
+  const p = { runId, nodeId: 'n1', requestId: 'tile-gate' }
+  await s.registerMedia(a, { ...p, id: 'media', fileID: 'private-photo' })
+  await s.checkin(a, { ...p, mediaId: 'media', latitude: 22, longitude: 113 })
+  await s.saveDraft(admin, { ...draft, revision: 1 })
+  await s.publish(admin, { id: draft.id, revision: 2 })
+  assert.deepEqual((await s.catalog())[0].activities, [])
+  assert.equal((await s.tileStatus(a, { runId })).unlocked, true)
+  await assert.rejects(s.saveTile(a, { ...selection, pattern: 'bogus' }), /INVALID_TILE_SELECTION/)
+  const work = await s.saveTile(a, selection)
+  assert.deepEqual(await s.saveTile(a, { ...selection, palette: 'mist' }), work)
+  assert.equal((await s.progress(a, { runId })).done, 2)
+  assert.deepEqual(await s.works(a), [{ runId, routeName: draft.name, ...work }])
+  assert.deepEqual(await s.works(b), [])
+  assert.equal((await s.diary(a)).length, 1)
+})

@@ -5,8 +5,9 @@ import { demoNodes, demoRoutes } from './demo-fixtures.uts'
 import { visibleMapNodes } from './map-markers.uts'
 import type { RouteNode, RouteSummary, MapViewport } from './types.uts'
 export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
-export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[] }
-export type RunProgress = { runId: string, routeId: string, done: number, total: number, completed: string[], snapshot: PublishedRoute }
+export type ActivitySummary = { id: string, title: string }
+export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[] }
+export type RunProgress = { runId: string, routeId: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, activities?: string[] }
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)
 export const catalogError = shallowRef(false)
@@ -46,6 +47,14 @@ export async function startRoute(routeId: string): Promise<RunProgress> {
   return progress
 }
 
+export function summarizeRoute(r: PublishedRoute, run: RunProgress | null): RouteSummary {
+  const completed = run?.completed ?? []
+  const next = r.nodes.find(n => !completed.includes(n.id))
+  const activities = r.activities ?? []
+  return { id: r.id, name: (r.testOnly ? '开发测试 · ' : '') + r.name, region: r.region, description: r.description,
+    total: r.nodes.length + activities.length, done: completed.length + (run?.activities?.length ?? 0),
+    nextNodeId: next == null ? null : r.id + ':' + next.id, viewport: r.viewport }
+}
 export function listRoutes(): RouteSummary[] {
   if (demoEnabled) return demoRoutes
   const routes = published.value.slice()
@@ -55,11 +64,7 @@ export function listRoutes(): RouteSummary[] {
     if (i >= 0) routes[i] = run.snapshot
     else routes.push(run.snapshot)
   }
-  return routes.map(r => {
-    const completed = run?.routeId === r.id ? run!.completed : []
-    const next = r.nodes.find(n => !completed.includes(n.id))
-    return { id: r.id, name: (r.testOnly ? '开发测试 · ' : '') + r.name, region: r.region, description: r.description, total: r.nodes.length, done: completed.length, nextNodeId: next == null ? null : r.id + ':' + next.id, viewport: r.viewport }
-  })
+  return routes.map(r => summarizeRoute(r, run?.routeId === r.id ? run : null))
 }
 export function findRoute(id: string | null): RouteSummary | null {
   return listRoutes().find(route => route.id === id) ?? null

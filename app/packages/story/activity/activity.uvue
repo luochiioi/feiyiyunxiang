@@ -1,0 +1,106 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="文化任务" :show-back="true" />
+    <view class="content">
+      <view v-if="status == null" class="card">
+        <text class="body">{{ message }}</text>
+        <button class="primary" :disabled="busy" @click="load">{{ session == null ? '微信登录并继续' : '重新读取' }}</button>
+      </view>
+      <view v-else class="card">
+        <text class="title">{{ status.title }}</text>
+        <text v-if="!status.unlocked" class="body">完成路线指定的定位照片打卡后解锁。</text>
+        <template v-else>
+          <text class="muted">图案示意 · 正式瓷砖纹样待校订</text>
+          <TilePreview :pattern="selection.pattern" :palette="selection.palette" />
+          <text v-if="status.work != null" class="body">作品已保存，可在「我的 → 文化作品」回看。</text>
+          <template v-else>
+            <text class="heading">纹样</text>
+            <view class="choices">
+              <button v-for="item in patterns" :key="item.id" class="choice" :class="{ selected: selection.pattern === item.id }" :disabled="busy" @click="choose(item.id, selection.palette)">{{ item.name }}</button>
+            </view>
+            <text class="heading">蓝白配色</text>
+            <view class="choices">
+              <button v-for="item in palettes" :key="item.id" class="choice" :class="{ selected: selection.palette === item.id }" :disabled="busy" @click="choose(selection.pattern, item.id)">{{ item.name }}</button>
+            </view>
+            <button class="primary" :disabled="busy" @click="save">{{ busy ? '保存中…' : '保存作品并完成任务' }}</button>
+          </template>
+        </template>
+        <text v-if="message.length > 0" class="muted">{{ message }}</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import TilePreview from '../components/TilePreview.uvue'
+import { secured, session } from '@/features/api.uts'
+import { refreshCatalog, startRoute } from '@/features/exploration/catalog.uts'
+import { decodePageId } from '@/features/navigation.uts'
+
+type Selection = { pattern: string, palette: string }
+type TileStatus = { title: string, unlocked: boolean, work: Selection | null }
+const patterns = [{ id: 'rose', name: '玫瑰' }, { id: 'sail', name: '海浪帆船' }, { id: 'geometry', name: '几何' }]
+const palettes = [{ id: 'indigo', name: '靛蓝' }, { id: 'cobalt', name: '钴蓝' }, { id: 'mist', name: '雾蓝' }]
+const selection = ref<Selection>({ pattern: 'rose', palette: 'indigo' })
+const status = ref<TileStatus | null>(null)
+const busy = ref(false)
+const message = ref('微信登录后可继续探索并保存作品。')
+let routeId = ''
+let runId = ''
+let draftKey = ''
+onLoad(query => {
+  routeId = decodePageId(query['routeId'] ?? null) ?? ''
+  if (session.value != null) load()
+})
+async function load(): Promise<void> {
+  if (busy.value || routeId.length === 0) return
+  busy.value = true
+  message.value = '正在读取任务…'
+  try {
+    const run = await startRoute(routeId)
+    runId = run.runId
+    draftKey = 'fy-tile-' + session.value!.uid + '-' + runId
+    const result = await secured<TileStatus>('tileStatus', { runId })
+    if (result.work != null) {
+      selection.value = result.work!
+      uni.removeStorageSync(draftKey)
+    } else {
+      const raw = uni.getStorageSync(draftKey) as string
+      if (raw != null && raw.length > 0) {
+        try { selection.value = JSON.parse<Selection>(raw)! } catch (_) { uni.removeStorageSync(draftKey) }
+      }
+    }
+    status.value = result
+    message.value = ''
+  } catch (error) {
+    message.value = (error as Error).message === 'NOT_FOUND' ? '当前探索版本没有这项任务。' : '读取失败，请检查登录和网络后重试。'
+  } finally { busy.value = false }
+}
+function choose(pattern: string, palette: string): void {
+  selection.value = { pattern, palette }
+  uni.setStorageSync(draftKey, JSON.stringify(selection.value))
+}
+async function save(): Promise<void> {
+  const current = status.value
+  if (busy.value || current == null || !current.unlocked || current.work != null) return
+  busy.value = true
+  message.value = ''
+  try {
+    const work = await secured<Selection>('saveTile', { runId, pattern: selection.value.pattern, palette: selection.value.palette })
+    selection.value = work
+    status.value = { ...current, work }
+    uni.removeStorageSync(draftKey)
+    await refreshCatalog()
+  } catch (_) { message.value = '保存尚未确认。配色草稿已留在本机，可以重试。' }
+  finally { busy.value = false }
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.choices { display: flex; flex-direction: row; flex-wrap: wrap; gap: 7px; }
+.choice { margin: 0; padding: 4px 10px; font-size: 14px; color: #2f5282; background: #edf3fa; }
+.selected { background: #2f5282; color: white; }
+</style>

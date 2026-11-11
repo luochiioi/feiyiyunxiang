@@ -21,6 +21,7 @@
         <button class="primary" @click="openPage('/packages/profile/my-checkins/my-checkins')">查看档案</button>
       </view>
       <view class="card">
+        <view class="row spread menu-row" @click="openPage('/packages/story/works/works')"><text class="body">文化作品</text><text class="muted">›</text></view>
         <view class="row spread menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
         <view class="row spread divider menu-row" @click="openPage('/packages/community/community/community')"><text class="body">社区</text><text class="muted">›</text></view>
         <view class="row spread divider menu-row" @click="showAi"><text class="body">AI 猜图</text><text class="muted">敬请期待 ›</text></view>

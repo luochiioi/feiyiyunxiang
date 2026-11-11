@@ -1,0 +1,26 @@
+<template>
+  <view class="tile" :class="palette">
+    <view v-for="(cell, index) in cells" :key="index" class="cell">
+      <text class="motif">{{ cell }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed } from 'vue'
+const props = defineProps<{ pattern: string, palette: string }>()
+const cells = computed((): string[] => {
+  if (props.pattern === 'sail') return ['≈', '▲', '▲', '≈']
+  if (props.pattern === 'geometry') return ['◈', '◇', '◇', '◈']
+  return ['❀', '✿', '✿', '❀']
+})
+</script>
+
+<style scoped>
+.tile { width: 176px; height: 176px; display: flex; flex-direction: row; flex-wrap: wrap; align-self: center; border: 6px double #2f5282; background: #fffdf6; box-sizing: content-box; }
+.cell { width: 88px; height: 88px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1px solid #c4d5eb; }
+.motif { font-size: 54px; color: #253e70; }
+.cobalt .motif { color: #265ba0; }
+.mist .motif { color: #527ea8; }
+.cell:nth-child(2), .cell:nth-child(3) { background: #edf3fa; }
+</style>
