@@ -26,6 +26,7 @@
             <text class="muted">{{ progress?.activities?.includes(item.id) === true ? '已完成' : '查看任务' }} ›</text>
           </view>
         </view>
+        <button class="secondary" @click="openStory">查看剧情章节</button>
         <button class="secondary" @click="showOnMap">在地图查看路线</button>
       </template>
       <view v-else class="card"><text class="body">找不到这条路线。</text><button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看路线列表</button></view>
@@ -77,6 +78,9 @@ async function openPoint(nodeId: string): Promise<void> {
 function openActivity(activityId: string): void {
   if (id.value == null) return
   openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(id.value!) + '&activityId=' + encodeURIComponent(activityId))
+}
+function openStory(): void {
+  if (id.value != null) openPage('/packages/story/story/story?routeId=' + encodeURIComponent(id.value!))
 }
 function showOnMap(): void {
   const item = route.value

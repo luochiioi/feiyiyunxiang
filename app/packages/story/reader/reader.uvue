@@ -1,0 +1,146 @@
+<template>
+  <view class="reader">
+    <AppPageHeader title="剧情阅读" :show-back="true" />
+    <view v-if="scene != null" class="game-page" :class="{ 'warm-scene': act >= 5 }">
+      <view class="game-stage">
+        <view class="game-top">
+          <text class="marker-caption">{{ '第 ' + act + ' 幕 · ' + chapter?.title }}</text>
+          <view class="game-icon-actions">
+            <button v-if="path.length > 1" class="game-icon-control" :disabled="busy" @click="previous">上一段</button>
+            <button class="game-icon-control" :disabled="busy" @click="restart">重读</button>
+          </view>
+        </view>
+        <view class="illustration">
+          <image v-if="scene.asset === 'aomiao' && !imageFailed" class="character" src="/static/ip/aomiao-wave.png" mode="aspectFit" @error="imageFailed = true" />
+          <text class="asset-note">{{ imageFailed ? '图片暂不可用，仍可阅读对白' : (scene.asset === 'aomiao' ? '澳喵 · 场景图待补' : '场景图待补') }}</text>
+        </view>
+        <text v-if="testOnly" class="marker-caption review-note">虚构场景 · 剧情与文化内容待校订</text>
+        <view v-if="scene.kind === 'choice'" class="choice-panel">
+          <text class="narration">{{ scene.text }}</text>
+          <button v-for="choice in scene.choices" :key="choice.nextSceneId" class="choice-item" :disabled="busy" @click="advance(choice.nextSceneId)">{{ choice.label }}</button>
+        </view>
+        <view v-else-if="scene.kind === 'dialogue'" class="dialogue-panel">
+          <text class="speaker-name">{{ scene.speaker }}</text>
+          <text class="dialogue-text">{{ scene.text }}</text>
+          <button class="continue-control" :disabled="busy" @click="advance(scene.nextSceneId ?? '')">{{ busy ? '正在保存…' : '继续' }}</button>
+        </view>
+        <view v-else class="ending-panel">
+          <text class="ending-title">本幕结束</text>
+          <text class="ending-text">{{ scene.text }}</text>
+          <button class="ending-action" @click="leave">返回章节目录</button>
+        </view>
+        <text v-if="message.length > 0" class="asset-note">{{ message }}</text>
+        <button v-if="conflict" class="game-icon-control" :disabled="busy" @click="load">同步已保存断点</button>
+      </view>
+    </view>
+    <view v-else class="reader-status">
+      <text>{{ message }}</text>
+      <button v-if="!busy && runId.length > 0" class="game-icon-control" @click="load">重新读取</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import { secured } from '@/features/api.uts'
+import { decodePageId, openPage } from '@/features/navigation.uts'
+import { opening, openingStorageKey, savedOpeningPath } from '../story-content.uts'
+import type { Chapter, ChapterRead, Checkpoint } from '../story-content.uts'
+
+const chapter = ref<Chapter | null>(null)
+const act = ref(0)
+const runId = ref('')
+const path = ref<string[]>([])
+const revision = ref(0)
+const testOnly = ref(true)
+const busy = ref(false)
+const conflict = ref(false)
+const imageFailed = ref(false)
+const message = ref('正在读取章节…')
+const scene = computed(() => chapter.value?.scenes.find(item => item.id === path.value[path.value.length - 1]) ?? null)
+
+onLoad(query => {
+  act.value = Number(query['act'] ?? '0')
+  runId.value = decodePageId(query['runId'] ?? null) ?? ''
+  load()
+})
+async function load(): Promise<void> {
+  if (busy.value) return
+  if (act.value === 1) {
+    chapter.value = opening
+    path.value = savedOpeningPath()
+    message.value = ''
+    return
+  }
+  if (runId.value.length === 0 || act.value < 2 || act.value > 6) {
+    message.value = '请从章节目录打开剧情。'
+    return
+  }
+  busy.value = true
+  try {
+    const result = await secured<ChapterRead>('storyChapter', { runId: runId.value, act: act.value })
+    chapter.value = result.chapter
+    path.value = result.checkpoint.path
+    revision.value = result.checkpoint.revision
+    testOnly.value = result.testOnly
+    imageFailed.value = false
+    conflict.value = false
+    message.value = ''
+  } catch (error) {
+    message.value = (error as Error).message === 'ACTIVITY_LOCKED' ? '请先完成本幕要求的路线任务。' : '无法读取章节，请检查登录或网络后重试。'
+  } finally { busy.value = false }
+}
+async function showPath(nextPath: string[]): Promise<void> {
+  if (busy.value || conflict.value) return
+  busy.value = true
+  message.value = ''
+  try {
+    if (act.value === 1) {
+      uni.setStorageSync(openingStorageKey, JSON.stringify(nextPath))
+      path.value = nextPath
+    } else {
+      const saved = await secured<Checkpoint>('saveReading', { runId: runId.value, act: act.value, path: nextPath, revision: revision.value })
+      path.value = saved.path
+      revision.value = saved.revision
+    }
+    imageFailed.value = false
+  } catch (error) {
+    conflict.value = (error as Error).message === 'CONFLICT'
+    message.value = conflict.value ? '另一设备已更新阅读进度。请先同步已保存断点。' : '断点保存尚未确认。请再次点击刚才的操作。'
+  } finally { busy.value = false }
+}
+function advance(id: string): void { if (id.length > 0) showPath([...path.value, id]) }
+function previous(): void { if (path.value.length > 1) showPath(path.value.slice(0, -1)) }
+function restart(): void {
+  const start = chapter.value?.start
+  if (start == null || path.value.length < 2) return
+  uni.showModal({ title: '从本幕开头重读？', success: result => { if (result.confirm) showPath([start]) } })
+}
+function leave(): void {
+  if (getCurrentPages().length > 1) uni.navigateBack()
+  else openPage('/packages/story/story/story')
+}
+</script>
+
+<style scoped>
+.reader { min-height: 100vh; background: #283447; }
+.game-page { background-color: #283447; padding: 18px 0 calc(24px + env(safe-area-inset-bottom)); }
+.warm-scene { background-color: #493239; }
+.game-stage { display: flex; flex-direction: column; gap: 12px; padding: 0 16px; }
+.game-top, .game-icon-actions { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.game-top { justify-content: space-between; flex-wrap: wrap; }
+.game-icon-control { margin: 0; padding: 2px 12px; border-radius: 16px; background: #fff1d7; color: #5c3b10; font-size: 13px; }
+.marker-caption { color: #f5e9d5; font-size: 13px; }
+.illustration { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 192px; border-radius: 18px; background: #37485e; }
+.warm-scene .illustration { background: #5c4048; }
+.character { width: 138px; height: 138px; }
+.asset-note { color: #f5e9d5; font-size: 12px; padding: 8px; }
+.review-note { text-align: center; }
+.choice-panel,.dialogue-panel,.ending-panel { display: flex; flex-direction: column; gap: 10px; border-radius: 18px; background-color: #231d16; border: 1px solid #f1c56d; padding: 16px; }
+.narration,.dialogue-text,.ending-text { color: #fff8eb; font-size: 16px; line-height: 1.65; }
+.choice-item,.continue-control,.ending-action { margin: 0; border-radius: 14px; background-color: #fff1d7; color: #5c3b10; font-size: 15px; font-weight: 700; white-space: normal; }
+.speaker-name,.ending-title { color: #ffd36e; font-size: 17px; font-weight: 700; }
+.continue-control { align-self: flex-end; padding: 0 18px; background-color: #f1c56d; }
+.reader-status { display: flex; flex-direction: column; gap: 12px; padding: 24px; color: #fff8eb; }
+</style>

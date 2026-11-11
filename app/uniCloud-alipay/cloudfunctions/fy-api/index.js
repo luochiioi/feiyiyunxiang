@@ -87,7 +87,8 @@ exports.main=async(event,context)=>{
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
     } else {
       const methods = new Set(['saveDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
-        'diary', 'nodeRecord', 'tileStatus', 'saveTile', 'works'])
+        'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard',
+        'storyLibrary', 'storyChapter', 'saveReading'])
       if(!methods.has(action))throw new Error('NOT_FOUND')
       data=await service[action](user,p)
     }

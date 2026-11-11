@@ -7,9 +7,10 @@
         <button class="primary" :disabled="busy" @click="load">{{ session == null ? '微信登录并继续' : '重新读取' }}</button>
       </view>
       <view v-else class="card">
+        <text v-if="status.testOnly" class="tag">开发测试 · 内容待校订</text>
         <text class="title">{{ status.title }}</text>
-        <text v-if="!status.unlocked" class="body">完成路线指定的定位照片打卡后解锁。</text>
-        <template v-else>
+        <text v-if="!status.unlocked" class="body">{{ activityId === 'learning' ? '完成湘绣辨认及路线指定的打卡后解锁。' : '完成路线指定的定位照片打卡后解锁。' }}</text>
+        <template v-else-if="activityId === 'tile'">
           <text class="muted">图案示意 · 正式瓷砖纹样待校订</text>
           <TilePreview :pattern="selection.pattern" :palette="selection.palette" />
           <text v-if="status.work != null" class="body">作品已保存，可在「我的 → 文化作品」回看。</text>
@@ -24,6 +25,30 @@
             </view>
             <button class="primary" :disabled="busy" @click="save">{{ busy ? '保存中…' : '保存作品并完成任务' }}</button>
           </template>
+        </template>
+        <template v-else-if="activityId === 'quiz'">
+          <text class="body">{{ status.prompt }}</text>
+          <text class="muted">辨认图为示意，馆藏图与科普文案待校订。</text>
+          <view v-for="option in status.options" :key="option.id" class="option">
+            <view v-if="option.illustration === 'threads'" class="threads">
+              <view v-for="strand in strands" :key="strand" class="thread" :style="{ backgroundColor: strand }" />
+            </view>
+            <TilePreview v-else pattern="geometry" palette="cobalt" />
+            <button class="secondary" :disabled="busy || status.done === true" @click="answer(option.id)">{{ option.label }}</button>
+          </view>
+          <text v-if="status.done" class="body">{{ status.explanation }}</text>
+        </template>
+        <template v-else>
+          <text class="body">学习进度 {{ status.read?.length ?? 0 }} / {{ status.cards?.length ?? 0 }}</text>
+          <text class="muted">知识卡为开发稿，针法名称、图示与说明待校订。</text>
+          <view v-for="card in status.cards" :key="card.id" class="option">
+            <text class="heading">{{ card.title }}</text>
+            <button class="secondary" :disabled="busy" @click="openCard(card.id)">{{ card.hotspot }} · {{ status.read?.includes(card.id) === true ? '已学习' : '查看' }}</button>
+            <template v-if="openedCard === card.id">
+              <text class="body">{{ card.body }}</text>
+              <button v-if="status.read?.includes(card.id) !== true" class="primary" :disabled="busy" @click="markRead(card.id)">标记已读</button>
+            </template>
+          </view>
         </template>
         <text v-if="message.length > 0" class="muted">{{ message }}</text>
       </view>
@@ -40,11 +65,17 @@ import { refreshCatalog, startRoute } from '@/features/exploration/catalog.uts'
 import { decodePageId } from '@/features/navigation.uts'
 
 type Selection = { pattern: string, palette: string }
-type TileStatus = { title: string, unlocked: boolean, work: Selection | null }
+type Option = { id: string, label: string, illustration: string }
+type Card = { id: string, title: string, hotspot: string, body: string }
+type ActivityStatus = { title: string, unlocked: boolean, testOnly: boolean, work?: Selection | null, prompt?: string,
+  options?: Option[], done?: boolean, explanation?: string, cards?: Card[], read?: string[] }
 const patterns = [{ id: 'rose', name: '玫瑰' }, { id: 'sail', name: '海浪帆船' }, { id: 'geometry', name: '几何' }]
 const palettes = [{ id: 'indigo', name: '靛蓝' }, { id: 'cobalt', name: '钴蓝' }, { id: 'mist', name: '雾蓝' }]
+const strands = ['#ad4249', '#c56461', '#db8f77', '#dfad81', '#994b4b', '#81354b']
 const selection = ref<Selection>({ pattern: 'rose', palette: 'indigo' })
-const status = ref<TileStatus | null>(null)
+const status = ref<ActivityStatus | null>(null)
+const activityId = ref('')
+const openedCard = ref('')
 const busy = ref(false)
 const message = ref('微信登录后可继续探索并保存作品。')
 let routeId = ''
@@ -52,24 +83,31 @@ let runId = ''
 let draftKey = ''
 onLoad(query => {
   routeId = decodePageId(query['routeId'] ?? null) ?? ''
+  activityId.value = decodePageId(query['activityId'] ?? null) ?? ''
+  if (routeId.length === 0 || !['tile', 'quiz', 'learning'].includes(activityId.value)) {
+    message.value = '请从路线详情打开文化任务。'
+    return
+  }
   if (session.value != null) load()
 })
 async function load(): Promise<void> {
-  if (busy.value || routeId.length === 0) return
+  if (busy.value || routeId.length === 0 || !['tile', 'quiz', 'learning'].includes(activityId.value)) return
   busy.value = true
   message.value = '正在读取任务…'
   try {
     const run = await startRoute(routeId)
     runId = run.runId
-    draftKey = 'fy-tile-' + session.value!.uid + '-' + runId
-    const result = await secured<TileStatus>('tileStatus', { runId })
-    if (result.work != null) {
-      selection.value = result.work!
-      uni.removeStorageSync(draftKey)
-    } else {
-      const raw = uni.getStorageSync(draftKey) as string
-      if (raw != null && raw.length > 0) {
-        try { selection.value = JSON.parse<Selection>(raw)! } catch (_) { uni.removeStorageSync(draftKey) }
+    const result = await secured<ActivityStatus>('activityStatus', { runId, activityId: activityId.value })
+    if (activityId.value === 'tile') {
+      draftKey = 'fy-tile-' + session.value!.uid + '-' + runId
+      if (result.work != null) {
+        selection.value = result.work!
+        uni.removeStorageSync(draftKey)
+      } else {
+        const raw = uni.getStorageSync(draftKey) as string
+        if (raw != null && raw.length > 0) {
+          try { selection.value = JSON.parse<Selection>(raw)! } catch (_) { uni.removeStorageSync(draftKey) }
+        }
       }
     }
     status.value = result
@@ -81,6 +119,35 @@ async function load(): Promise<void> {
 function choose(pattern: string, palette: string): void {
   selection.value = { pattern, palette }
   uni.setStorageSync(draftKey, JSON.stringify(selection.value))
+}
+function openCard(id: string): void { openedCard.value = openedCard.value === id ? '' : id }
+async function answer(option: string): Promise<void> {
+  const current = status.value
+  if (busy.value || current == null || current.done === true) return
+  busy.value = true
+  message.value = ''
+  try {
+    const result = await secured<{ done: boolean, explanation: string }>('answerQuiz', { runId, option })
+    status.value = { ...current, done: result.done, explanation: result.explanation }
+    message.value = result.done ? '已完成辨认题。' : '再观察一下图中的线材和表面，选另一项试试。'
+    if (result.done) await refreshCatalog()
+  } catch (_) { message.value = '答案提交失败，请重试。' }
+  finally { busy.value = false }
+}
+async function markRead(cardId: string): Promise<void> {
+  const current = status.value
+  if (busy.value || current == null) return
+  busy.value = true
+  message.value = ''
+  try {
+    const read = await secured<string[]>('readCard', { runId, cardId })
+    status.value = { ...current, read }
+    if (read.length === current.cards?.length) {
+      message.value = '四张知识卡已学完。'
+      await refreshCatalog()
+    }
+  } catch (_) { message.value = '学习进度保存失败，请重试。' }
+  finally { busy.value = false }
 }
 async function save(): Promise<void> {
   const current = status.value
@@ -103,4 +170,7 @@ async function save(): Promise<void> {
 .choices { display: flex; flex-direction: row; flex-wrap: wrap; gap: 7px; }
 .choice { margin: 0; padding: 4px 10px; font-size: 14px; color: #2f5282; background: #edf3fa; }
 .selected { background: #2f5282; color: white; }
+.option { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid #eee6db; }
+.threads { align-self: center; width: 164px; padding: 18px; background: #f3e2d2; border: 3px solid #a87951; border-radius: 50%; display: flex; flex-direction: column; gap: 4px; }
+.thread { height: 7px; border-radius: 6px; transform: rotate(-12deg); }
 </style>

@@ -50,14 +50,14 @@ test('Macau route gates its private tile work on a real check-in and pins the ac
   assert.equal((await s.progress(a, { runId })).total, 2)
   const selection = { runId, pattern: 'sail', palette: 'cobalt' }
   await assert.rejects(s.saveTile(a, selection), /ACTIVITY_LOCKED/)
-  await assert.rejects(s.tileStatus(b, { runId }), /NOT_FOUND/)
+  await assert.rejects(s.activityStatus(b, { runId, activityId: 'tile' }), /NOT_FOUND/)
   const p = { runId, nodeId: 'n1', requestId: 'tile-gate' }
   await s.registerMedia(a, { ...p, id: 'media', fileID: 'private-photo' })
   await s.checkin(a, { ...p, mediaId: 'media', latitude: 22, longitude: 113 })
   await s.saveDraft(admin, { ...draft, revision: 1 })
   await s.publish(admin, { id: draft.id, revision: 2 })
   assert.deepEqual((await s.catalog())[0].activities, [])
-  assert.equal((await s.tileStatus(a, { runId })).unlocked, true)
+  assert.equal((await s.activityStatus(a, { runId, activityId: 'tile' })).unlocked, true)
   await assert.rejects(s.saveTile(a, { ...selection, pattern: 'bogus' }), /INVALID_TILE_SELECTION/)
   const work = await s.saveTile(a, selection)
   assert.deepEqual(await s.saveTile(a, { ...selection, palette: 'mist' }), work)
@@ -65,4 +65,84 @@ test('Macau route gates its private tile work on a real check-in and pins the ac
   assert.deepEqual(await s.works(a), [{ runId, routeName: draft.name, ...work }])
   assert.deepEqual(await s.works(b), [])
   assert.equal((await s.diary(a)).length, 1)
+})
+
+const hunan = { ...draft, id: 'hunan', region: '湖南' }
+const quiz = { title: '湘绣辨认', after: ['n1'], prompt: '哪幅是丝线示意？', explanation: '答案说明',
+  options: [{ id: 'a', label: '图 A', illustration: 'tile' }, { id: 'b', label: '图 B', illustration: 'threads' }], answer: 'b' }
+const cards = ['line', 'color', 'layer', 'direction'].map(id => ({ id, title: id, hotspot: '观察', body: '待校订' }))
+const scenes = [
+  { id: 'start', kind: 'choice', text: '选一项', choices: [{ label: '左', nextSceneId: 'left' }, { label: '右', nextSceneId: 'right' }] },
+  { id: 'left', kind: 'dialogue', speaker: '旁白', text: '左边', nextSceneId: 'right' },
+  { id: 'right', kind: 'ending', text: '完' }
+]
+const chapter = { act: 5, title: '湘绣相遇', after: [], start: 'start', scenes }
+const hunanCulture = { quiz, learning: { title: '针法学习', after: [], cards }, chapters: [chapter, { ...chapter, act: 6, title: '针法学习' }] }
+async function checkPoint(s, user, runId) {
+  const payload = { runId, nodeId: 'n1', requestId: 'complete-test-point' }
+  await s.registerMedia(user, { ...payload, id: 'photo', fileID: 'private-photo' })
+  await s.checkin(user, { ...payload, mediaId: 'photo', latitude: 22, longitude: 113 })
+}
+
+test('Hunan can complete quiz and all cards independently, and only its owner can read the story', async () => {
+  const { s, admin, a, b } = setup()
+  await s.saveDraft(admin, { ...hunan, culture: hunanCulture })
+  await s.publish(admin, { id: hunan.id, revision: 1 })
+  const { id: runId } = await s.start(a, { routeId: hunan.id, requestId: 'hunan-test' })
+  await assert.rejects(s.storyChapter(a, { runId, act: 5 }), /ACTIVITY_LOCKED/)
+  await assert.rejects(s.answerQuiz(a, { runId, option: 'b' }), /ACTIVITY_LOCKED/)
+  await checkPoint(s, a, runId)
+  const question = await s.activityStatus(a, { runId, activityId: 'quiz' })
+  assert.equal(question.answer, undefined)
+  assert.equal(question.explanation, '')
+  assert.equal((await s.answerQuiz(a, { runId, option: 'a' })).done, false)
+  assert.equal((await s.progress(a, { runId })).done, 1)
+  await assert.rejects(s.readCard(a, { runId, cardId: 'line' }), /ACTIVITY_LOCKED/)
+  assert.equal((await s.answerQuiz(a, { runId, option: 'b' })).done, true)
+  assert.equal((await s.storyChapter(a, { runId, act: 5 })).chapter.title, chapter.title)
+  await assert.rejects(s.storyChapter(b, { runId, act: 5 }), /NOT_FOUND/)
+  await assert.rejects(s.storyChapter(a, { runId, act: 6 }), /ACTIVITY_LOCKED/)
+  await assert.rejects(s.readCard(a, { runId, cardId: 'missing' }), /INVALID_CARD/)
+  await Promise.all(cards.map(card => s.readCard(a, { runId, cardId: card.id })))
+  assert.equal((await s.readCard(a, { runId, cardId: 'line' })).length, 4)
+  const status = await s.activityStatus(a, { runId, activityId: 'learning' })
+  assert.deepEqual(new Set(status.read), new Set(cards.map(card => card.id)))
+  const progress = await s.progress(a, { runId })
+  assert.equal(progress.done, progress.total)
+  assert.deepEqual(progress.activities, ['quiz', 'learning'])
+  assert.deepEqual((await s.storyLibrary(a)).map(entry => [entry.act, entry.unlocked]), [[5, true], [6, true]])
+  assert.deepEqual(await s.storyLibrary(b), [])
+})
+
+test('reader checkpoint validates graph paths, retries, and concurrent updates on the pinned release', async () => {
+  const { s, admin, a, b } = setup()
+  await s.saveDraft(admin, { ...hunan, culture: hunanCulture })
+  await s.publish(admin, { id: hunan.id, revision: 1 })
+  const { id: runId } = await s.start(a, { routeId: hunan.id, requestId: 'reader-test' })
+  await checkPoint(s, a, runId)
+  await s.answerQuiz(a, { runId, option: 'b' })
+  const p = { runId, act: 5, revision: 0 }
+  await assert.rejects(s.saveReading(a, { ...p, path: ['start', 'right', 'left'] }), /INVALID_READING_PATH/)
+  await assert.rejects(s.saveReading(b, { ...p, path: ['start', 'left'] }), /NOT_FOUND/)
+  const checkpoint = await s.saveReading(a, { ...p, path: ['start', 'left'] })
+  assert.deepEqual(await s.saveReading(a, { ...p, path: ['start', 'left'] }), checkpoint)
+  await assert.rejects(s.saveReading(a, { ...p, path: ['start', 'right'] }), /CONFLICT/)
+  await s.saveDraft(admin, { ...hunan, revision: 1, culture: { ...hunanCulture, chapters: [{ ...chapter, title: '新版' }] } })
+  await s.publish(admin, { id: hunan.id, revision: 2 })
+  const resumed = await s.storyChapter(a, p)
+  assert.equal(resumed.chapter.title, chapter.title)
+  assert.deepEqual(resumed.checkpoint, checkpoint)
+  assert.deepEqual(await s.saveReading(a, { ...p, revision: checkpoint.revision, path: ['start'] }), { path: ['start'], revision: 2 })
+})
+
+test('content validation rejects cycles, unreachable scenes, missing targets and unknown assets', async () => {
+  const { s, admin } = setup()
+  const left = scenes[1]
+  for (const nextSceneId of ['start', 'missing']) {
+    await assert.rejects(s.saveDraft(admin, { ...hunan, culture: { quiz, chapters: [{ ...chapter, scenes: [scenes[0], { ...left, nextSceneId }, scenes[2]] }] } }), /INVALID_SCENE_GRAPH/)
+  }
+  const withExtra = [...scenes, { id: 'hidden', kind: 'ending', text: '隐藏' }]
+  await assert.rejects(s.saveDraft(admin, { ...hunan, culture: { quiz, chapters: [{ ...chapter, scenes: withExtra }] } }), /INVALID_SCENE_GRAPH/)
+  const withUnknownAsset = [{ ...scenes[0], asset: 'missing' }, ...scenes.slice(1)]
+  await assert.rejects(s.saveDraft(admin, { ...hunan, culture: { quiz, chapters: [{ ...chapter, scenes: withUnknownAsset }] } }), /INVALID_SCENE/)
 })

@@ -1,0 +1,33 @@
+export type Choice = { label: string, nextSceneId: string }
+export type Scene = { id: string, kind: string, text: string, asset?: string, speaker?: string, nextSceneId?: string, choices?: Choice[] }
+export type Chapter = { act: number, title: string, start: string, scenes: Scene[] }
+export type Checkpoint = { path: string[], revision: number }
+export type ChapterRead = { chapter: Chapter, checkpoint: Checkpoint, testOnly: boolean }
+
+export const openingStorageKey = 'fy-story-opening-v1'
+export const opening: Chapter = {
+  act: 1,
+  title: '触碰海丝地图',
+  start: 'map',
+  scenes: [
+    { id: 'map', kind: 'dialogue', asset: 'aomiao', speaker: '澳喵', text: '这张海丝地图上，有一块蓝白瓷砖和一缕红色绣线。你想先看看哪一样？', nextSceneId: 'choose' },
+    { id: 'choose', kind: 'choice', text: '指尖滑过地图，两样东西同时亮了起来。', choices: [
+      { label: '触碰蓝白瓷砖', nextSceneId: 'tile' },
+      { label: '拾起红色绣线', nextSceneId: 'thread' }
+    ] },
+    { id: 'tile', kind: 'dialogue', speaker: '旁白', text: '你在蓝纹里看见一片帆影。浪声由远而近，仿佛有一艘船正向你驶来。', nextSceneId: 'depart' },
+    { id: 'thread', kind: 'dialogue', speaker: '旁白', text: '红线在指尖绕了一圈。顺着它看过去，你听见针尖穿过布面的轻响。', nextSceneId: 'depart' },
+    { id: 'depart', kind: 'ending', asset: 'aomiao', text: '地图上的两束光汇到一起。澳喵收好地图，邀请你选一条本地路线继续探索。' }
+  ]
+}
+
+export function savedOpeningPath(): string[] {
+  const raw = uni.getStorageSync(openingStorageKey) as string
+  if (raw != null && raw.length > 0) {
+    try {
+      const path = JSON.parse<string[]>(raw)
+      if (path != null && path.length > 0 && path[0] === opening.start && path.every(id => opening.scenes.some(scene => scene.id === id))) return path
+    } catch (_) { uni.removeStorageSync(openingStorageKey) }
+  }
+  return [opening.start]
+}

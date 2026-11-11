@@ -2,19 +2,22 @@
   <view class="screen">
     <AppPageHeader title="剧情" :show-back="true" />
     <view class="content">
-      <DemoNotice :pending="true" description="本页只检查入口和返回。章节阅读、文化任务和剧情解锁在阶段三实现。" />
-
       <view class="card green">
         <text class="title">海丝瓷绣·一念归期</text>
-        <text class="body">蓝白瓷砖与湘绣串起两地的故事。澳门探索者完成瓷砖配色，湖南探索者辨认湘绣针法并完成学习卡。</text>
+        <text class="body">从海丝地图出发，沿澳门的蓝白瓷砖或湖南的湘绣继续故事。</text>
+        <button class="primary" @click="openOpening">{{ openingStarted ? '继续开场预览' : '阅读开场预览' }}</button>
       </view>
-      <view class="card"><text class="heading">剧情介绍</text><text class="body">两地探索者分别推进本地任务，完成后共同解锁结尾。</text><text class="muted">正式章节、资源和解锁进度在剧情阶段接通。</text></view>
       <view class="card">
         <text class="heading">章节目录</text>
-        <view v-for="(chapter, index) in chapters" :key="chapter" class="row spread divider">
-          <text class="body">{{ chapter }}</text>
-          <text class="muted">{{ index === 6 ? '两地合作解锁' : (index === 0 ? '公共开场' : '随路线解锁') }}</text>
+        <view v-for="(chapter, index) in chapters" :key="chapter.title" class="row spread divider menu-row" @click="openChapter(index + 1)">
+          <view class="stack">
+            <text class="body">{{ '第 ' + (index + 1) + ' 幕 · ' + (chapterFor(index + 1)?.title ?? chapter.title) }}</text>
+            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapter.gate }}</text>
+          </view>
+          <text class="muted">{{ chapterLabel(index + 1) }}</text>
         </view>
+        <text v-if="message.length > 0" class="muted">{{ message }}</text>
+        <button v-if="loadFailed" class="secondary" @click="load">重新读取解锁进度</button>
       </view>
       <button class="primary" @click="openPage('/packages/routes/routes/routes')">查看两地路线</button>
     </view>
@@ -23,10 +26,60 @@
 
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import DemoNotice from '@/components/DemoNotice.uvue'
-
-import { openPage } from '@/features/navigation.uts'
-const chapters = ['触碰海丝地图', '海上风暴', '女儿与瓷砖', '澳门靠岸', '湘绣相遇', '针法学习', '共同终章']
+import { ref } from 'vue'
+import { secured, session } from '@/features/api.uts'
+import { decodePageId, openPage } from '@/features/navigation.uts'
+import { savedOpeningPath } from '../story-content.uts'
+type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean }
+const entries = ref<Entry[]>([])
+const openingStarted = ref(false)
+const loadFailed = ref(false)
+const message = ref('')
+let preferredRoute = ''
+const chapters = [
+  { title: '触碰海丝地图', gate: '' },
+  { title: '海上风暴', gate: '澳门 · 完成路线指定打卡' },
+  { title: '女儿与瓷砖', gate: '澳门 · 保存瓷砖配色作品' },
+  { title: '澳门靠岸', gate: '澳门 · 完成路线指定后续打卡' },
+  { title: '湘绣相遇', gate: '湖南 · 完成湘绣辨认' },
+  { title: '针法学习', gate: '湖南 · 学完四张知识卡' }
+]
+onLoad(query => { preferredRoute = decodePageId(query['routeId'] ?? null) ?? '' })
+onShow(() => {
+  openingStarted.value = savedOpeningPath().length > 1
+  load()
+})
+async function load(): Promise<void> {
+  loadFailed.value = false
+  message.value = ''
+  if (session.value == null) { entries.value = []; return }
+  try {
+    entries.value = await secured<Entry[]>('storyLibrary')
+  } catch (_) {
+    entries.value = []
+    loadFailed.value = true
+    message.value = '解锁进度暂不可用。'
+  }
+}
+function chapterFor(act: number): Entry | null {
+  const candidates = entries.value.filter(entry => entry.act === act)
+  return candidates.find(entry => entry.unlocked && entry.routeId === preferredRoute) ??
+    candidates.find(entry => entry.unlocked) ?? candidates.find(entry => entry.routeId === preferredRoute) ?? candidates[0] ?? null
+}
+function chapterLabel(act: number): string {
+  if (act === 1) return '游客可读 ›'
+  const entry = chapterFor(act)
+  if (entry?.unlocked === true) return entry.started ? '继续阅读 ›' : '阅读 ›'
+  return loadFailed.value ? '待重试' : '随路线解锁'
+}
+function openOpening(): void { openPage('/packages/story/reader/reader?act=1') }
+function openChapter(act: number): void {
+  if (act === 1) { openOpening(); return }
+  const entry = chapterFor(act)
+  if (entry?.unlocked === true) {
+    openPage('/packages/story/reader/reader?act=' + act + '&runId=' + encodeURIComponent(entry.runId))
+  }
+}
 </script>
 
 <style scoped>

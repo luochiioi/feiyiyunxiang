@@ -52,6 +52,9 @@
           "path": "story/story"
         },
         {
+          "path": "reader/reader"
+        },
+        {
           "path": "activity/activity"
         },
         {
