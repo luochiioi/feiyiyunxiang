@@ -1,11 +1,13 @@
 const crypto=require('node:crypto')
 const {createService,key}=require('./service')
+const {createPartnershipService}=require('./partnership-service')
 const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
 const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCredentials } = require('./admin-session')
 const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
-  'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading'])
+  'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
+  'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends'])
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED'])
 exports.main=async(event,context)=>{
   try {
@@ -17,6 +19,7 @@ exports.main=async(event,context)=>{
       return require('uni-id-common').createInstance({ context, config: cfg.identity })
     }
     const service=createService({repo,allowTestContent:cfg.environment==='development'})
+    const partners=createPartnershipService({repo})
     const action=event.action, p=event.payload??{}
     let user=null
     if (adminActions.has(action)) {
@@ -89,7 +92,7 @@ exports.main=async(event,context)=>{
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
     } else {
       if(!serviceActions.has(action))throw new Error('NOT_FOUND')
-      data=await service[action](user,p)
+      data=await (partners[action] ?? service[action])(user,p)
     }
     return {code:'OK',data}
   } catch(e) {
