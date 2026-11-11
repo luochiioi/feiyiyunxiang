@@ -11,7 +11,8 @@
           <template v-if="record != null">
             <text class="muted">{{ new Date(record.createdAt).toLocaleString() }}</text>
             <image v-if="recordPhoto.length > 0" :src="recordPhoto" mode="aspectFit" class="saved-photo" />
-            <button v-if="photoFailed" class="secondary" :disabled="busy" @click="loadRecordPhoto">重试读取照片</button>
+            <text v-if="photoUnavailable" class="muted">这次打卡的原照片未保存到云端。</text>
+            <button v-else-if="photoFailed" class="secondary" :disabled="busy" @click="loadRecordPhoto">重试读取照片</button>
             <text v-if="record.note.length > 0" class="body">{{ record.note }}</text>
           </template>
           <button v-else class="secondary" :disabled="busy" @click="prepare">查看我的打卡</button>
@@ -58,6 +59,7 @@ const node = computed(() => findNode(id.value))
 const loading = ref(false)
 const ready = ref(false), busy = ref(false), completed = ref(false)
 const record = ref<NodeRecord | null>(null), recordPhoto = ref(''), photoFailed = ref(false)
+const photoUnavailable = ref(false)
 const photo = ref(''), note = ref(''), status = ref('')
 const locationStatus = ref(''), locationPermissionDenied = ref(false), locationRetry = ref(false)
 let draft: Draft = { requestId: '', base64: '', mime: '', note: '', mediaId: '' }
@@ -125,10 +127,14 @@ async function loadRecordPhoto(): Promise<void> {
   const owner = session.value?.uid
   if (item == null || owner == null) return
   photoFailed.value = false
+  photoUnavailable.value = false
   try {
     const result = await secured<{ src: string }>('readMedia', { id: item.mediaId })
     if (session.value?.uid === owner) recordPhoto.value = result.src
-  } catch (_) { photoFailed.value = true }
+  } catch (error) {
+    photoUnavailable.value = (error as Error | null)?.message === 'PHOTO_UNAVAILABLE'
+    photoFailed.value = !photoUnavailable.value
+  }
 }
 function choose(): void {
   uni.chooseImage({ count: 1, sizeType: ['compressed'], success: result => {
@@ -243,6 +249,10 @@ async function submit(): Promise<void> {
       status.value = '打卡未提交，草稿已保留。'
     } else if (code === 'CONFIG_REQUIRED' && stage === 'photo') {
       status.value = '私密照片存储尚未启用，请联系管理员。照片和备注已保留。'
+    } else if (code === 'PHOTO_UNAVAILABLE' && stage === 'checkin') {
+      draft.mediaId = ''
+      saveDraft()
+      status.value = '照片未保存到云端，请重新提交。草稿已保留。'
     } else if (code === 'INVALID_IMAGE') status.value = '照片格式不支持，请重新选择 1 MB 以内的 JPG 或 PNG。'
     else if (code === 'OUTSIDE_RANGE') status.value = '服务端确认当前位置超出打卡范围。请到达点位后重试，草稿已保留。'
     else if (code === 'AUTH_REQUIRED' || code === 'LOGIN_FAILED') status.value = '登录已失效，请重新登录后重试，草稿已保留。'

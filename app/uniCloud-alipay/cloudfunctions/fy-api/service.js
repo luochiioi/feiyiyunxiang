@@ -95,6 +95,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     async mediaBinding(u,p) { return binding(repo,u,p) },
     // Only called with server-generated metadata after authenticated byte upload.
     async registerMedia(u,p) {
+      if (!text(p.fileID, 2048)) fail('MEDIA_UPLOAD_FAILED')
       await binding(repo,u,p)
       await repo.put('fy-media',p.id,{uid:u.uid,runId:p.runId,nodeId:p.nodeId,requestId:p.requestId,fileID:p.fileID,mime:p.mime,createdAt:now(),used:false})
       return {id:p.id}
@@ -103,6 +104,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       if(!id(p.id)) fail('NOT_FOUND')
       const m=await repo.get('fy-media',p.id)
       if (!m||m.uid!==u?.uid) fail('NOT_FOUND')
+      if (!text(m.fileID, 2048)) fail('PHOTO_UNAVAILABLE')
       return m
     },
     async checkin(u,p) {
@@ -119,6 +121,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         if(typeof p.note!=='undefined'&&(typeof p.note!=='string'||p.note.length>1000)) fail('INVALID_NOTE')
         const media= id(p.mediaId) ? await db.get('fy-media',p.mediaId) : null
         if (!media||media.uid!==u.uid||media.runId!==p.runId||media.nodeId!==p.nodeId||media.requestId!==p.requestId||media.used) fail('MEDIA_MISMATCH')
+        if (!text(media.fileID, 2048)) fail('PHOTO_UNAVAILABLE')
         const record={uid:u.uid,runId:p.runId,routeId:run.routeId,version:run.version,nodeId:p.nodeId,title:node.title,mediaId:p.mediaId,note:p.note??'',requestId:p.requestId,createdAt:now()}
         await db.put('fy-checkins',cid,record)
         await db.put('fy-requests',requestKey,{runId:p.runId,nodeId:p.nodeId,checkinId:cid})

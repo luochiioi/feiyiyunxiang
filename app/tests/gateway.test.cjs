@@ -3,13 +3,13 @@ const assert=require('node:assert/strict')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{createRequire}=require('node:module')
 const entry=path.resolve(__dirname,'../uniCloud-alipay/cloudfunctions/fy-api/index.js')
 const nativeRequire=createRequire(entry)
-function gateway({configured=true,validCode=true,privateStorageVerified=false}={}) {
+function gateway({configured=true,validCode=true,privateStorageVerified=false,storage=null}={}) {
  const rows=new Map()
  const db={collection(c){return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([k,v])=>({...v,_id:k.slice(c.length)}))}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
  let exchanges=0,uploads=0
- const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:40029}}}},async uploadFile(){uploads++;throw new Error('unexpected upload')}}
+ const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:40029}}}},async uploadFile(args){uploads++;assert.ok(storage,'unexpected upload');return storage.uploadFile(args)},async downloadFile(args){assert.ok(storage,'unexpected download');return storage.downloadFile(args)}}
  const identity={async checkToken(token){return token==='fixture-token'?{uid:'member',errCode:0}:{errCode:'expired'}},async createToken({uid}){return {errCode:0,token:'issued-token',tokenExpired:1000,uid}}}
- const sandbox={exports:{},uniCloud:cloud,Buffer,__dirname:path.dirname(entry),require(name){if(name==='uni-config-center')return ()=>({config:()=>configured?{wechatAppId:'public-appid',wechatSecret:'server-fixture-secret',identity:{tokenSecret:'fixture-token-secret'},environment:'development',privateStorageVerified}:null});if(name==='uni-id-common')return {createInstance:()=>identity};return nativeRequire(name)}}
+ const sandbox={exports:{},uniCloud:cloud,Buffer,__dirname:path.dirname(entry),require(name){if(name==='uni-config-center')return ()=>({config:()=>configured?{wechatAppId:'public-appid',wechatSecret:'server-fixture-secret',identity:{tokenSecret:'fixture-token-secret'},environment:'development',privateStorageVerified,mediaEncryptionKey:Buffer.alloc(32,7).toString('base64')}:null});if(name==='uni-id-common')return {createInstance:()=>identity};return nativeRequire(name)}}
  vm.runInNewContext(fs.readFileSync(entry,'utf8'),sandbox,{filename:entry})
  return {main:(event)=>sandbox.exports.main(event,{CLIENTIP:'fixture-ip',APPID:'fixture-app'}),rows,counts:()=>({exchanges,uploads})}
 }
@@ -17,6 +17,43 @@ test('gateway exchanges WeChat code on server and never returns session_key or s
 test('gateway rejects invalid code and missing configuration without pretending login',async()=>{assert.equal((await gateway({validCode:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'LOGIN_FAILED');assert.equal((await gateway({configured:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'CONFIG_REQUIRED');})
 test('gateway ignores submitted uid/admin and denies ordinary member operations',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});for(const action of ['drafts','saveDraft','publish'])assert.equal((await g.main({action,token:'fixture-token',uid:'administrator',admin:true,payload:{}})).code,'AUTH_REQUIRED');assert.equal((await g.main({action:'diary',token:'expired',uid:'member'})).code,'AUTH_REQUIRED');})
 test('unverified private storage blocks all uploads before SDK is called',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});assert.equal((await g.main({action:'uploadMedia',token:'fixture-token',payload:{base64:'fixture'}})).code,'CONFIG_REQUIRED');assert.equal(g.counts().uploads,0);})
+
+test('storage errors without a file ID preserve retry and never create a broken photo record', async () => {
+  const fileID = 'cloud://fixture/fy-private/photo.bin'
+  let failUpload = true
+  let ciphertext = null
+  const storage = {
+    async uploadFile({ fileContent }) {
+      if (failUpload) return { errCode: 'STORAGE_DENIED' }
+      ciphertext = fileContent
+      return { fileID }
+    },
+    async downloadFile(options) {
+      assert.equal(options.fileID, fileID)
+      return { fileContent: ciphertext }
+    }
+  }
+  const g = gateway({ privateStorageVerified: true, storage })
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: [] })
+  g.rows.set('fy-runsfixture-run', { uid: 'member', snapshot: { nodes: [{ id: 'n1' }] } })
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aiekAAAAASUVORK5CYII='
+  const call = (action, payload) => g.main({ action, token: 'fixture-token', payload })
+  const payload = { runId: 'fixture-run', nodeId: 'n1', requestId: 'fixture-request', base64: png }
+  assert.equal((await call('uploadMedia', payload)).code, 'MEDIA_UPLOAD_FAILED')
+  assert.equal([...g.rows.keys()].some(key => key.startsWith('fy-media')), false)
+
+  failUpload = false
+  const uploaded = await call('uploadMedia', payload)
+  assert.equal(uploaded.code, 'OK')
+  assert.equal(uploaded.data.fileID, undefined)
+  const read = await call('readMedia', { id: uploaded.data.id })
+  assert.equal(read.data.src, 'data:image/png;base64,' + png)
+
+  g.rows.set('fy-medialegacy', { uid: 'member', used: true })
+  assert.equal((await call('readMedia', { id: 'legacy' })).code, 'PHOTO_UNAVAILABLE')
+  g.rows.set('fy-medialegacy', { uid: 'someone-else', used: true })
+  assert.equal((await call('readMedia', { id: 'legacy' })).code, 'NOT_FOUND')
+})
 
 test('admin credentials and sessions are separate from WeChat users', async () => {
   const g = gateway()

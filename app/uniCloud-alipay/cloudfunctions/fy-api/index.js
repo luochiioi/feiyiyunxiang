@@ -4,7 +4,7 @@ const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
 const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCredentials } = require('./admin-session')
 const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -72,7 +72,10 @@ exports.main=async(event,context)=>{
       const mediaKey=Buffer.from(cfg.mediaEncryptionKey,'base64')
       if(mediaKey.length!==32)throw new Error('CONFIG_REQUIRED')
       const mediaId=crypto.randomBytes(24).toString('hex')
-      const {fileID}=await uniCloud.uploadFile({cloudPath:'fy-private/'+user.uid+'/'+mediaId+'.bin',fileContent:encrypt(bytes,mediaKey)})
+      const upload = await uniCloud.uploadFile({ cloudPath: 'fy-private/' + user.uid + '/' + mediaId + '.bin', fileContent: encrypt(bytes, mediaKey) })
+      // The storage SDK can return an error result without rejecting the promise.
+      const fileID = upload?.fileID
+      if (typeof fileID !== 'string' || !fileID.trim()) throw new Error('MEDIA_UPLOAD_FAILED')
       try {data=await service.registerMedia(user,{...p,id:mediaId,fileID,mime})}
       catch(e){await uniCloud.deleteFile({fileList:[fileID]}).catch(()=>{});throw e}
     } else if(action==='readMedia') {
@@ -80,6 +83,7 @@ exports.main=async(event,context)=>{
       const mediaKey=Buffer.from(cfg.mediaEncryptionKey??'','base64')
       if(mediaKey.length!==32)throw new Error('CONFIG_REQUIRED')
       const {fileContent}=await uniCloud.downloadFile({fileID:media.fileID})
+      if (!Buffer.isBuffer(fileContent) || fileContent.length < 28) throw new Error('SERVICE_UNAVAILABLE')
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
     } else {
       const methods={saveDraft:'saveDraft',publish:'publish',drafts:'drafts',start:'start',checkin:'checkin',progress:'progress',routeProgress:'routeProgress',diary:'diary',nodeRecord:'nodeRecord'}
