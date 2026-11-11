@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const fail = code => { throw new Error(code) }
+const { pkMethods } = require('./pk-service')
 const HOUR = 3600 * 1000
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
@@ -138,7 +139,7 @@ function createPartnershipService({ repo, now = Date.now }) {
         const seats = { ...plan, macau: mySeat === 'macau' ? u.uid : target.uid, hunan: mySeat === 'hunan' ? u.uid : target.uid }
         const teamId = key('team', u.uid, p.requestId)
         await db.put('fy-teams', teamId, {
-          members: pair, seats, routeId: p.routeId, version: route.version, status: 'invited',
+          members: pair, a: pair[0], b: pair[1], seats, routeId: p.routeId, version: route.version, status: 'invited',
           invitedBy: u.uid, invitedAt: now(), expiresAt: now() + 24 * HOUR
         })
         await db.put('fy-requests', requestKey, { teamId })
@@ -232,13 +233,14 @@ function createPartnershipService({ repo, now = Date.now }) {
         await db.put('fy-teams', p.teamId, { ...team, status: 'done', completedAt: now() })
         return { id: p.teamId, alreadySettled: false }
       })
-    }
+    },
+    ...pkMethods({ repo, now, key, fail, member, codeOf, requestOf })
   }
 }
 
 async function activeTeam(db, uid, except) {
-  const rows = await db.list('fy-teams', {})
-  return rows.find(row => (row.status === 'invited' || row.status === 'active') && row.members.includes(uid) && row._id !== except) ?? null
+  const rows = [...await db.list('fy-teams', { a: uid }), ...await db.list('fy-teams', { b: uid })]
+  return rows.find(row => (row.status === 'invited' || row.status === 'active') && row._id !== except) ?? null
 }
 
 async function loadTeam(db, teamId, uid) {

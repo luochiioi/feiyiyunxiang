@@ -168,3 +168,68 @@ test('coop invite only reaches friends and expires after 24 hours', async () => 
   await assert.rejects(f.p.respondCoop(f.b, { teamId: team.id, accept: true }), /EXPIRED/)
   assert.equal((await f.repo.list('fy-runs', { purpose: 'coop' })).length, 0)
 })
+
+async function pkStarted() {
+  const f = await ready()
+  f.service = createService({ repo: f.repo, now: () => f.now(), allowTestContent: true })
+  const admin = { uid: 'admin', admin: true }
+  await f.service.saveDraft(admin, coopDraft)
+  await f.service.publish(admin, { id: 'combined', revision: 1 })
+  await f.p.requestFriend(f.a, { code: f.codes.b, requestId: 'fr-pk' })
+  await f.p.respondFriend(f.b, { requestId: 'fr-pk', accept: true })
+  f.match = await f.p.invitePk(f.a, { code: f.codes.b, routeId: 'combined', requestId: 'pk-1' })
+  await f.p.respondPk(f.b, { matchId: f.match.id, accept: true })
+  await f.p.readyPk(f.a, { matchId: f.match.id })
+  await f.p.readyPk(f.b, { matchId: f.match.id })
+  f.startedAt = (await f.repo.get('fy-matches', f.match.id)).startedAt
+  return f
+}
+
+async function completeAllNodes(f, user) {
+  const match = await f.repo.get('fy-matches', f.match.id)
+  const runId = match.runs[user.uid]
+  const run = await f.repo.get('fy-runs', runId)
+  for (const node of run.snapshot.nodes) {
+    await f.repo.put('fy-checkins', key(runId, node.id), { uid: user.uid, runId, nodeId: node.id, createdAt: f.now() })
+  }
+}
+
+test('concurrent first submissions settle the match exactly once', async () => {
+  const f = await pkStarted()
+  await completeAllNodes(f, f.a)
+  await completeAllNodes(f, f.b)
+  const results = await Promise.all([f.p.settlePk(f.a, { matchId: f.match.id }), f.p.settlePk(f.b, { matchId: f.match.id })])
+  const winners = results.map(r => r.winner).filter(Boolean)
+  assert.equal(new Set(winners).size, 1)
+  const loser = winners[0] === f.a.uid ? f.b : f.a
+  assert.equal((await f.p.assignment(loser)).status, 'pending')
+  assert.equal((await f.repo.list('fy-assignments', {})).length, 1)
+})
+
+test('an unfinished match expires after 24 hours without an assignment', async () => {
+  const f = await pkStarted()
+  f.advance(24 * 3600 * 1000 + 1)
+  const r = await f.p.settlePk(f.a, { matchId: f.match.id })
+  assert.equal(r.expired, true)
+  assert.equal(await f.p.assignment(f.b), null)
+  assert.equal((await f.repo.list('fy-audit', {})).filter(row => row.action === 'pk-expire').length, 1)
+})
+
+test('a failure task locks the next match until rejected after 72 hours', async () => {
+  const f = await pkStarted()
+  await f.p.forfeitPk(f.a, { matchId: f.match.id })
+  const task = await f.p.assignment(f.a)
+  await assert.rejects(f.p.invitePk(f.a, { code: f.codes.b, routeId: 'combined', requestId: 'pk-2' }), /ASSIGNMENT_PENDING/)
+  f.advance(72 * 3600 * 1000 - 1)
+  await assert.rejects(f.p.rejectAssignment(f.a, { assignmentId: task.id }), /TOO_EARLY/)
+  f.advance(1)
+  await f.p.rejectAssignment(f.a, { assignmentId: task.id })
+  assert.equal(await f.p.assignment(f.a), null)
+})
+
+test('an admin cancellation ends the match with no failure task', async () => {
+  const f = await pkStarted()
+  await f.p.cancelPk({ uid: 'admin', admin: true }, { matchId: f.match.id, reason: '路线关闭' })
+  assert.equal(await f.p.assignment(f.a), null)
+  assert.equal(await f.p.assignment(f.b), null)
+})
