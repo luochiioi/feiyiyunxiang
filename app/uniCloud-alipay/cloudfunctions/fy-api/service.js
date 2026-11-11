@@ -55,6 +55,11 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
   return {
     ...createCultureService({ repo, owned, key, now }),
     async drafts(u) { adminOnly(u); return repo.list('fy-drafts',{}) },
+    async previewDraft(u, p) {
+      adminOnly(u)
+      const value = validateDraft(p)
+      return { ...value, releaseAllowed: value.testOnly && allowTestContent }
+    },
     async saveDraft(u,p) {
       adminOnly(u); const value=validateDraft(p)
       return repo.tx(async db=>{
@@ -68,12 +73,13 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       adminOnly(u)
       if (!id(p.id)||!Number.isInteger(p.revision)) fail('INVALID_REQUEST')
       return repo.tx(async db=>{
+        const version=key(p.id,p.revision)
+        if (await db.get('fy-versions', version)) return { version }
         const draft=await db.get('fy-drafts',p.id)
         if (!draft||draft.revision!==p.revision) fail('CONFLICT')
         validateDraft(draft)
         if (draft.testOnly&&!allowTestContent) fail('TEST_CONTENT_DISABLED')
         if (!draft.testOnly && draft.contentVerified!==true) fail('CONTENT_REVIEW_REQUIRED')
-        const version=key(p.id,p.revision)
         await db.put('fy-versions',version,{...draft,publishedAt:now(),publishedBy:u.uid})
         await db.put('fy-routes',p.id,{version,enabled:true,testOnly:draft.testOnly})
         await db.put('fy-audit',key(p.id,p.revision),{action:'publish',routeId:p.id,version,uid:u.uid,at:now()})

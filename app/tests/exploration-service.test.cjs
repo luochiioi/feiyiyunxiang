@@ -1,5 +1,8 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { stripTypeScriptTypes } = require('node:module')
 const { createService } = require('../uniCloud-alipay/cloudfunctions/fy-api/service')
 
 function setup() {
@@ -145,4 +148,32 @@ test('content validation rejects cycles, unreachable scenes, missing targets and
   await assert.rejects(s.saveDraft(admin, { ...hunan, culture: { quiz, chapters: [{ ...chapter, scenes: withExtra }] } }), /INVALID_SCENE_GRAPH/)
   const withUnknownAsset = [{ ...scenes[0], asset: 'missing' }, ...scenes.slice(1)]
   await assert.rejects(s.saveDraft(admin, { ...hunan, culture: { quiz, chapters: [{ ...chapter, scenes: withUnknownAsset }] } }), /INVALID_SCENE/)
+})
+
+test('the bundled route templates preview without writes and publish only their selected revisions', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../admin/features/stage-three-content.uts'), 'utf8')
+  const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64')
+  const { macauContent, hunanContent } = await import(moduleUrl)
+  const { s, repo, admin, a } = setup()
+  const macau = { ...draft, nodes: [...draft.nodes, { ...draft.nodes[0], id: 'n2' }], culture: macauContent('n1', 'n2') }
+  const expected = [2, 3, 4]
+  assert.deepEqual((await s.previewDraft(admin, macau)).culture.chapters.map(chapter => chapter.act), expected)
+  assert.deepEqual((await s.previewDraft(admin, { ...hunan, culture: hunanContent('n1') })).culture.chapters.map(chapter => chapter.act), [5, 6])
+  await assert.rejects(s.previewDraft(a, macau), /FORBIDDEN/)
+  assert.deepEqual(await s.drafts(admin), [])
+  assert.deepEqual(await s.catalog(), [])
+  await s.saveDraft(admin, macau)
+  const v1 = await s.publish(admin, { id: macau.id, revision: 1 })
+  const savedVersion = await repo.get('fy-versions', v1.version)
+  await s.saveDraft(admin, { ...macau, revision: 1, name: '修订二' })
+  await assert.rejects(s.publish(admin, { id: macau.id, revision: 3 }), /CONFLICT/)
+  const v2 = await s.publish(admin, { id: macau.id, revision: 2 })
+  assert.notEqual(v1.version, v2.version)
+  assert.deepEqual(await s.publish(admin, { id: macau.id, revision: 1 }), v1)
+  assert.deepEqual(await repo.get('fy-versions', v1.version), savedVersion)
+  assert.equal((await s.catalog())[0].version, v2.version)
+  const production = createService({ repo, allowTestContent: false })
+  assert.equal((await production.previewDraft(admin, macau)).releaseAllowed, false)
+  await production.saveDraft(admin, { ...macau, revision: 2 })
+  await assert.rejects(production.publish(admin, { id: macau.id, revision: 3 }), /TEST_CONTENT_DISABLED/)
 })

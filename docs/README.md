@@ -1,7 +1,9 @@
 # 非遗云想设计资料
 
-当前进度为阶段二收尾，可开始阶段三开发。已用真机验证微信登录、账号隔离、到点打卡和进度，后台独立登录已联调。旧照片缺失的处理及下一轮真机复测见阶段二部署清单。
+阶段三代码在 `codex/stage-3` 本地开发。六幕剧情、文化任务和后台版本发布的验证范围与联调顺序见阶段三验收清单。已部署环境仍使用阶段二版本。
 
+- [阶段三实施计划](superpowers/plans/2026-11-11-stage-3-story-culture.md)
+- [阶段三验收清单](validation/stage-3-acceptance.md)
 - [阶段二实施计划](superpowers/plans/2026-11-11-stage-2-exploration.md)
 - [阶段二本地交付与验证](validation/stage-2-local.md)：已实现内容、26 项测试、构建、阶段一补充复核及实际限制。
 - [阶段二部署清单](validation/stage-2-deployment.md)：开发部署结果、两端账号隔离、剩余配置和联调顺序。

@@ -2,6 +2,7 @@ const tilePatterns = ['rose', 'sail', 'geometry']
 const tilePalettes = ['indigo', 'cobalt', 'mist']
 const activityIds = ['tile', 'quiz', 'learning']
 const illustrations = ['threads', 'tile']
+const cardIllustrations = ['direction', 'length', 'color', 'layers']
 
 function requireValue(ok, code) {
   if (!ok) throw new Error(code)
@@ -45,8 +46,10 @@ function validateCulture(value, nodeIds) {
     const header = activityHeader(learning, nodeIds, 'INVALID_LEARNING', 0)
     requireValue(result.quiz && Array.isArray(learning.cards) && learning.cards.length === 4, 'INVALID_LEARNING')
     const cards = learning.cards.map(card => {
-      requireValue(isId(card?.id) && isText(card.title, 80) && isText(card.hotspot, 80) && isText(card.body, 500), 'INVALID_CARD')
-      return { id: card.id, title: card.title, hotspot: card.hotspot, body: card.body }
+      requireValue(isId(card?.id) && isText(card.title, 80) && isText(card.hotspot, 80) && isText(card.body, 500) &&
+        (card.illustration == null || cardIllustrations.includes(card.illustration)), 'INVALID_CARD')
+      const illustration = card.illustration == null ? {} : { illustration: card.illustration }
+      return { id: card.id, title: card.title, hotspot: card.hotspot, body: card.body, ...illustration }
     })
     requireValue(distinct(cards.map(card => card.id)), 'INVALID_CARD')
     result.learning = { ...header, cards }

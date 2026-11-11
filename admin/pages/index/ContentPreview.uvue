@@ -1,0 +1,94 @@
+<template>
+  <view class="preview">
+    <text class="heading">内容预览 · {{ value.name }}</text>
+    <text>{{ value.region }} · {{ value.testOnly ? '开发测试' : '正式内容' }}</text>
+    <text v-if="!value.releaseAllowed">当前内容需要满足环境与内容审核条件后才能发布。</text>
+    <view v-if="value.culture?.tile != null" class="section">
+      <text class="heading">{{ value.culture?.tile?.title }}</text>
+      <text>{{ gateLabel(value.culture?.tile?.after ?? []) }}</text>
+      <text>玫瑰、海浪帆船、几何 · 靛蓝、钴蓝、雾蓝</text>
+    </view>
+    <view v-if="value.culture?.quiz != null" class="section">
+      <text class="heading">{{ value.culture?.quiz?.title }}</text>
+      <text>{{ gateLabel(value.culture?.quiz?.after ?? []) }}</text>
+      <text>{{ value.culture?.quiz?.prompt }}</text>
+      <text v-for="option in value.culture?.quiz?.options" :key="option.id">
+        {{ option.label }} · {{ option.illustration === 'threads' ? '绣线示意' : '瓷砖示意' }}{{ option.id === value.culture?.quiz?.answer ? ' · 正确项' : '' }}
+      </text>
+      <text>{{ value.culture?.quiz?.explanation }}</text>
+    </view>
+    <view v-if="value.culture?.learning != null" class="section">
+      <text class="heading">{{ value.culture?.learning?.title }}</text>
+      <text>先完成辨认题{{ value.culture?.learning?.after?.length ? '及' + gateLabel(value.culture?.learning?.after ?? []) : '' }}</text>
+      <view v-for="card in value.culture?.learning?.cards" :key="card.id" class="section">
+        <text class="heading">{{ card.title }} · {{ card.hotspot }}</text>
+        <text>{{ card.body }}</text>
+      </view>
+    </view>
+    <view v-if="chapters.length > 0" class="section">
+      <text class="heading">章节试读</text>
+      <view class="actions">
+        <button v-for="chapter in chapters" :key="chapter.act" @click="selectAct(chapter.act)">{{ '第 ' + chapter.act + ' 幕 · ' + chapter.title }}</button>
+      </view>
+      <template v-if="currentChapter != null && scene != null">
+        <text>{{ unlockLabel }}</text>
+        <view class="stage">
+          <image v-if="scene?.asset === 'aomiao'" class="mascot" src="/static/aomiao-wave.png" mode="aspectFit" />
+          <text class="note">场景图待补</text>
+          <text v-if="scene?.speaker != null" class="speaker">{{ scene?.speaker }}</text>
+          <text>{{ scene?.text }}</text>
+          <view class="actions">
+            <button v-for="choice in scene?.choices" :key="choice.nextSceneId" @click="forward(choice.nextSceneId)">{{ choice.label }}</button>
+            <button v-if="scene?.kind === 'dialogue'" @click="forward(scene?.nextSceneId ?? '')">继续</button>
+            <button v-if="history.length > 1" @click="back">上一段</button>
+            <text v-if="scene?.kind === 'ending'" class="speaker">本幕结束</text>
+          </view>
+        </view>
+      </template>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, ref } from 'vue'
+import type { DraftPreview } from '@/features/stage-three-content.uts'
+const props = defineProps<{ value: DraftPreview }>()
+const chapters = computed(() => props.value.culture?.chapters ?? [])
+const act = ref(0)
+const history = ref<string[]>([])
+const currentChapter = computed(() => chapters.value.find(chapter => chapter.act === act.value) ?? null)
+const scene = computed(() => currentChapter.value?.scenes.find(item => item.id === history.value[history.value.length - 1]) ?? null)
+const unlockLabel = computed(() => {
+  const chapter = currentChapter.value
+  if (chapter == null) return ''
+  const labels = [] as string[]
+  if (chapter.after.length > 0) labels.push(gateLabel(chapter.after))
+  const culture = props.value.culture
+  if (chapter.activity === 'tile') labels.push('完成' + (culture?.tile?.title ?? '配色'))
+  if (chapter.activity === 'quiz') labels.push('完成' + (culture?.quiz?.title ?? '辨认'))
+  if (chapter.activity === 'learning') labels.push('完成' + (culture?.learning?.title ?? '学习'))
+  return labels.join('；')
+})
+function gateLabel(ids: string[]): string {
+  return '完成打卡：' + ids.map(id => props.value.nodes.find(node => node.id === id)?.title ?? id).join('、')
+}
+function selectAct(value: number): void {
+  act.value = value
+  const start = currentChapter.value?.start
+  history.value = start == null ? [] : [start]
+}
+function forward(id: string): void { if (id.length > 0) history.value = [...history.value, id] }
+function back(): void { history.value = history.value.slice(0, -1) }
+</script>
+
+<style scoped>
+.preview, .section, .stage { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #d7dfce; border-radius: 12px; }
+.preview { background: #f1f5ea; }
+.heading { font-weight: 700; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font-size: 13px; margin: 0; }
+.stage { background: #283447; color: #fff8eb; }
+.mascot { width: 90px; height: 90px; }
+.note { font-size: 12px; }
+.speaker { color: #ffd36e; font-weight: 700; }
+</style>

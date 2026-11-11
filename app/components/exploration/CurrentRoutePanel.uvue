@@ -9,8 +9,8 @@
       <text class="route-meta">{{ expanded ? '收起 ⌄' : '展开 ⌃' }}</text>
     </button>
     <view v-if="expanded" class="route-task">
-      <text class="route-name">{{ nextNode == null ? '当前没有待打卡点' : '下一站 · ' + nextNode.title }}</text>
-      <text class="route-meta">{{ nextNode == null ? '可在路线详情查看任务' : '两地旅伴各自完成本地任务' }}</text>
+      <text class="route-name">{{ nextNode != null ? '下一站 · ' + nextNode.title : (route.done < route.total ? '还有文化任务待完成' : '本次探索已完成') }}</text>
+      <text v-if="nextNode != null" class="route-meta">定位与照片凭证仅自己可见</text>
       <button v-if="nextNode != null" class="task-button" @click="emit('continue-task', nextNode.id)">前往私密打卡</button>
       <button v-else class="task-button" @click="openRouteDetail(route.id)">查看路线任务</button>
     </view>

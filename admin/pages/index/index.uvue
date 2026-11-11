@@ -1,6 +1,6 @@
 <template>
   <view class="desktop">
-    <view class="sidebar"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text><text>运营工作台 · 阶段二</text><text class="hint">博物馆与路线发布</text><text class="hint">社区审核、剧情、旅伴管理待开发</text></view>
+    <view class="sidebar"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text><text>运营工作台</text><text class="hint">路线、文化任务与剧情发布</text></view>
     <view class="main">
       <text class="title">{{ session == null ? '管理员登录' : '路线与博物馆' }}</text>
       <text class="message">{{ message }}</text>
@@ -44,11 +44,16 @@
               <button :disabled="busy" @click="removeNode(index)">删除节点</button>
             </view>
             <button :disabled="busy" @click="addNode">增加定位照片节点</button>
-            <text class="heading">文化内容</text>
-            <text class="hint">选填。解锁条件使用上面的节点编号。</text>
+            <text class="heading">文化任务与剧情</text>
+            <text class="hint">选填。可从模板载入可编辑的 JSON。after 使用上面的打卡节点编号。正式配图、馆藏资料和文化文案待校订。</text>
             <textarea class="content-source" v-model="cultureSource" :maxlength="-1" placeholder="文化内容 JSON" />
-            <button :disabled="busy" @click="fillTile">载入澳门配色模板</button>
-            <view class="toolbar"><button class="primary" :disabled="busy" @click="save">保存草稿</button><button :disabled="busy || draft.revision === 0" @click="publish">保存并发布此版本</button></view>
+            <view class="toolbar">
+              <button :disabled="busy" @click="fillMacau">载入澳门模板</button>
+              <button :disabled="busy" @click="fillHunan">载入湖南模板</button>
+              <button :disabled="busy" @click="validatePreview">校验并预览当前编辑</button>
+            </view>
+            <ContentPreview v-if="preview != null" :key="previewId" :value="preview" />
+            <view class="toolbar"><button class="primary" :disabled="busy" @click="save">保存草稿</button><button :disabled="busy || draft.revision === 0" @click="publish">发布已保存修订</button></view>
             <text class="hint">发布后生成固定版本；正在探索的用户继续使用原版本。</text>
           </view>
         </view>
@@ -59,16 +64,21 @@
 <script setup lang="uts">
 import { ref } from 'vue'
 import { api, session, AdminSession } from '@/features/api.uts'
-type Node = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
+import ContentPreview from './ContentPreview.uvue'
+import { macauContent, hunanContent } from '@/features/stage-three-content.uts'
+import type { DraftNode, DraftPreview } from '@/features/stage-three-content.uts'
 type Museum = { name: string, description: string }
 type Viewport = { latitude: number, longitude: number, scale: number }
-type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: Node[] }
+type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: DraftNode[] }
 const username = ref(''), password = ref(''), busy = ref(false), message = ref('')
 const editingAccount = ref(false), newUsername = ref('')
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 const drafts = ref<Draft[]>([])
 const editing = ref(false)
 const cultureSource = ref('')
+const preview = ref<DraftPreview | null>(null)
+const previewId = ref(0)
+let savedPayload = ''
 const draft = ref<Draft>({ id: '', name: '', region: '', description: '', revision: 0, testOnly: true, museum: { name: '', description: '' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] })
 function numeric(value: string): number { return Number(value) }
 async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; await load() } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
@@ -131,28 +141,104 @@ async function saveAccount(): Promise<void> {
 }
 async function load(): Promise<void> { try { drafts.value = await api<Draft[]>('drafts'); message.value = '' } catch (_) { message.value = '读取失败或会话已过期。编辑内容仍保留。' } }
 function edit(item: Draft): void {
+  if (busy.value) return
   const raw = JSON.stringify(item)
   draft.value = JSON.parse<Draft>(raw)!
   const value = JSON.parse<UTSJSONObject>(raw)!['culture']
   cultureSource.value = value == null ? '' : JSON.stringify(value, null, 2)
+  preview.value = null
+  savedPayload = JSON.stringify(draftPayload())
   editing.value = true
 }
-function newDraft(): void { draft.value = { id: 'route-' + Date.now(), name: '开发测试路线', region: '澳门', description: '仅用于开发联调，不代表真实馆方路线', revision: 0, testOnly: true, museum: { name: '开发测试馆', description: '资料待核实' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] }; cultureSource.value = ''; editing.value = true; addNode() }
-function fillTile(): void {
-  cultureSource.value = JSON.stringify({ tile: { title: '蓝白瓷砖配色', after: draft.value.nodes.map(node => node.id) } }, null, 2)
+function newDraft(): void {
+  if (busy.value) return
+  draft.value = { id: 'route-' + Date.now(), name: '开发测试路线', region: '澳门', description: '仅用于开发联调，不代表真实馆方路线', revision: 0, testOnly: true, museum: { name: '开发测试馆', description: '资料待核实' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] }
+  cultureSource.value = ''
+  savedPayload = ''
+  preview.value = null
+  editing.value = true
+  addNode()
+}
+function fillMacau(): void {
+  const nodes = draft.value.nodes
+  if (nodes.length < 2) { message.value = '澳门模板需要两个打卡节点，请先补齐。'; return }
+  draft.value.region = '澳门'
+  cultureSource.value = JSON.stringify(macauContent(nodes[0].id, nodes[1].id), null, 2)
+  preview.value = null
+  message.value = '已载入澳门开发模板，请核对打卡坐标后校验。'
+}
+function fillHunan(): void {
+  const nodes = draft.value.nodes
+  if (nodes.length === 0) { message.value = '湖南模板需要至少一个打卡节点。'; return }
+  draft.value.region = '湖南'
+  cultureSource.value = JSON.stringify(hunanContent(nodes[0].id), null, 2)
+  preview.value = null
+  message.value = '已载入湖南开发模板，请核对打卡坐标后校验。'
 }
 function addNode(): void { draft.value?.nodes.push({ id: 'node-' + Date.now(), title: '测试节点', description: '定位与照片', latitude: 0, longitude: 0, radius: 100 }) }
 function removeNode(index: number): void { draft.value?.nodes.splice(index, 1) }
-async function saveValue(): Promise<void> {
-  if (draft.value == null || draft.value!.nodes.length === 0) throw new Error('INVALID_NODES')
-  draft.value!.viewport.latitude = draft.value!.nodes[0].latitude; draft.value!.viewport.longitude = draft.value!.nodes[0].longitude
-  const payload = JSON.parse<UTSJSONObject>(JSON.stringify(draft.value))!
-  payload['culture'] = cultureSource.value.trim().length === 0 ? null : JSON.parse<UTSJSONObject>(cultureSource.value)
-  const result = await api<{ revision: number }>('saveDraft', payload)
-  draft.value!.revision = result.revision
+function draftPayload(): UTSJSONObject {
+  const value = draft.value
+  const first = value.nodes[0]
+  const payload = JSON.parse<UTSJSONObject>(JSON.stringify(value))!
+  if (first != null) payload['viewport'] = { ...value.viewport, latitude: first.latitude, longitude: first.longitude }
+  const source = cultureSource.value.trim()
+  if (source.length === 0) { payload['culture'] = null; return payload }
+  try {
+    const content = JSON.parse<UTSJSONObject>(source)
+    if (content == null) throw new Error('INVALID_CONTENT_JSON')
+    payload['culture'] = content
+  } catch (_) { throw new Error('INVALID_CONTENT_JSON') }
+  return payload
 }
-async function save(): Promise<void> { if (busy.value) return; busy.value = true; try { await saveValue(); message.value = '草稿已保存。' } catch (_) { message.value = '保存失败：请检查必填内容、坐标，或刷新确认修订冲突。当前编辑内容已保留。' } finally { busy.value = false } }
-async function publish(): Promise<void> { if (busy.value || draft.value == null) return; busy.value = true; try { await saveValue(); await api<UTSJSONObject>('publish', { id: draft.value!.id, revision: draft.value!.revision }); message.value = '此测试版本已发布。' } catch (_) { message.value = '发布未完成，请核对权限、坐标和修订版本后重试。' } finally { busy.value = false } }
+function contentError(error: any): string {
+  const code = (error as Error | null)?.message ?? ''
+  if (code === 'CONFLICT') return '草稿修订冲突，请刷新并重新载入。'
+  if (code === 'INVALID_CONTENT_JSON') return '文化内容需要有效的 JSON 对象。'
+  if (code.endsWith('_GATE')) return '解锁条件引用了无效或重复的打卡节点，或缺少本幕对应的文化任务。'
+  if (code === 'INVALID_SCENE_GRAPH') return '检查起始场景、跳转目标、循环和不可达场景。'
+  if (code === 'INVALID_SCENE') return '场景编号、正文、类型或素材引用有误。当前可使用素材编号 aomiao。'
+  if (code === 'INVALID_QUIZ_ANSWER') return '辨认题选项编号必须唯一，答案须引用一个已有选项。'
+  if (code === 'TEST_CONTENT_DISABLED' || code === 'CONTENT_REVIEW_REQUIRED') return '环境或内容审核条件尚未满足。'
+  return '请检查字段、素材和坐标后重试。' + (code.startsWith('INVALID_') ? '（' + code + '）' : '')
+}
+async function validatePreview(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  preview.value = null
+  try {
+    preview.value = await api<DraftPreview>('previewDraft', draftPayload())
+    previewId.value += 1
+    message.value = '当前编辑通过校验。预览使用本次校验的内容。'
+  } catch (error) { message.value = '校验失败。' + contentError(error) }
+  finally { busy.value = false }
+}
+async function save(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    const payload = draftPayload()
+    const result = await api<{ revision: number }>('saveDraft', payload)
+    draft.value.revision = result.revision
+    payload['revision'] = result.revision
+    savedPayload = JSON.stringify(payload)
+    message.value = '草稿修订 ' + result.revision + ' 已保存。'
+  } catch (error) { message.value = '保存失败。' + contentError(error) }
+  finally { busy.value = false }
+}
+async function publish(): Promise<void> {
+  if (busy.value || draft.value.revision === 0) return
+  busy.value = true
+  try {
+    if (savedPayload !== JSON.stringify(draftPayload())) {
+      message.value = '编辑内容有改动，请先保存当前修订。'
+      return
+    }
+    const result = await api<{ version: string }>('publish', { id: draft.value.id, revision: draft.value.revision })
+    message.value = '已发布修订 ' + draft.value.revision + '（' + result.version.slice(0, 8) + '）。'
+  } catch (error) { message.value = '发布未确认。' + contentError(error) }
+  finally { busy.value = false }
+}
 </script>
 <style>
 page { background:#f3f4ed; color:#35452d; font-size:14px; }

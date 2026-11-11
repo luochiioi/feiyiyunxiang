@@ -66,14 +66,17 @@ onShow(async () => {
     if (session.value?.uid === uid) progress.value = value
   } catch (_) { if (session.value?.uid !== uid) progress.value = null }
 })
+async function selectViewedRun(): Promise<boolean> {
+  if (busy.value) return false
+  const value = progress.value
+  if (value == null || activeRun.value?.runId === value.runId) return true
+  busy.value = true
+  try { await startRoute(value.routeId); return true }
+  catch (_) { showError(); return false }
+  finally { busy.value = false }
+}
 async function openPoint(nodeId: string): Promise<void> {
-  if (busy.value) return
-  if (progress.value != null && activeRun.value?.runId !== progress.value!.runId) {
-    busy.value = true
-    try { await startRoute(progress.value!.routeId) } catch (_) { showError(); return }
-    finally { busy.value = false }
-  }
-  openCheckin(nodeId)
+  if (await selectViewedRun()) openCheckin(nodeId)
 }
 function openActivity(activityId: string): void {
   if (id.value == null) return
@@ -82,9 +85,9 @@ function openActivity(activityId: string): void {
 function openStory(): void {
   if (id.value != null) openPage('/packages/story/story/story?routeId=' + encodeURIComponent(id.value!))
 }
-function showOnMap(): void {
+async function showOnMap(): Promise<void> {
   const item = route.value
-  if (item == null) return
+  if (item == null || !await selectViewedRun()) return
   dispatchMapEvent({ type: 'select-route', routeId: item.id, viewport: item.viewport })
   returnToMap()
 }

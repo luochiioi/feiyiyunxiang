@@ -15,7 +15,7 @@ function gateway({configured=true,validCode=true,privateStorageVerified=false,st
 }
 test('gateway exchanges WeChat code on server and never returns session_key or secret',async()=>{const g=gateway();const r=await g.main({action:'wxLogin',payload:{code:'wx-code'}});assert.equal(r.code,'OK');assert.equal(r.data.token,'issued-token');assert.equal(g.counts().exchanges,1);assert.doesNotMatch(JSON.stringify(r),/never-return|server-fixture|openid/);})
 test('gateway rejects invalid code and missing configuration without pretending login',async()=>{assert.equal((await gateway({validCode:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'LOGIN_FAILED');assert.equal((await gateway({configured:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'CONFIG_REQUIRED');})
-test('gateway ignores submitted uid/admin and denies ordinary member operations',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});for(const action of ['drafts','saveDraft','publish'])assert.equal((await g.main({action,token:'fixture-token',uid:'administrator',admin:true,payload:{}})).code,'AUTH_REQUIRED');assert.equal((await g.main({action:'diary',token:'expired',uid:'member'})).code,'AUTH_REQUIRED');})
+test('gateway ignores submitted uid/admin and denies ordinary member operations',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});for(const action of ['drafts','saveDraft','previewDraft','publish'])assert.equal((await g.main({action,token:'fixture-token',uid:'administrator',admin:true,payload:{}})).code,'AUTH_REQUIRED');assert.equal((await g.main({action:'diary',token:'expired',uid:'member'})).code,'AUTH_REQUIRED');})
 test('unverified private storage blocks all uploads before SDK is called',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});assert.equal((await g.main({action:'uploadMedia',token:'fixture-token',payload:{base64:'fixture'}})).code,'CONFIG_REQUIRED');assert.equal(g.counts().uploads,0);})
 
 test('storage errors without a file ID preserve retry and never create a broken photo record', async () => {
@@ -71,6 +71,8 @@ test('admin credentials and sessions are separate from WeChat users', async () =
   assert.equal((await g.main({ action: 'drafts', token })).code, 'OK')
   assert.equal((await g.main({ action: 'diary', token })).code, 'AUTH_REQUIRED')
   assert.equal((await g.main({ action: 'readMedia', token })).code, 'AUTH_REQUIRED')
+  assert.equal((await g.main({ action: 'storyLibrary', token })).code, 'AUTH_REQUIRED')
+  assert.equal((await g.main({ action: 'works', token })).code, 'AUTH_REQUIRED')
   assert.equal((await g.main({ action: 'adminLogout', token })).code, 'OK')
   assert.equal((await g.main({ action: 'drafts', token })).code, 'AUTH_REQUIRED')
 })

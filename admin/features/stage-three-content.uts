@@ -1,0 +1,75 @@
+export type DraftNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
+type Choice = { label: string, nextSceneId: string }
+type Scene = { id: string, kind: string, text: string, asset?: string, speaker?: string, nextSceneId?: string, choices?: Choice[] }
+type Chapter = { act: number, title: string, after: string[], start: string, scenes: Scene[], activity?: string | null }
+type Activity = { title: string, after: string[] }
+type Quiz = { title: string, after: string[], prompt: string, explanation: string, options: QuizOption[], answer: string }
+type QuizOption = { id: string, label: string, illustration: string }
+type Learning = { title: string, after: string[], cards: LearningCard[] }
+type LearningCard = { id: string, title: string, hotspot: string, body: string, illustration?: string }
+export type CultureContent = { tile?: Activity, quiz?: Quiz, learning?: Learning, chapters?: Chapter[] }
+export type DraftPreview = { name: string, region: string, testOnly: boolean, releaseAllowed: boolean, nodes: DraftNode[], culture?: CultureContent }
+
+export function macauContent(first: string, second: string): CultureContent {
+  return {
+    tile: { title: '蓝白瓷砖配色', after: [first] },
+    chapters: [
+      { act: 2, title: '海上风暴', after: [first], start: 'wave', scenes: [
+        { id: 'wave', kind: 'dialogue', speaker: '父亲', text: '浪把船身推得一斜。小心，先把脚边的瓷砖箱护好。', nextSceneId: 'hold' },
+        { id: 'hold', kind: 'choice', text: '箱角从绳结里滑了出来。你伸手够到了两样东西。', choices: [
+          { label: '拉紧固定箱子的绳子', nextSceneId: 'rope' },
+          { label: '用布垫住箱角', nextSceneId: 'cloth' }
+        ] },
+        { id: 'rope', kind: 'dialogue', speaker: '旁白', text: '你重新打了个结，把箱子拉回木梁边。', nextSceneId: 'dawn' },
+        { id: 'cloth', kind: 'dialogue', speaker: '旁白', text: '你把布塞进缝里，箱子终于不再撞击甲板。', nextSceneId: 'dawn' },
+        { id: 'dawn', kind: 'ending', text: '浪声渐缓。父亲打开箱盖，一块蓝白瓷砖还完好地躺在里面。' }
+      ] },
+      { act: 3, title: '女儿与瓷砖', after: [], start: 'pattern', scenes: [
+        { id: 'pattern', kind: 'dialogue', speaker: '女儿', text: '我先在纸上试着排一排纹样。帆、花瓣和几何边线，你刚才选的是哪一种？', nextSceneId: 'color' },
+        { id: 'color', kind: 'dialogue', speaker: '旁白', text: '桌上排着试稿。她把深蓝留给边线，又给中间留出一块白。', nextSceneId: 'work' },
+        { id: 'work', kind: 'ending', text: '你的配色已收进作品页。窗外传来脚步声，有人从码头送来靠岸的消息。' }
+      ] },
+      { act: 4, title: '澳门靠岸', after: [first, second], start: 'shore', scenes: [
+        { id: 'shore', kind: 'dialogue', speaker: '旁白', text: '船停在岸边。女儿拿出试稿，渔村里的人围过来，指着画上的小帆。', nextSceneId: 'exchange' },
+        { id: 'exchange', kind: 'dialogue', speaker: '女儿', text: '你们认识这片海。下次我想照着你们见过的浪，再画一块瓷砖。', nextSceneId: 'today' },
+        { id: 'today', kind: 'ending', asset: 'aomiao', text: '码头的声音慢慢退去。你回到今天的地图前，蓝白瓷砖已经留在自己的探索记录里。' }
+      ] }
+    ]
+  }
+}
+
+export function hunanContent(first: string): CultureContent {
+  return {
+    quiz: {
+      title: '湘绣辨认', after: [first], prompt: '根据示意图，哪一幅呈现了绣线的质感？',
+      options: [{ id: 'a', label: '选择图 A', illustration: 'tile' }, { id: 'b', label: '选择图 B', illustration: 'threads' }],
+      answer: 'b', explanation: '图 B 用有方向的色线模拟绣线，图 A 用重复的边线模拟蓝白瓷砖。'
+    },
+    learning: {
+      title: '针法学习卡', after: [],
+      cards: [
+        { id: 'direction', title: '第一张 · 走向', hotspot: '观察线条', illustration: 'direction', body: '沿着一段线条看过去，指出哪里改变了方向。正式针法名称和对照图待校订。' },
+        { id: 'length', title: '第二张 · 长短', hotspot: '比较针脚', illustration: 'length', body: '找出图样中较长和较短的线段，比较它们留下的轮廓。馆藏局部示意待补。' },
+        { id: 'color', title: '第三张 · 色阶', hotspot: '寻找深浅变化', illustration: 'color', body: '观察颜色从浅到深的过渡，试着指出你最先注意到的位置。正式例图待补。' },
+        { id: 'layers', title: '第四张 · 层次', hotspot: '寻找交叠', illustration: 'layers', body: '看一看线条交会的地方，试着描述前后关系。对应针法与正式解说待校订。' }
+      ]
+    },
+    chapters: [
+      { act: 5, title: '湘绣相遇', after: [], start: 'meet', scenes: [
+        { id: 'meet', kind: 'dialogue', speaker: '绣者', text: '把这两张图并排放着看。你刚才已经找到绣线，再看看它们是朝哪个方向排的。', nextSceneId: 'notice' },
+        { id: 'notice', kind: 'choice', text: '绣者把图样移到窗边。你先注意到什么？', choices: [
+          { label: '线条的走向', nextSceneId: 'direction' },
+          { label: '颜色的变化', nextSceneId: 'color' }
+        ] },
+        { id: 'direction', kind: 'dialogue', speaker: '绣者', text: '沿着你指的方向，我们再看一段。', nextSceneId: 'invite' },
+        { id: 'color', kind: 'dialogue', speaker: '绣者', text: '靠近一点，看看浅色在哪里接上深色。', nextSceneId: 'invite' },
+        { id: 'invite', kind: 'ending', text: '她把四张观察卡放到你面前，等你一张一张翻开。' }
+      ] },
+      { act: 6, title: '针法学习', after: [], start: 'cards', scenes: [
+        { id: 'cards', kind: 'dialogue', speaker: '绣者', text: '走向、长短、色阶和层次，你都观察过了。下回见到绣品，也可以从这些地方看起。', nextSceneId: 'return' },
+        { id: 'return', kind: 'dialogue', speaker: '旁白', text: '最后一张观察卡翻过去，窗边的光落在那缕红线上。', nextSceneId: 'today' },
+        { id: 'today', kind: 'ending', asset: 'aomiao', text: '你回到今天的地图前。四张卡的学习记录已经保存，下次还可以回来翻看。' }
+      ] }
+    ]
+  }
+}

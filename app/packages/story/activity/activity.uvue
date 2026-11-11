@@ -4,7 +4,7 @@
     <view class="content">
       <view v-if="status == null" class="card">
         <text class="body">{{ message }}</text>
-        <button class="primary" :disabled="busy" @click="load">{{ session == null ? '微信登录并继续' : '重新读取' }}</button>
+        <button v-if="validEntry" class="primary" :disabled="busy" @click="load">{{ session == null ? '微信登录并继续' : '重新读取' }}</button>
       </view>
       <view v-else class="card">
         <text v-if="status.testOnly" class="tag">开发测试 · 内容待校订</text>
@@ -30,9 +30,7 @@
           <text class="body">{{ status.prompt }}</text>
           <text class="muted">辨认图为示意，馆藏图与科普文案待校订。</text>
           <view v-for="option in status.options" :key="option.id" class="option">
-            <view v-if="option.illustration === 'threads'" class="threads">
-              <view v-for="strand in strands" :key="strand" class="thread" :style="{ backgroundColor: strand }" />
-            </view>
+            <StitchSample v-if="option.illustration === 'threads'" variant="color" />
             <TilePreview v-else pattern="geometry" palette="cobalt" />
             <button class="secondary" :disabled="busy || status.done === true" @click="answer(option.id)">{{ option.label }}</button>
           </view>
@@ -45,6 +43,7 @@
             <text class="heading">{{ card.title }}</text>
             <button class="secondary" :disabled="busy" @click="openCard(card.id)">{{ card.hotspot }} · {{ status.read?.includes(card.id) === true ? '已学习' : '查看' }}</button>
             <template v-if="openedCard === card.id">
+              <StitchSample v-if="card.illustration != null" :variant="card.illustration" />
               <text class="body">{{ card.body }}</text>
               <button v-if="status.read?.includes(card.id) !== true" class="primary" :disabled="busy" @click="markRead(card.id)">标记已读</button>
             </template>
@@ -60,21 +59,22 @@
 import { ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import TilePreview from '../components/TilePreview.uvue'
+import StitchSample from '../components/StitchSample.uvue'
 import { secured, session } from '@/features/api.uts'
 import { refreshCatalog, startRoute } from '@/features/exploration/catalog.uts'
 import { decodePageId } from '@/features/navigation.uts'
 
 type Selection = { pattern: string, palette: string }
 type Option = { id: string, label: string, illustration: string }
-type Card = { id: string, title: string, hotspot: string, body: string }
+type Card = { id: string, title: string, hotspot: string, body: string, illustration?: string }
 type ActivityStatus = { title: string, unlocked: boolean, testOnly: boolean, work?: Selection | null, prompt?: string,
   options?: Option[], done?: boolean, explanation?: string, cards?: Card[], read?: string[] }
 const patterns = [{ id: 'rose', name: '玫瑰' }, { id: 'sail', name: '海浪帆船' }, { id: 'geometry', name: '几何' }]
 const palettes = [{ id: 'indigo', name: '靛蓝' }, { id: 'cobalt', name: '钴蓝' }, { id: 'mist', name: '雾蓝' }]
-const strands = ['#ad4249', '#c56461', '#db8f77', '#dfad81', '#994b4b', '#81354b']
 const selection = ref<Selection>({ pattern: 'rose', palette: 'indigo' })
 const status = ref<ActivityStatus | null>(null)
 const activityId = ref('')
+const validEntry = ref(false)
 const openedCard = ref('')
 const busy = ref(false)
 const message = ref('微信登录后可继续探索并保存作品。')
@@ -84,14 +84,15 @@ let draftKey = ''
 onLoad(query => {
   routeId = decodePageId(query['routeId'] ?? null) ?? ''
   activityId.value = decodePageId(query['activityId'] ?? null) ?? ''
-  if (routeId.length === 0 || !['tile', 'quiz', 'learning'].includes(activityId.value)) {
+  validEntry.value = routeId.length > 0 && ['tile', 'quiz', 'learning'].includes(activityId.value)
+  if (!validEntry.value) {
     message.value = '请从路线详情打开文化任务。'
     return
   }
   if (session.value != null) load()
 })
 async function load(): Promise<void> {
-  if (busy.value || routeId.length === 0 || !['tile', 'quiz', 'learning'].includes(activityId.value)) return
+  if (busy.value || !validEntry.value) return
   busy.value = true
   message.value = '正在读取任务…'
   try {
@@ -171,6 +172,4 @@ async function save(): Promise<void> {
 .choice { margin: 0; padding: 4px 10px; font-size: 14px; color: #2f5282; background: #edf3fa; }
 .selected { background: #2f5282; color: white; }
 .option { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid #eee6db; }
-.threads { align-self: center; width: 164px; padding: 18px; background: #f3e2d2; border: 3px solid #a87951; border-radius: 50%; display: flex; flex-direction: column; gap: 4px; }
-.thread { height: 7px; border-radius: 6px; transform: rotate(-12deg); }
 </style>

@@ -1,0 +1,19 @@
+<template>
+  <view class="hoop" :class="variant">
+    <view v-for="(strand, index) in strands" :key="index" class="thread"
+      :style="{ backgroundColor: strand, width: variant === 'length' ? lengths[index] : '100%' }" />
+  </view>
+</template>
+
+<script setup lang="uts">
+defineProps<{ variant: string }>()
+const strands = ['#e3af9a', '#db8f77', '#c56461', '#ad4249', '#994b4b', '#81354b']
+const lengths = ['42%', '80%', '57%', '90%', '46%', '68%']
+</script>
+
+<style scoped>
+.hoop { align-self: center; width: 164px; padding: 19px; background: #f3e2d2; border: 3px solid #a87951; border-radius: 50%; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.thread { height: 7px; border-radius: 6px; transform: rotate(-12deg); }
+.direction .thread:nth-child(n + 4) { transform: rotate(14deg); }
+.layers .thread:nth-child(n + 4) { transform: rotate(30deg) translateY(-13px); }
+</style>
