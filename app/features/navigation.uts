@@ -5,6 +5,11 @@ export function openPage(path: string): void {
   })
 }
 
+export function decodePageId(value: string | null): string | null {
+  if (value == null) return null
+  try { return decodeURIComponent(value) } catch (_) { return null }
+}
+
 export function returnToMap(): void {
   const pages = getCurrentPages()
   const home = pages.findIndex(page => page.route === 'pages/index/index')

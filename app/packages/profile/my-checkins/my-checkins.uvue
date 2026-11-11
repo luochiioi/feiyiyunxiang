@@ -1,7 +1,7 @@
 <template>
   <view class="screen"><AppPageHeader title="探索档案" :show-back="true" />
     <view class="content">
-      <view class="card green"><text class="heading">我的私密日记</text><text class="body">{{ records.length }} 条已保存记录 · 作品与合作待开发</text><button class="secondary" :disabled="busy" @click="load">微信登录并刷新</button></view>
+      <view class="card green"><text class="heading">我的私密日记</text><text class="body">{{ records.length }} 条已保存记录 · 作品与合作待开发</text><button class="secondary" :disabled="busy" @click="load">{{ session == null ? '微信登录并查看' : '刷新日记' }}</button></view>
       <text class="body">{{ message }}</text>
       <view v-for="item in records" :key="item._id" class="card">
         <view class="row spread"><text class="heading">{{ item.title }}</text><text class="tag">仅本人可见</text></view>

@@ -1,0 +1,23 @@
+import type { MapPosition } from './types.uts'
+
+export function validLocation(position: MapPosition): boolean {
+  return Number.isFinite(position.latitude) && Number.isFinite(position.longitude) &&
+    Math.abs(position.latitude) <= 90 && Math.abs(position.longitude) <= 180
+}
+
+export function distanceMeters(from: MapPosition, to: MapPosition): number {
+  const radians = Math.PI / 180
+  const latitude = (to.latitude - from.latitude) * radians
+  const longitude = (to.longitude - from.longitude) * radians
+  const arc = Math.sin(latitude / 2) ** 2 +
+    Math.cos(from.latitude * radians) * Math.cos(to.latitude * radians) * Math.sin(longitude / 2) ** 2
+  return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, arc)))
+}
+
+export function locationFailureCode(message: string): string {
+  const error = message.toLowerCase()
+  if (error.includes('privacy') || error.includes('requiredprivateinfos') || error.includes('隐私')) return 'LOCATION_PRIVACY'
+  if (error.includes('auth deny') || error.includes('auth denied') || error.includes('permission denied') ||
+      error.includes('permission deny') || error.includes('authorize') || error.includes('授权')) return 'LOCATION_PERMISSION'
+  return 'LOCATION_UNAVAILABLE'
+}

@@ -13,6 +13,30 @@ const source = () => {
 
 const viewport = { latitude: 28.2, longitude: 113.01, scale: 17 }
 
+test('WeChat navigation preserves the published point ID after decoding', async () => {
+  const uts = readFileSync(join(__dirname, '../features/navigation.uts'), 'utf8')
+  const { decodePageId } = await import('data:text/javascript,' + encodeURIComponent(stripTypeScriptTypes(uts)))
+  const pointId = 'route-123:node-456'
+  assert.equal(decodePageId(encodeURIComponent(pointId)), pointId)
+  assert.equal(decodePageId(pointId), pointId)
+  assert.equal(decodePageId('route-123%ZZnode-456'), null)
+})
+
+test('check-in location preview separates distance, permission and privacy failures', async () => {
+  const uts = readFileSync(join(__dirname, '../features/exploration/checkin-location.uts'), 'utf8')
+  const js = stripTypeScriptTypes(uts.replace(/^import type .*\r?\n/m, ''))
+  const { validLocation, distanceMeters, locationFailureCode } = await import('data:text/javascript,' + encodeURIComponent(js))
+  const point = { latitude: 22.2, longitude: 113.55 }
+  assert.equal(validLocation({ latitude: NaN, longitude: 113.55 }), false)
+  assert.equal(validLocation({ latitude: 22.2, longitude: 181 }), false)
+  assert.equal(distanceMeters(point, point), 0)
+  assert.ok(distanceMeters(point, { ...point, latitude: 22.2005 }) < 100)
+  assert.ok(distanceMeters(point, { ...point, latitude: 22.202 }) > 100)
+  assert.equal(locationFailureCode('getLocation:fail auth deny'), 'LOCATION_PERMISSION')
+  assert.equal(locationFailureCode('getLocation:fail privacy permission is not authorized'), 'LOCATION_PRIVACY')
+  assert.equal(locationFailureCode('getLocation:fail timeout'), 'LOCATION_UNAVAILABLE')
+})
+
 test('starts collapsed without a route and ignores a panel toggle', async () => {
   const { initialMapState, reduceMapState } = await source()
   const state = initialMapState()

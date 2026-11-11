@@ -6,9 +6,15 @@
 
       <view class="card row">
         <image class="avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
-        <view class="stack"><text class="heading">你好，探索者</text><text class="muted">{{ session == null ? '游客，可浏览已发布路线' : '已登录 · 私密探索账号' }}</text></view>
+        <view class="stack">
+          <text class="heading">{{ session == null ? '你好，探索者' : '微信已登录' }}</text>
+          <text class="muted">{{ session == null ? '游客，可浏览已发布路线' : '小程序账号 ' + session.uid.slice(-10).toUpperCase() }}</text>
+        </view>
       </view>
-      <button v-if="session == null" class="primary" :disabled="busy" @click="signIn">微信登录</button>
+      <template v-if="session == null">
+        <text class="body">使用当前微信账号登录后，可以保存探索进度和私密日记。</text>
+        <button class="primary" :disabled="busy" @click="signIn">{{ busy ? '正在登录…' : '微信登录' }}</button>
+      </template>
       <button v-else class="secondary" :disabled="busy" @click="signOut">退出登录</button>
       <view class="card green">
         <text class="heading">探索档案</text><text class="body">回看打卡日记、文化作品和旅伴记录。</text>
@@ -18,6 +24,9 @@
         <view class="row spread menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
         <view class="row spread divider menu-row" @click="openPage('/packages/community/community/community')"><text class="body">社区</text><text class="muted">›</text></view>
         <view class="row spread divider menu-row" @click="showAi"><text class="body">AI 猜图</text><text class="muted">敬请期待 ›</text></view>
+        <!-- #ifdef MP-WEIXIN -->
+        <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="muted">›</text></view>
+        <!-- #endif -->
       </view>
     </view>
   </view>
@@ -32,7 +41,21 @@ import { ref } from 'vue'
 import { session, login, api, clearSession, showError } from '@/features/api.uts'
 import { activeRun } from '@/features/exploration/catalog.uts'
 const busy = ref(false)
-async function signIn(): Promise<void> { busy.value = true; try { await login() } catch (_) { showError() } finally { busy.value = false } }
+async function signIn(): Promise<void> {
+  busy.value = true
+  try {
+    await login()
+    uni.showToast({ title: '微信登录成功', icon: 'success' })
+  } catch (e) {
+    const message = (e as Error).message === 'CONFIG_REQUIRED' ? '微信登录尚未配置' : '微信登录未完成，请重试'
+    uni.showToast({ title: message, icon: 'none' })
+  } finally { busy.value = false }
+}
+function showPrivacy(): void {
+  // #ifdef MP-WEIXIN
+  wx.openPrivacyContract({ fail: () => uni.showToast({ title: '暂时无法打开隐私保护指引', icon: 'none' }) })
+  // #endif
+}
 async function signOut(): Promise<void> { busy.value = true; try { await api<UTSJSONObject>('logout'); clearSession(); activeRun.value = null } catch (_) { showError() } finally { busy.value = false } }
 function showAi(): void {
   uni.showToast({ title: 'AI 猜图 · 敬请期待', icon: 'none' })

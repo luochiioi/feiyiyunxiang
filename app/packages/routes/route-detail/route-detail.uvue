@@ -21,7 +21,7 @@
           <view class="row spread divider"><text class="body">文化任务</text><text class="muted">阶段三待开发</text></view>
         </view>
         <button class="primary" @click="showOnMap">{{ route.id === mapState.routeId ? '返回当前路线地图' : '选择路线并查看地图' }}</button>
-        <button class="primary" :disabled="starting" @click="begin">{{ starting ? '正在恢复探索…' : '微信登录并开始 / 继续探索' }}</button>
+        <button class="primary" :disabled="starting" @click="begin">{{ startLabel }}</button>
         <button class="secondary" @click="openPage('/packages/story/story/story')">剧情介绍 · 阅读待开发</button>
         <button class="secondary" @click="openPage('/packages/partner/partner/partner')">旅伴介绍 · 合作待开发</button>
       </template>
@@ -36,8 +36,8 @@ import DemoNotice from '@/components/DemoNotice.uvue'
 
 import { computed, ref } from 'vue'
 import ProgressBar from '@/components/ProgressBar.uvue'
-import { findRoute, listNodes, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
-import { showError } from '@/features/api.uts'
+import { activeRun, findRoute, listNodes, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
+import { session, showError } from '@/features/api.uts'
 import { dispatchMapEvent, mapState } from '@/features/exploration/map-store.uts'
 import { openPage, returnToMap } from '@/features/navigation.uts'
 const id = ref<string | null>(null)
@@ -45,6 +45,11 @@ onLoad(query => { id.value = query['routeId'] ?? null })
 const route = computed(() => findRoute(id.value))
 const nodes = computed(() => listNodes(route.value?.id ?? null))
 const starting = ref(false)
+const startLabel = computed(() => {
+  if (starting.value) return '正在准备探索…'
+  if (session.value == null) return '微信登录并开始探索'
+  return activeRun.value?.routeId === id.value ? '继续探索' : '开始探索'
+})
 onShow(() => { refreshCatalog() })
 async function begin(): Promise<void> {
   if (starting.value || route.value == null) return
