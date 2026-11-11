@@ -29,7 +29,7 @@ exports.main=async(event,context)=>{
       const uid=key(cfg.wechatAppId,result.data.openid)
       await repo.tx(async t=>{if(!await t.get('uni-id-users',uid))await t.put('uni-id-users',uid,{role:[],token:[],status:0,dcloud_appid:[context.APPID],register_date:Date.now()})})
       const account=await repo.get('uni-id-users',uid)
-      if(account.status===1)throw new Error('LOGIN_FAILED')
+      if(account.status!==0)throw new Error('LOGIN_FAILED')
       const token=await identity.createToken({uid})
       if(token.errCode)throw new Error('LOGIN_FAILED')
       data={uid,token:token.token,expiresAt:token.tokenExpired}
@@ -38,7 +38,7 @@ exports.main=async(event,context)=>{
       if(typeof p.username!=='string'||!/^[A-Za-z0-9_-]{3,40}$/.test(p.username)||typeof p.password!=='string'||p.password.length>256)throw new Error('LOGIN_FAILED')
       const rows=await repo.list('uni-id-users',{username:p.username})
       const account=rows[0]
-      if(!verifyPassword(p.password,account?.passwordHash??'0'.repeat(32)+':'+'0'.repeat(128))||!account?.role?.includes('admin')||account.status===1)throw new Error('LOGIN_FAILED')
+      if(!verifyPassword(p.password,account?.passwordHash??'0'.repeat(32)+':'+'0'.repeat(128))||!account?.role?.includes('admin')||account.status!==0)throw new Error('LOGIN_FAILED')
       const token=await identity.createToken({uid:account._id})
       if(token.errCode)throw new Error('LOGIN_FAILED')
       data={uid:account._id,token:token.token,expiresAt:token.tokenExpired}

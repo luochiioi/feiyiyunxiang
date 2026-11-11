@@ -19,7 +19,7 @@ async function authenticate(identity,token,getUser) {
   try { result=await identity.checkToken(token,{autoRefresh:false}) }catch {throw new Error('AUTH_REQUIRED')}
   if(result.errCode||!result.uid) throw new Error('AUTH_REQUIRED')
   const user=await getUser(result.uid)
-  if(!user||user.status===1||!user.token?.includes(token))throw new Error('AUTH_REQUIRED')
+  if(!user||user.status!==0||!user.token?.includes(token))throw new Error('AUTH_REQUIRED')
   return {uid:result.uid,admin:Array.isArray(user.role)&&user.role.includes('admin')}
 }
 module.exports={encrypt,decrypt,decodeImage,hashPassword,verifyPassword,authenticate}

@@ -21,7 +21,7 @@ function validateDraft(p) {
     ids.add(n.id)
     return {id:n.id,title:n.title,description:n.description,latitude:n.latitude,longitude:n.longitude,radius:n.radius}
   })
-  return {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:p.viewport,nodes}
+  return {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:{latitude:p.viewport.latitude,longitude:p.viewport.longitude,scale:p.viewport.scale},nodes}
 }
 function createService({repo,now=Date.now,allowTestContent=true}) {
   async function owned(db,u,runId) {
@@ -66,7 +66,11 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     },
     async catalog() {
       const routes=await repo.list('fy-routes',{enabled:true}), result=[]
-      for (const r of routes) { if (r.testOnly&&!allowTestContent) continue; const v=await repo.get('fy-versions',r.version); if(v) result.push({...v,version:r.version}) }
+      for (const r of routes) {
+        if (r.testOnly&&!allowTestContent) continue
+        const v=await repo.get('fy-versions',r.version)
+        if(v) result.push({id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version:r.version})
+      }
       return result
     },
     async start(u,p) {
@@ -100,6 +104,9 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       return repo.tx(async db=>{
         const {run,node}=await binding(db,u,p)
         const cid=key(p.runId,p.nodeId)
+        const requestKey=key(u.uid,'checkin',p.requestId)
+        const request=await db.get('fy-requests',requestKey)
+        if(request&&(request.runId!==p.runId||request.nodeId!==p.nodeId)) fail('REQUEST_CONFLICT')
         const old=await db.get('fy-checkins',cid)
         if (old) return {id:cid,alreadyCompleted:true}
         if (!coord(p.latitude,p.longitude)) fail('INVALID_LOCATION')
@@ -109,6 +116,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         if (!media||media.uid!==u.uid||media.runId!==p.runId||media.nodeId!==p.nodeId||media.requestId!==p.requestId||media.used) fail('MEDIA_MISMATCH')
         const record={uid:u.uid,runId:p.runId,routeId:run.routeId,version:run.version,nodeId:p.nodeId,title:node.title,mediaId:p.mediaId,note:p.note??'',requestId:p.requestId,createdAt:now()}
         await db.put('fy-checkins',cid,record)
+        await db.put('fy-requests',requestKey,{runId:p.runId,nodeId:p.nodeId,checkinId:cid})
         await db.put('fy-diary',cid,record)
         await db.put('fy-media',p.mediaId,{...media,used:true})
         // A shared run write forces conflict on concurrent same-run updates.
