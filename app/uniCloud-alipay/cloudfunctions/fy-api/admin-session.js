@@ -1,6 +1,6 @@
 const { randomBytes } = require('node:crypto')
 const { key } = require('./service')
-const { verifyPassword } = require('./security')
+const { hashPassword, verifyPassword } = require('./security')
 
 const users = 'fy-admin-users'
 const sessions = 'fy-admin-sessions'
@@ -22,7 +22,7 @@ async function createAdminSession(repo, username, password) {
 
   const token = 'fy_admin_' + randomBytes(32).toString('hex')
   const expiresAt = Date.now() + 2 * 60 * 60 * 1000
-  await repo.put(sessions, key(token), { uid: account._id, expiresAt })
+  await repo.put(sessions, key(token), { uid: account._id, expiresAt, passwordVersion: account.passwordVersion ?? 0 })
   return { uid: account._id, token, expiresAt }
 }
 
@@ -36,11 +36,34 @@ async function authenticateAdmin(repo, token) {
   if (!session || session.expiresAt <= Date.now()) throw new Error('AUTH_REQUIRED')
   const account = await repo.get(users, session.uid)
   if (!isActiveAdmin(account)) throw new Error('FORBIDDEN')
-  return { uid: session.uid, admin: true, sessionId }
+  const passwordVersion = account.passwordVersion ?? 0
+  if ((session.passwordVersion ?? 0) !== passwordVersion) throw new Error('AUTH_REQUIRED')
+  return { uid: session.uid, admin: true, sessionId, passwordVersion }
+}
+
+async function changeAdminPassword(repo, user, currentPassword, newPassword) {
+  if (typeof newPassword !== 'string' || newPassword.length < 16 || newPassword.length > 128 || !newPassword.trim()) {
+    throw new Error('INVALID_PASSWORD')
+  }
+
+  await repo.tx(async tx => {
+    const account = await tx.get(users, user.uid)
+    if (!isActiveAdmin(account)) throw new Error('FORBIDDEN')
+    const passwordVersion = account.passwordVersion ?? 0
+    if (passwordVersion !== user.passwordVersion) throw new Error('AUTH_REQUIRED')
+    if (!verifyPassword(currentPassword, account.passwordHash)) throw new Error('PASSWORD_INCORRECT')
+    if (currentPassword === newPassword) throw new Error('PASSWORD_UNCHANGED')
+
+    await tx.put(users, user.uid, {
+      ...account,
+      passwordHash: hashPassword(newPassword),
+      passwordVersion: passwordVersion + 1
+    })
+  })
 }
 
 async function revokeAdminSession(repo, user) {
   await repo.put(sessions, user.sessionId, { uid: user.uid, expiresAt: 0 })
 }
 
-module.exports = { createAdminSession, authenticateAdmin, revokeAdminSession }
+module.exports = { createAdminSession, authenticateAdmin, revokeAdminSession, changeAdminPassword }

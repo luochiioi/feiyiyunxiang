@@ -2,9 +2,9 @@ const crypto=require('node:crypto')
 const {createService,key}=require('./service')
 const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
-const { createAdminSession, authenticateAdmin, revokeAdminSession } = require('./admin-session')
-const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED'])
+const { createAdminSession, authenticateAdmin, revokeAdminSession, changeAdminPassword } = require('./admin-session')
+const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -51,6 +51,10 @@ exports.main=async(event,context)=>{
       data = await createAdminSession(repo, p.username, p.password)
     } else if (action === 'adminLogout') {
       await revokeAdminSession(repo, user)
+      data = {}
+    } else if (action === 'adminChangePassword') {
+      await limited('admin-password:' + user.uid, 5)
+      await changeAdminPassword(repo, user, p.currentPassword, p.newPassword)
       data = {}
     } else if(action==='session') data=user
     else if(action==='logout') {

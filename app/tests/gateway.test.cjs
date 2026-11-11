@@ -5,7 +5,7 @@ const entry=path.resolve(__dirname,'../uniCloud-alipay/cloudfunctions/fy-api/ind
 const nativeRequire=createRequire(entry)
 function gateway({configured=true,validCode=true,privateStorageVerified=false}={}) {
  const rows=new Map()
- const db={collection(c){return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([,v])=>v)}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
+ const db={collection(c){return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([k,v])=>({...v,_id:k.slice(c.length)}))}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
  let exchanges=0,uploads=0
  const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:40029}}}},async uploadFile(){uploads++;throw new Error('unexpected upload')}}
  const identity={async checkToken(token){return token==='fixture-token'?{uid:'member',errCode:0}:{errCode:'expired'}},async createToken({uid}){return {errCode:0,token:'issued-token',tokenExpired:1000,uid}}}
@@ -36,4 +36,36 @@ test('admin credentials and sessions are separate from WeChat users', async () =
   assert.equal((await g.main({ action: 'readMedia', token })).code, 'AUTH_REQUIRED')
   assert.equal((await g.main({ action: 'adminLogout', token })).code, 'OK')
   assert.equal((await g.main({ action: 'drafts', token })).code, 'AUTH_REQUIRED')
+})
+
+test('changing the admin password verifies the current password and revokes all old sessions', async () => {
+  const g = gateway()
+  const { hashPassword, verifyPassword } = nativeRequire('./security')
+  const oldPassword = 'fixture-initial-admin-password'
+  const newPassword = 'fixture-replacement-admin-password'
+  const uid = 'operator'
+  g.rows.set('fy-admin-users' + uid, { _id: uid, username: uid, passwordHash: hashPassword(oldPassword), role: ['admin'], status: 0 })
+
+  const login = password => g.main({ action: 'adminLogin', payload: { username: uid, password } })
+  const first = await login(oldPassword)
+  const second = await login(oldPassword)
+  assert.equal(first.code, 'OK')
+  assert.equal(second.code, 'OK')
+
+  const change = (token, currentPassword, replacement) => g.main({
+    action: 'adminChangePassword', token, payload: { currentPassword, newPassword: replacement }
+  })
+  assert.equal((await change('fixture-token', oldPassword, newPassword)).code, 'AUTH_REQUIRED')
+  assert.equal((await change(first.data.token, oldPassword, 'short')).code, 'INVALID_PASSWORD')
+  assert.equal((await change(first.data.token, 'wrong-password', newPassword)).code, 'PASSWORD_INCORRECT')
+  assert.equal((await change(first.data.token, oldPassword, newPassword)).code, 'OK')
+  assert.equal(verifyPassword(newPassword, g.rows.get('fy-admin-users' + uid).passwordHash), true)
+
+  for (const token of [first.data.token, second.data.token]) {
+    assert.equal((await g.main({ action: 'drafts', token })).code, 'AUTH_REQUIRED')
+  }
+  assert.equal((await login(oldPassword)).code, 'LOGIN_FAILED')
+  const renewed = await login(newPassword)
+  assert.equal(renewed.code, 'OK')
+  assert.equal((await g.main({ action: 'drafts', token: renewed.data.token })).code, 'OK')
 })

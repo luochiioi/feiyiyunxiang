@@ -11,7 +11,18 @@
         <text class="hint">使用单独开通的后台管理员账号登录。</text>
       </view>
       <template v-else>
-        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button @click="signOut">退出</button></view>
+        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="showPasswordForm">修改密码</button><button :disabled="busy" @click="signOut">退出</button></view>
+        <view v-if="changingPassword" class="card password-form">
+          <text class="heading">修改管理员密码</text>
+          <text>当前密码</text><input v-model="currentPassword" :password="true" :maxlength="256" :disabled="busy" />
+          <text>新密码（16–128 字符）</text><input v-model="newPassword" :password="true" :maxlength="128" :disabled="busy" />
+          <text>确认新密码</text><input v-model="confirmPassword" :password="true" :maxlength="128" :disabled="busy" />
+          <text class="hint">修改后，需要在各设备上使用新密码重新登录。</text>
+          <view class="toolbar">
+            <button class="primary" :disabled="busy" @click="savePassword">保存新密码</button>
+            <button :disabled="busy" @click="closePasswordForm">取消</button>
+          </view>
+        </view>
         <view class="workspace">
           <view class="list card"><view v-for="item in drafts" :key="item.id" class="list-item" @click="edit(item)"><text>{{ item.name }}</text><text class="hint">{{ item.region }} · 草稿 v{{ item.revision }}</text></view><text v-if="drafts.length === 0">暂无草稿</text></view>
           <view v-if="editing" class="card editor">
@@ -46,12 +57,52 @@ type Museum = { name: string, description: string }
 type Viewport = { latitude: number, longitude: number, scale: number }
 type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: Node[] }
 const username = ref(''), password = ref(''), busy = ref(false), message = ref('')
+const changingPassword = ref(false)
+const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 const drafts = ref<Draft[]>([])
 const editing = ref(false)
 const draft = ref<Draft>({ id: '', name: '', region: '', description: '', revision: 0, testOnly: true, museum: { name: '', description: '' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] })
 function numeric(value: string): number { return Number(value) }
 async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; await load() } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
-async function signOut(): Promise<void> { try { await api<UTSJSONObject>('adminLogout'); session.value = null; editing.value = false; drafts.value = [] } catch (_) { message.value = '退出未完成，请重试。' } }
+async function signOut(): Promise<void> { try { await api<UTSJSONObject>('adminLogout'); session.value = null; editing.value = false; drafts.value = []; closePasswordForm() } catch (_) { message.value = '退出未完成，请重试。' } }
+function showPasswordForm(): void {
+  message.value = ''
+  changingPassword.value = true
+}
+function closePasswordForm(): void {
+  currentPassword.value = ''
+  newPassword.value = ''
+  confirmPassword.value = ''
+  changingPassword.value = false
+}
+async function savePassword(): Promise<void> {
+  if (busy.value) return
+  if (currentPassword.value.length === 0 || newPassword.value.length < 16 || newPassword.value.length > 128 || newPassword.value.trim().length === 0) {
+    message.value = '请输入当前密码，并设置 16–128 字符的新密码。'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    message.value = '两次输入的新密码不一致。'
+    return
+  }
+  busy.value = true
+  try {
+    await api<UTSJSONObject>('adminChangePassword', { currentPassword: currentPassword.value, newPassword: newPassword.value })
+    session.value = null
+    editing.value = false
+    drafts.value = []
+    message.value = '密码已修改，请用新密码重新登录。'
+    closePasswordForm()
+  } catch (error) {
+    const code = (error as Error | null)?.message ?? ''
+    if (code === 'PASSWORD_INCORRECT') message.value = '当前密码不正确。'
+    else if (code === 'PASSWORD_UNCHANGED') message.value = '请设置与当前密码不同的新密码。'
+    else if (code === 'INVALID_PASSWORD') message.value = '新密码应为 16–128 字符。'
+    else if (code === 'RATE_LIMITED') message.value = '尝试次数过多，请稍后再试。'
+    else if (code === 'AUTH_REQUIRED') { message.value = '登录已过期，请重新登录后修改密码。'; closePasswordForm() }
+    else message.value = '暂未确认密码是否修改，请重新登录核对。'
+  } finally { busy.value = false }
+}
 async function load(): Promise<void> { try { drafts.value = await api<Draft[]>('drafts'); message.value = '' } catch (_) { message.value = '读取失败或会话已过期。编辑内容仍保留。' } }
 function edit(item: Draft): void { draft.value = JSON.parse<Draft>(JSON.stringify(item))!; editing.value = true }
 function newDraft(): void { draft.value = { id: 'route-' + Date.now(), name: '开发测试路线', region: '澳门', description: '仅用于开发联调，不代表真实馆方路线', revision: 0, testOnly: true, museum: { name: '开发测试馆', description: '资料待核实' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] }; editing.value = true; addNode() }
@@ -75,6 +126,7 @@ page { background:#f3f4ed; color:#35452d; font-size:14px; }
 .main { padding:32px; flex:1; min-width:0; }
 .card { padding:24px; background:#fffef7; border-radius:20px; display:flex; flex-direction:column; gap:12px; }
 .login { max-width:440px; margin-top:24px; }
+.password-form { max-width:440px; margin-bottom:16px; }
 .hint { font-size:12px; opacity:.75; line-height:1.7; }
 .message { display:block; padding:12px 0; color:#8b532b; }
 .toolbar { display:flex; flex-direction:row; gap:12px; margin:12px 0; flex-wrap:wrap; }
