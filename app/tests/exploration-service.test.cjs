@@ -244,3 +244,53 @@ test('the bundled route templates preview without writes and publish only their 
   await production.saveDraft(admin, { ...macau, revision: 2 })
   await assert.rejects(production.publish(admin, { id: macau.id, revision: 3 }), /TEST_CONTENT_DISABLED/)
 })
+
+test('combined test revision attaches four tasks to old explorations and carries matching progress by owner', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../admin/features/stage-three-content.uts'), 'utf8')
+  const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64')
+  const { combinedContent, macauContent, hunanContent } = await import(moduleUrl)
+  const { s, repo, admin, a, b } = setup()
+  const macauSource = { ...draft, id: 'trial-macau', culture: macauContent(['n1']) }
+  const hunanSource = { ...hunan, id: 'trial-hunan', culture: hunanContent() }
+  for (const route of [draft, macauSource, hunanSource]) {
+    await s.saveDraft(admin, route)
+    await s.publish(admin, { id: route.id, revision: 1 })
+  }
+  const old = (await s.start(a, { routeId: draft.id, requestId: 'main-old' })).id
+  await checkPoint(s, a, old)
+  const before = await s.progress(a, { runId: old })
+  const macauRun = (await s.start(a, { routeId: macauSource.id, requestId: 'trial-macau' })).id
+  const work = await s.saveTile(a, { runId: macauRun, pattern: 'sail', palette: 'mist' })
+  await s.answerQuiz(a, { runId: macauRun, activityId: 'tileQuiz', option: 'b' })
+  const checkpoint = await s.saveReading(a, { runId: macauRun, act: 4, revision: 0, path: ['shore', 'exchange'] })
+  const hunanRun = (await s.start(a, { routeId: hunanSource.id, requestId: 'trial-hunan' })).id
+  await s.answerQuiz(a, { runId: hunanRun, option: 'b' })
+  await s.readCard(a, { runId: hunanRun, cardId: 'direction' })
+
+  const merged = {
+    ...draft, revision: 1, nodes: [{ ...draft.nodes[0], id: 'new-map-point' }],
+    culture: combinedContent(['new-map-point']), cultureUpgrade: [macauSource.id, hunanSource.id]
+  }
+  await assert.rejects(s.saveDraft(admin, { ...merged, cultureUpgrade: [merged.id] }), /INVALID_CULTURE_UPGRADE/)
+  await s.saveDraft(admin, merged)
+  const { version } = await s.publish(admin, { id: merged.id, revision: 2 })
+  const [progress, library] = await Promise.all([s.routeProgress(a, { routeId: merged.id }), s.storyLibrary(a)])
+  assert.equal(progress.runId, old)
+  assert.equal(progress.version, before.version)
+  assert.deepEqual(progress.snapshot.nodes, before.snapshot.nodes)
+  assert.deepEqual(progress.completed, ['n1'])
+  assert.deepEqual(progress.activities, ['tile', 'tileQuiz', 'quiz'])
+  assert.equal((await repo.get('fy-runs', old)).cultureVersion, version)
+  assert.equal((await s.diary(a)).length, 1)
+  assert.deepEqual(await s.works(a), [{ runId: old, routeName: draft.name, ...work }])
+  assert.deepEqual((await s.storyChapter(a, { runId: old, act: 4 })).checkpoint, checkpoint)
+  assert.deepEqual(library.filter(entry => entry.routeId === merged.id).map(e => [e.act, e.unlocked, e.nextActivityId]),
+    [[2, true, null], [3, true, null], [4, true, null], [5, true, null], [6, false, 'learning']])
+  assert.deepEqual((await s.activityStatus(a, { runId: old, activityId: 'learning' })).read, ['direction'])
+  const fresh = (await s.start(b, { routeId: merged.id, requestId: 'main-other' })).id
+  const second = await s.progress(b, { runId: fresh })
+  assert.deepEqual(second.activities, [])
+  assert.equal((await s.storyLibrary(b)).find(entry => entry.act === 6).nextActivityId, 'quiz')
+  await assert.rejects(s.progress(b, { runId: old }), /NOT_FOUND/)
+  assert.equal((await s.catalog()).find(item => item.id === merged.id).chapters.length, 5)
+})

@@ -44,7 +44,7 @@ import { activeRun, findRoute, listNodes, published, refreshCatalog, startRoute,
 import type { RunProgress } from '@/features/exploration/catalog.uts'
 import { api, session, showError } from '@/features/api.uts'
 import { dispatchMapEvent } from '@/features/exploration/map-store.uts'
-import { decodePageId, openCheckin, openPage, returnToMap } from '@/features/navigation.uts'
+import { decodePageId, openCheckin, openCultureActivity, openPage, returnToMap } from '@/features/navigation.uts'
 const id = ref<string | null>(null)
 const progress = ref<RunProgress | null>(null)
 const busy = ref(false)
@@ -80,7 +80,7 @@ async function openPoint(nodeId: string): Promise<void> {
 }
 function openActivity(activityId: string): void {
   if (id.value == null) return
-  openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(id.value!) + '&activityId=' + encodeURIComponent(activityId))
+  openCultureActivity(id.value!, activityId)
 }
 function openStory(): void {
   if (id.value != null) openPage('/packages/story/story/story?routeId=' + encodeURIComponent(id.value!))

@@ -18,6 +18,10 @@ export function openRouteDetail(routeId: string): void {
   openPage('/packages/routes/route-detail/route-detail?routeId=' + encodeURIComponent(routeId))
 }
 
+export function openCultureActivity(routeId: string, activityId: string): void {
+  openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(routeId) + '&activityId=' + encodeURIComponent(activityId))
+}
+
 export function returnToMap(): void {
   const pages = getCurrentPages()
   const home = pages.findIndex(page => page.route === 'pages/index/index')

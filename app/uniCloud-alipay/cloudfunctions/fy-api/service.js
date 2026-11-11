@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto')
-const { validateCulture, cultureSummary, completedActivities } = require('./culture')
+const { validateCulture, cultureSummary, chapterGuide, completedActivities, activityIds } = require('./culture')
 const { createCultureService } = require('./culture-service')
+const { createCultureUpgrade } = require('./culture-upgrade')
 const fail = code => { throw new Error(code) }
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const text = (v, max=120) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
@@ -25,12 +26,25 @@ function validateDraft(p) {
   })
   const value = {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:{latitude:p.viewport.latitude,longitude:p.viewport.longitude,scale:p.viewport.scale},nodes}
   if (p.culture != null) value.culture = validateCulture(p.culture, ids)
+  if (p.cultureUpgrade != null) {
+    const from = p.cultureUpgrade
+    const culture = value.culture
+    if (!p.testOnly || !Array.isArray(from) || from.length > 2 || new Set(from).size !== from.length ||
+      !from.every(source => id(source) && source !== p.id) ||
+      !activityIds.every(activity => culture?.[activity]?.after.length === 0) ||
+      culture.chapters?.length !== 5 || culture.chapters[0]?.act !== 2 || culture.chapters[0].checkinMode !== 'any' ||
+      culture.chapters.slice(1).some(chapter => chapter.after.length > 0)) fail('INVALID_CULTURE_UPGRADE')
+    value.cultureUpgrade = from
+  }
   return value
 }
 function routeView(v, version) {
-  return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version,activities:cultureSummary(v.culture)}
+  return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version,
+    activities:cultureSummary(v.culture), chapters:(v.culture?.chapters ?? []).map(chapter => chapterGuide(v.culture, chapter)),
+    cultureUpgrade:Array.isArray(v.cultureUpgrade)}
 }
 function createService({repo,now=Date.now,allowTestContent=true}) {
+  const attachCulture = createCultureUpgrade({ repo, allowTestContent })
   async function owned(db,u,runId) {
     if (!u?.uid || !id(runId)) fail('NOT_FOUND')
     const run=await db.get('fy-runs',runId)
@@ -45,6 +59,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     return {run,node}
   }
   async function runProgress(u, runId, run) {
+    run = await attachCulture(run, runId)
     const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
     const completed = checks.map(check => check.nodeId)
     const snapshot = routeView(run.snapshot, run.version)
@@ -53,7 +68,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       done: completed.length + activities.length, total: snapshot.nodes.length + snapshot.activities.length }
   }
   return {
-    ...createCultureService({ repo, owned, key, now }),
+    ...createCultureService({ repo, owned, key, now, attachCulture }),
     async drafts(u) { adminOnly(u); return repo.list('fy-drafts',{}) },
     async previewDraft(u, p) {
       adminOnly(u)
@@ -81,7 +96,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         if (draft.testOnly&&!allowTestContent) fail('TEST_CONTENT_DISABLED')
         if (!draft.testOnly && draft.contentVerified!==true) fail('CONTENT_REVIEW_REQUIRED')
         await db.put('fy-versions',version,{...draft,publishedAt:now(),publishedBy:u.uid})
-        await db.put('fy-routes',p.id,{version,enabled:true,testOnly:draft.testOnly})
+        await db.put('fy-routes',p.id,{version,enabled:true,testOnly:draft.testOnly,cultureUpgrade:Array.isArray(draft.cultureUpgrade)})
         await db.put('fy-audit',key(p.id,p.revision),{action:'publish',routeId:p.id,version,uid:u.uid,at:now()})
         return {version}
       })

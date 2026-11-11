@@ -6,7 +6,8 @@ import { visibleMapNodes } from './map-markers.uts'
 import type { RouteNode, RouteSummary, MapViewport } from './types.uts'
 export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
 export type ActivitySummary = { id: string, title: string }
-export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[] }
+export type ChapterGuide = { act: number, title: string, activityId?: string | null, gateText: string }
+export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean }
 export type RunProgress = { runId: string, routeId: string, version: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, activities?: string[] }
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)

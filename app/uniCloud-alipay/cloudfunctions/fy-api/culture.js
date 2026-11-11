@@ -138,6 +138,15 @@ function cultureSummary(culture) {
   return activityIds.filter(id => culture?.[id]).map(id => ({ id, title: culture[id].title }))
 }
 
+function chapterGuide(culture, chapter) {
+  const gates = []
+  if (chapter.after.length > 0) gates.push(chapter.checkinMode === 'any' ? '完成路线内任一地点打卡' : '完成路线指定打卡')
+  const activity = culture[chapter.activity]
+  if (chapter.activity === 'learning') gates.push('答对湘绣辨认题并读完四张知识卡')
+  else if (activity) gates.push('完成「' + activity.title + '」')
+  return { act: chapter.act, title: chapter.title, activityId: chapter.activity, gateText: gates.join('，') }
+}
+
 function completedActivities(run) {
   const completed = []
   if (run.culture?.tile) completed.push('tile')
@@ -153,4 +162,4 @@ function tileWork(p, at) {
   return { pattern: p.pattern, palette: p.palette, savedAt: at }
 }
 
-module.exports = { activityIds, quizIds, requireValue, validateCulture, cultureSummary, completedActivities, validPath, tileWork }
+module.exports = { activityIds, quizIds, requireValue, validateCulture, cultureSummary, chapterGuide, completedActivities, validPath, tileWork }

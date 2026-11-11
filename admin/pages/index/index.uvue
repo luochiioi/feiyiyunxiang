@@ -50,11 +50,17 @@
             <view class="toolbar">
               <button :disabled="busy" @click="fillMacau">载入澳门模板</button>
               <button :disabled="busy" @click="fillHunan">载入湖南模板</button>
+              <button v-if="draft.testOnly" :disabled="busy" @click="fillCombined">在本路线合并两地任务</button>
               <button :disabled="busy" @click="validatePreview">校验并预览当前编辑</button>
+            </view>
+            <view v-if="draft.cultureUpgrade != null" class="node">
+              <text class="heading">沿用已有探索的打卡进度</text>
+              <text class="hint">可填最多两个联调路线编号，用逗号分隔。相同任务的配色作品、答题和已读进度将转入本路线。</text>
+              <input v-model="cultureSourceRoutes" placeholder="来源路线编号（选填）" />
             </view>
             <ContentPreview v-if="preview != null" :key="previewId" :value="preview" />
             <view class="toolbar"><button class="primary" :disabled="busy" @click="save">保存草稿</button><button :disabled="busy || draft.revision === 0" @click="publish">发布已保存修订</button></view>
-            <text class="hint">发布后生成固定版本；正在探索的用户继续使用原版本。</text>
+            <text class="hint">{{ draft.cultureUpgrade != null ? '已有探索会加入这次发布的文化任务，沿用原有地图点位和打卡记录。' : '发布后生成固定版本，正在探索的用户继续使用原版本。' }}</text>
           </view>
         </view>
       </template>
@@ -65,17 +71,18 @@
 import { ref } from 'vue'
 import { api, session, AdminSession } from '@/features/api.uts'
 import ContentPreview from './ContentPreview.uvue'
-import { macauContent, hunanContent } from '@/features/stage-three-content.uts'
+import { combinedContent, macauContent, hunanContent } from '@/features/stage-three-content.uts'
 import type { DraftNode, DraftPreview } from '@/features/stage-three-content.uts'
 type Museum = { name: string, description: string }
 type Viewport = { latitude: number, longitude: number, scale: number }
-type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: DraftNode[] }
+type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: DraftNode[], cultureUpgrade?: string[] | null }
 const username = ref(''), password = ref(''), busy = ref(false), message = ref('')
 const editingAccount = ref(false), newUsername = ref('')
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 const drafts = ref<Draft[]>([])
 const editing = ref(false)
 const cultureSource = ref('')
+const cultureSourceRoutes = ref('')
 const preview = ref<DraftPreview | null>(null)
 const previewId = ref(0)
 let savedPayload = ''
@@ -146,6 +153,7 @@ function edit(item: Draft): void {
   draft.value = JSON.parse<Draft>(raw)!
   const value = JSON.parse<UTSJSONObject>(raw)!['culture']
   cultureSource.value = value == null ? '' : JSON.stringify(value, null, 2)
+  cultureSourceRoutes.value = draft.value.cultureUpgrade?.join(', ') ?? ''
   preview.value = null
   savedPayload = JSON.stringify(draftPayload())
   editing.value = true
@@ -154,6 +162,7 @@ function newDraft(): void {
   if (busy.value) return
   draft.value = { id: 'route-' + Date.now(), name: '开发测试路线', region: '澳门', description: '仅用于开发联调，不代表真实馆方路线', revision: 0, testOnly: true, museum: { name: '开发测试馆', description: '资料待核实' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] }
   cultureSource.value = ''
+  cultureSourceRoutes.value = ''
   savedPayload = ''
   preview.value = null
   editing.value = true
@@ -163,6 +172,7 @@ function fillMacau(): void {
   const nodes = draft.value.nodes
   if (nodes.length === 0) { message.value = '澳门模板需要至少一个打卡节点。'; return }
   draft.value.region = '澳门'
+  draft.value.cultureUpgrade = null
   cultureSource.value = JSON.stringify(macauContent(nodes.map(node => node.id)), null, 2)
   preview.value = null
   message.value = '已载入澳门开发模板，请核对打卡坐标后校验。'
@@ -171,9 +181,18 @@ function fillHunan(): void {
   const nodes = draft.value.nodes
   if (nodes.length === 0) { message.value = '湖南模板需要至少一个打卡节点。'; return }
   draft.value.region = '湖南'
+  draft.value.cultureUpgrade = null
   cultureSource.value = JSON.stringify(hunanContent(), null, 2)
   preview.value = null
   message.value = '已载入湖南开发模板，请核对打卡坐标后校验。'
+}
+function fillCombined(): void {
+  const nodes = draft.value.nodes
+  if (nodes.length === 0) { message.value = '合并模板需要至少一个打卡节点。'; return }
+  draft.value.cultureUpgrade = []
+  cultureSource.value = JSON.stringify(combinedContent(nodes.map(node => node.id)), null, 2)
+  preview.value = null
+  message.value = '已载入两地文化任务。校验后可在本路线预览第二至六幕。'
 }
 function addNode(): void { draft.value?.nodes.push({ id: 'node-' + Date.now(), title: '测试节点', description: '定位与照片', latitude: 0, longitude: 0, radius: 100 }) }
 function removeNode(index: number): void { draft.value?.nodes.splice(index, 1) }
@@ -181,6 +200,9 @@ function draftPayload(): UTSJSONObject {
   const value = draft.value
   const first = value.nodes[0]
   const payload = JSON.parse<UTSJSONObject>(JSON.stringify(value))!
+  if (value.cultureUpgrade != null) {
+    payload['cultureUpgrade'] = cultureSourceRoutes.value.split(/[,，]/).map(id => id.trim()).filter(id => id.length > 0)
+  }
   if (first != null) payload['viewport'] = { ...value.viewport, latitude: first.latitude, longitude: first.longitude }
   const source = cultureSource.value.trim()
   if (source.length === 0) { payload['culture'] = null; return payload }
@@ -199,6 +221,7 @@ function contentError(error: any): string {
   if (code === 'INVALID_SCENE_GRAPH') return '检查起始场景、跳转目标、循环和不可达场景。'
   if (code === 'INVALID_SCENE') return '场景编号、正文、类型或素材引用有误。当前可使用素材编号 aomiao。'
   if (code === 'INVALID_QUIZ_ANSWER') return '辨认题选项编号必须唯一，答案须引用一个已有选项。'
+  if (code === 'INVALID_CULTURE_UPGRADE') return '请核对开发测试状态、两地合并模板及来源路线编号。'
   if (code === 'TEST_CONTENT_DISABLED' || code === 'CONTENT_REVIEW_REQUIRED') return '环境或内容审核条件尚未满足。'
   return '请检查字段、素材和坐标后重试。' + (code.startsWith('INVALID_') ? '（' + code + '）' : '')
 }

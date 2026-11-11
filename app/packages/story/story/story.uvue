@@ -9,17 +9,19 @@
       </view>
       <view class="card">
         <text class="heading">章节目录</text>
-        <view v-for="(chapter, index) in chapters" :key="chapter.title" class="row spread divider menu-row" @click="openChapter(index + 1)">
+        <text class="muted">从每一幕的入口完成任务，返回这里继续阅读。</text>
+        <view v-for="(chapter, index) in chapters" :key="chapter.title" class="row spread divider menu-row">
           <view class="stack">
             <text class="body">{{ '第 ' + (index + 1) + ' 幕 · ' + (chapterFor(index + 1)?.title ?? chapter.title) }}</text>
             <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapterFor(index + 1)?.gateText ?? chapter.gate }}</text>
           </view>
-          <text class="muted">{{ chapterLabel(index + 1) }}</text>
+          <button v-if="hasAction(index + 1)" class="chapter-action" @click="openChapter(index + 1)">{{ chapterLabel(index + 1) }}</button>
+          <text v-else class="muted">{{ chapterLabel(index + 1) }}</text>
         </view>
         <text v-if="message.length > 0" class="muted">{{ message }}</text>
         <button v-if="loadFailed" class="secondary" @click="load">重新读取解锁进度</button>
       </view>
-      <button class="primary" @click="openPage('/packages/routes/routes/routes')">查看两地路线</button>
+      <button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看路线</button>
     </view>
   </view>
 </template>
@@ -27,12 +29,15 @@
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { ref } from 'vue'
-import { secured, session } from '@/features/api.uts'
-import { decodePageId, openPage } from '@/features/navigation.uts'
+import { api, secured, session } from '@/features/api.uts'
+import type { PublishedRoute } from '@/features/exploration/catalog.uts'
+import { decodePageId, openCultureActivity, openPage, openRouteDetail } from '@/features/navigation.uts'
 import { legacyStorm, localStoryPath, savedOpeningPath } from '../story-content.uts'
 import { readLegacyStorm } from '../legacy-story.uts'
-type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean, gateText?: string, local?: boolean }
+type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean, gateText?: string, nextActivityId?: string | null, local?: boolean }
+type TaskLink = { routeId: string, activityId: string, label: string }
 const entries = ref<Entry[]>([])
+const routes = ref<PublishedRoute[]>([])
 const openingStarted = ref(false)
 const loadFailed = ref(false)
 const olderService = ref(false)
@@ -40,12 +45,12 @@ const message = ref('')
 let loading = false
 let preferredRoute = ''
 const chapters = [
-  { title: '触碰海丝地图', gate: '' },
-  { title: '海上风暴', gate: '澳门 · 完成路线内任一地点打卡' },
-  { title: '女儿与瓷砖', gate: '澳门 · 保存瓷砖配色作品' },
-  { title: '澳门靠岸', gate: '澳门 · 答对瓷砖纹样辨认题' },
-  { title: '湘绣相遇', gate: '湖南 · 完成湘绣辨认' },
-  { title: '针法学习', gate: '湖南 · 学完四张知识卡' }
+  { title: '触碰海丝地图', gate: '', taskId: '' },
+  { title: '海上风暴', gate: '完成路线内任一地点打卡', taskId: '' },
+  { title: '女儿与瓷砖', gate: '保存蓝白瓷砖配色作品', taskId: 'tile' },
+  { title: '澳门靠岸', gate: '答对瓷砖纹样辨认题', taskId: 'tileQuiz' },
+  { title: '湘绣相遇', gate: '答对湘绣辨认题', taskId: 'quiz' },
+  { title: '针法学习', gate: '答对湘绣辨认题后，读完四张知识卡', taskId: 'learning' }
 ]
 onLoad(query => { preferredRoute = decodePageId(query['routeId'] ?? null) ?? '' })
 onShow(() => {
@@ -57,10 +62,11 @@ async function load(): Promise<void> {
   loadFailed.value = false
   olderService.value = false
   message.value = ''
-  if (session.value == null) { entries.value = []; return }
   loading = true
-  const uid = session.value!.uid
+  const uid = session.value?.uid
   try {
+    try { routes.value = await api<PublishedRoute[]>('catalog') } catch (_) { /* Keep the last public catalog for task links. */ }
+    if (uid == null) { entries.value = []; return }
     let library: Entry[] = []
     let missing = false
     try {
@@ -89,10 +95,6 @@ async function load(): Promise<void> {
       message.value = library.length > 0
         ? '当前测试路线的第二幕可按已有打卡进度阅读，其余章节待剧情服务接入。'
         : '当前开发环境尚未接入剧情服务。可从已打卡的澳门测试路线查看第二幕。'
-    } else if (library.every(item => item.local === true)) {
-      message.value = library.length > 0
-        ? '当前探索版本只包含第二幕。其他章节需从已发布文化任务的路线开始。'
-        : '当前账号暂无已接入剧情的探索。可在路线详情查看文化任务。'
     }
   } catch (error) {
     entries.value = []
@@ -103,13 +105,41 @@ async function load(): Promise<void> {
 }
 function chapterFor(act: number): Entry | null {
   const candidates = entries.value.filter(entry => entry.act === act)
+  const main = routes.value.find(route => route.cultureUpgrade === true)
   return candidates.find(entry => entry.routeId === preferredRoute) ??
+    candidates.find(entry => entry.routeId === main?.id) ??
     candidates.find(entry => entry.unlocked) ?? candidates[0] ?? null
+}
+function taskFor(act: number): TaskLink | null {
+  if (act < 2) return null
+  const entry = chapterFor(act)
+  const defaultTask = chapters[act - 1].taskId
+  const matching = routes.value.filter(route => route.chapters?.some(chapter => chapter.act === act) === true ||
+    route.activities?.some(task => task.id === (act === 2 ? 'tile' : defaultTask)) === true)
+  const route = matching.find(item => item.id === preferredRoute) ?? matching.find(item => item.cultureUpgrade === true) ??
+    matching.find(item => item.id === entry?.routeId) ?? matching[0] ?? null
+  if (route == null && entry == null) return null
+  const routeId = route?.id ?? entry!.routeId
+  const sameRoute = entry?.routeId === routeId
+  let task = ''
+  if (act > 2) {
+    if (sameRoute && entry?.nextActivityId !== undefined) task = entry?.nextActivityId ?? ''
+    else if (route?.activities?.some(item => item.id === defaultTask) === true) {
+      task = act === 6 && !entries.value.some(item => item.routeId === routeId && item.act === 5 && item.unlocked) ? 'quiz' : defaultTask
+    }
+  }
+  const label = task === 'tile' ? '去配色' : task === 'tileQuiz' ? '答瓷砖题' : task === 'quiz' ? '答湘绣题' : task === 'learning' ? '学知识卡' : act === 2 ? '去打卡' : '查看路线'
+  return { routeId, activityId: task, label }
+}
+function hasAction(act: number): boolean {
+  return act === 1 || chapterFor(act)?.unlocked === true || taskFor(act) != null
 }
 function chapterLabel(act: number): string {
   if (act === 1) return '游客可读 ›'
   const entry = chapterFor(act)
   if (entry?.unlocked === true) return entry.started ? '继续阅读 ›' : '阅读 ›'
+  const task = taskFor(act)
+  if (task != null) return task.label + ' ›'
   if (loadFailed.value) return '待重试'
   if (entry != null) return '随路线解锁'
   if (session.value == null) return '登录后查看'
@@ -121,11 +151,17 @@ function openChapter(act: number): void {
   const entry = chapterFor(act)
   if (entry?.unlocked === true) {
     openPage('/packages/story/reader/reader?act=' + act + '&runId=' + encodeURIComponent(entry.runId) + (entry.local === true ? '&legacy=1' : ''))
+    return
   }
+  const task = taskFor(act)
+  if (task == null) return
+  if (task.activityId.length > 0) openCultureActivity(task.routeId, task.activityId)
+  else openRouteDetail(task.routeId)
 }
 </script>
 
 <style scoped>
 @import '@/styles/page.css';
 
+.chapter-action { flex-shrink: 0; margin: 0; padding: 0 10px; border-radius: 9px; font-size: 13px; line-height: 34px; background: #eef2e5; color: #385538; }
 </style>

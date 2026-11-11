@@ -40,6 +40,7 @@
             <template v-if="pickedOptionId === option.id">
               <text v-if="message.length > 0" class="body">{{ message }}</text>
               <text v-if="status.done" class="body">{{ status.explanation }}</text>
+              <button v-if="status.done" class="secondary" @click="showStory">查看已解锁章节</button>
             </template>
           </view>
           <text v-if="status.done && pickedOptionId.length === 0" class="body">{{ status.explanation }}</text>
@@ -58,6 +59,7 @@
           </view>
         </template>
         <text v-if="message.length > 0 && (!quizActivity || pickedOptionId.length === 0)" class="muted">{{ message }}</text>
+        <button v-if="activityComplete && (!quizActivity || pickedOptionId.length === 0)" class="secondary" @click="showStory">查看已解锁章节</button>
       </view>
     </view>
   </view>
@@ -70,7 +72,7 @@ import TilePreview from '../components/TilePreview.uvue'
 import StitchSample from '../components/StitchSample.uvue'
 import { secured, session } from '@/features/api.uts'
 import { refreshCatalog, startRoute } from '@/features/exploration/catalog.uts'
-import { decodePageId } from '@/features/navigation.uts'
+import { decodePageId, openPage } from '@/features/navigation.uts'
 
 type Selection = { pattern: string, palette: string }
 type Option = { id: string, label: string, illustration: string }
@@ -83,6 +85,7 @@ const selection = ref<Selection>({ pattern: 'rose', palette: 'indigo' })
 const status = ref<ActivityStatus | null>(null)
 const activityId = ref('')
 const quizActivity = computed(() => activityId.value === 'quiz' || activityId.value === 'tileQuiz')
+const activityComplete = computed(() => status.value?.work != null || status.value?.done === true || status.value?.read?.length === 4)
 const pickedOptionId = ref('')
 const validEntry = ref(false)
 const openedCard = ref('')
@@ -130,6 +133,14 @@ async function load(): Promise<void> {
 function choose(pattern: string, palette: string): void {
   selection.value = { pattern, palette }
   uni.setStorageSync(draftKey, JSON.stringify(selection.value))
+}
+function showStory(): void {
+  const pages = getCurrentPages()
+  if (pages.length > 1 && pages[pages.length - 2].route === 'packages/story/story/story') {
+    uni.navigateBack({ delta: 1 })
+    return
+  }
+  openPage('/packages/story/story/story?routeId=' + encodeURIComponent(routeId))
 }
 function openCard(id: string): void { openedCard.value = openedCard.value === id ? '' : id }
 async function answer(option: string): Promise<void> {

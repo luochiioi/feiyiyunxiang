@@ -1,6 +1,6 @@
-const { activityIds, quizIds, completedActivities, requireValue, tileWork, validPath } = require('./culture')
+const { activityIds, quizIds, chapterGuide, completedActivities, requireValue, tileWork, validPath } = require('./culture')
 
-function createCultureService({ repo, owned, key, now }) {
+function createCultureService({ repo, owned, key, now, attachCulture }) {
   async function checkinsMet(db, runId, after, mode = 'all') {
     for (const nodeId of after) {
       const checked = !!await db.get('fy-checkins', key(runId, nodeId))
@@ -47,7 +47,8 @@ function createCultureService({ repo, owned, key, now }) {
 
   return {
     async activityStatus(u, p) {
-      return activityStatus(repo, await owned(repo, u, p.runId), p.runId, p.activityId)
+      const run = await attachCulture(await owned(repo, u, p.runId), p.runId)
+      return activityStatus(repo, run, p.runId, p.activityId)
     },
     async saveTile(u, p) {
       const work = tileWork(p, now())
@@ -91,7 +92,8 @@ function createCultureService({ repo, owned, key, now }) {
     async works(u) {
       requireValue(u?.uid, 'AUTH_REQUIRED')
       const runs = await repo.list('fy-runs', { uid: u.uid })
-      return runs.filter(run => run.culture?.tile).map(run => ({
+      const copied = new Set(runs.map(run => run.cultureTileSourceId).filter(Boolean))
+      return runs.filter(run => run.culture?.tile && !copied.has(run._id)).map(run => ({
         runId: run._id, routeName: run.snapshot.name, ...run.culture.tile
       })).sort((a, b) => b.savedAt - a.savedAt)
     },
@@ -102,30 +104,29 @@ function createCultureService({ repo, owned, key, now }) {
       for (const run of runs.sort((a, b) => b.createdAt - a.createdAt)) {
         if (!latest.has(run.routeId)) latest.set(run.routeId, run)
       }
-      const items = await Promise.all(Array.from(latest.values(), async run => {
+      const items = await Promise.all(Array.from(latest.values(), async original => {
+        const run = await attachCulture(original, original._id)
         const chapters = run.snapshot.culture?.chapters ?? []
         if (chapters.length === 0) return []
         const checks = await repo.list('fy-checkins', { runId: run._id, uid: u.uid })
         const ids = new Set(checks.map(check => check.nodeId))
         const completed = completedActivities(run)
         return chapters.map(chapter => {
-          const gates = []
           const any = chapter.checkinMode === 'any'
           const checked = any ? chapter.after.some(id => ids.has(id)) : chapter.after.every(id => ids.has(id))
-          if (chapter.after.length > 0) gates.push(any ? '完成路线内任一地点打卡' : '完成路线指定打卡')
-          const activity = run.snapshot.culture[chapter.activity]
-          if (activity) gates.push('完成「' + activity.title + '」')
+          const done = chapter.activity == null || completed.includes(chapter.activity)
+          const nextActivityId = !checked || done ? null :
+            chapter.activity === 'learning' && !completed.includes('quiz') ? 'quiz' : chapter.activity
           return {
-            act: chapter.act, title: chapter.title, runId: run._id, routeId: run.routeId,
-            unlocked: checked && (chapter.activity == null || completed.includes(chapter.activity)),
-            started: !!run.story?.[chapter.act], gateText: gates.join('，')
+            ...chapterGuide(run.snapshot.culture, chapter), runId: run._id, routeId: run.routeId,
+            unlocked: checked && done, started: !!run.story?.[chapter.act], nextActivityId
           }
         })
       }))
       return items.flat()
     },
     async storyChapter(u, p) {
-      const run = await owned(repo, u, p.runId)
+      const run = await attachCulture(await owned(repo, u, p.runId), p.runId)
       const chapter = await unlockedChapter(repo, run, p)
       return { chapter, checkpoint: checkpoint(run, chapter), testOnly: run.snapshot.testOnly }
     },

@@ -10,6 +10,12 @@ type LearningCard = { id: string, title: string, hotspot: string, body: string, 
 export type CultureContent = { tile?: Activity, tileQuiz?: Quiz, quiz?: Quiz, learning?: Learning, chapters?: Chapter[] }
 export type DraftPreview = { name: string, region: string, testOnly: boolean, releaseAllowed: boolean, nodes: DraftNode[], culture?: CultureContent }
 
+export function combinedContent(nodeIds: string[]): CultureContent {
+  const macau = macauContent(nodeIds)
+  const hunan = hunanContent()
+  return { ...macau, ...hunan, chapters: [...(macau.chapters ?? []), ...(hunan.chapters ?? [])] }
+}
+
 export function macauContent(nodeIds: string[]): CultureContent {
   return {
     tile: { title: '蓝白瓷砖配色', after: [] },
