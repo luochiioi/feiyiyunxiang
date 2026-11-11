@@ -1,0 +1,46 @@
+<template>
+  <map id="exploration-map" class="map-surface" :latitude="viewport.latitude" :longitude="viewport.longitude"
+    :scale="viewport.scale" :markers="markers" :enable-rotate="false"
+    @markertap="markerTap" @regionchange="regionChange" />
+</template>
+
+<script setup lang="uts">
+import { computed } from 'vue'
+import { buildMapMarkers, resolveNodeId } from '@/features/exploration/map-markers.uts'
+import type { MarkerEvent } from '@/features/exploration/map-markers.uts'
+import type { MapPosition, MapViewport, RouteNode } from '@/features/exploration/types.uts'
+
+const props = defineProps<{
+  nodes: RouteNode[], selectedNodeId: string | null, viewport: MapViewport, currentLocation: MapPosition | null
+}>()
+const emit = defineEmits<{
+  (event: 'node-select', id: string): void
+  (event: 'viewport-change', viewport: MapViewport): void
+}>()
+
+const markers = computed(() => buildMapMarkers(props.nodes, props.selectedNodeId, props.currentLocation))
+
+type RegionEvent = {
+  type: string
+  causedBy?: string
+  detail?: { type?: string, causedBy?: string, centerLocation?: { latitude: number, longitude: number }, scale?: number }
+}
+function markerTap(event: MarkerEvent): void {
+  const id = resolveNodeId(props.nodes, event)
+  if (id != null) emit('node-select', id)
+}
+function regionChange(event: RegionEvent): void {
+  const detail = event.detail
+  const cause = detail?.causedBy ?? event.causedBy
+  if ((detail?.type ?? event.type) !== 'end' || (cause !== 'drag' && cause !== 'scale' && cause !== 'gesture')) return
+  const center = detail?.centerLocation
+  const scale = detail?.scale
+  if (center != null && scale != null && Number.isFinite(scale)) {
+    emit('viewport-change', { latitude: center.latitude, longitude: center.longitude, scale })
+  }
+}
+</script>
+
+<style scoped>
+.map-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>

@@ -1,0 +1,9 @@
+import { shallowRef } from 'vue'
+import { initialMapState, reduceMapState } from './map-state.uts'
+import type { MapEvent, MapState } from './types.uts'
+
+export const mapState = shallowRef<MapState>(initialMapState())
+
+export function dispatchMapEvent(event: MapEvent): void {
+  mapState.value = reduceMapState(mapState.value, event)
+}

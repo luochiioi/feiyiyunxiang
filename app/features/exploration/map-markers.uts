@@ -1,0 +1,47 @@
+import type { MapPosition, RouteNode } from './types.uts'
+
+export const locationMarkerId = 90000
+
+type MapMarker = {
+  id: number
+  latitude: number
+  longitude: number
+  iconPath: string
+  width: number
+  height: number
+  anchor: { x: number, y: number }
+  zIndex: number
+}
+
+export type MarkerEvent = { markerId?: number, detail?: { markerId?: number } }
+
+export function visibleMapNodes(nodes: RouteNode[], routeId: string | null): RouteNode[] {
+  return routeId == null ? nodes : nodes.filter(node => node.routeId === routeId)
+}
+
+export function buildMapMarkers(nodes: RouteNode[], selectedNodeId: string | null, location: MapPosition | null): MapMarker[] {
+  const markers = nodes.map((node): MapMarker => {
+    const selected = selectedNodeId === node.id
+    const status = node.checked ? 'checked' : 'default'
+    return {
+      id: node.markerId, latitude: node.latitude, longitude: node.longitude,
+      iconPath: '/static/map/marker_' + status + (selected ? '_selected' : '') + '.png',
+      width: selected ? 42 : 36, height: selected ? 46 : 40,
+      anchor: { x: 0.5, y: 1 }, zIndex: selected ? 3 : 2
+    }
+  })
+  if (location != null) {
+    markers.push({
+      id: locationMarkerId, latitude: location.latitude, longitude: location.longitude,
+      iconPath: '/static/map/position-dot.png', width: 24, height: 24,
+      anchor: { x: 0.5, y: 0.5 }, zIndex: 1
+    })
+  }
+  return markers
+}
+
+export function resolveNodeId(nodes: RouteNode[], event: MarkerEvent): string | null {
+  const markerId = event.detail?.markerId ?? event.markerId
+  if (markerId == null || markerId === locationMarkerId) return null
+  return nodes.find(node => node.markerId === markerId)?.id ?? null
+}

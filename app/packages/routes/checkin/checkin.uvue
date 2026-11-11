@@ -1,0 +1,34 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="拍照打卡" :show-back="true" />
+    <view class="content">
+      <DemoNotice :pending="true" description="本页只检查入口和返回。定位校验、拍照、上传及提交打卡在阶段二接通。" />
+
+      <template v-if="node != null">
+        <text class="title">{{ node.title }}</text>
+        <view class="card"><text class="heading">当前定位</text><text class="body">正式打卡需要在馆方确认的范围内获取位置。</text></view>
+        <view class="card"><text class="heading">照片与备注</text><text class="body">定位、拍照和提交将在微信登录与私密存储接通后开放。</text></view>
+        <view class="card green"><text class="body">打卡凭证默认私密。发布到社区时由你选图，并单独提交审核。</text></view>
+        <button class="secondary" @click="returnToMap">回到地图</button>
+      </template>
+      <view v-else class="card"><text class="body">请从路线或点位详情打开打卡。</text><button class="secondary" @click="returnToMap">回到地图</button></view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { computed, ref } from 'vue'
+import { findNode } from '@/features/exploration/catalog.uts'
+import { returnToMap } from '@/features/navigation.uts'
+const id = ref<string | null>(null)
+onLoad(query => { id.value = query['nodeId'] ?? null })
+const node = computed(() => findNode(id.value))
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+
+</style>

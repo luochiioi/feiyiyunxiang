@@ -1,0 +1,40 @@
+<template>
+  <view class="rail">
+    <button v-for="action in actions" :key="action.label" class="action" @click="emit('navigate', action.path)">
+      <image class="action-icon" :src="'/static/map/' + action.icon + '.png'" mode="aspectFit" />
+      <text>{{ action.label }}</text>
+    </button>
+    <template v-if="side === 'right'">
+      <button class="action zoom" aria-label="放大地图" @click="emit('zoom', 1)">＋</button>
+      <button class="action zoom" aria-label="缩小地图" @click="emit('zoom', -1)">－</button>
+      <button class="action" @click="emit('locate')">
+        <image class="action-icon" src="/static/map/locate.png" mode="aspectFit" /><text>定位</text>
+      </button>
+    </template>
+  </view>
+</template>
+
+<script setup lang="uts">
+const props = defineProps<{ side: string }>()
+const emit = defineEmits<{
+  (event: 'navigate', path: string): void
+  (event: 'zoom', delta: number): void
+  (event: 'locate'): void
+}>()
+const actions = props.side === 'left' ? [
+  { label: '我的', icon: 'profile', path: '/packages/profile/account/account' },
+  { label: '社区', icon: 'community', path: '/packages/community/community/community' },
+  { label: '剧情', icon: 'story', path: '/packages/story/story/story' }
+] : [
+  { label: '旅伴', icon: 'friends', path: '/packages/partner/partner/partner' },
+  { label: '路线', icon: 'route', path: '/packages/routes/routes/routes' }
+]
+</script>
+
+<style scoped>
+.rail { display: flex; flex-direction: column; gap: 8px; }
+.action { box-sizing: border-box; margin: 0; padding: 2px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 46px; height: 55px; border-radius: 17px; background: rgba(255,255,250,.98); color: #533a25; font-size: 12px; line-height: 15px; font-weight: 700; box-shadow: 0 3px 9px #2f30251a; }
+.action::after { border: 0; }
+.action-icon { width: 30px; height: 30px; }
+.zoom { height: 40px; font-size: 20px; }
+</style>

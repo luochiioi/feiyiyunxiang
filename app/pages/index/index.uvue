@@ -1,0 +1,94 @@
+<template>
+  <view class="home">
+    <RouteMap :nodes="nodes" :selected-node-id="mapState.selectedNodeId" :viewport="commandedViewport"
+      :current-location="currentLocation" @node-select="openNode" @viewport-change="saveViewport" />
+    <view class="home-header" :style="{ top: statusBar + 7 + 'px' }">
+      <text class="home-title">{{ route == null ? '非遗云享' : route.region + ' · 当前路线' }}</text>
+      <text class="home-caption">{{ demoEnabled ? '开发演示 · ' : '' }}{{ route == null ? (nodes.length > 0 ? '点图钉查看打卡点' : '从路线开始探索') : '博物馆探索' }}</text>
+    </view>
+    <view class="map-rail left" :style="{ top: statusBar + 75 + 'px' }">
+      <MapSideActions side="left" @navigate="openPage" />
+    </view>
+    <view class="map-rail right" :style="{ top: statusBar + 75 + 'px' }">
+      <MapSideActions side="right" @navigate="openPage" @zoom="zoom" @locate="locate" />
+    </view>
+    <view v-if="route != null" class="home-bottom">
+      <CurrentRoutePanel :route="route" :next-node="nextNode" :expanded="mapState.panelExpanded"
+        @toggle="togglePanel" @continue-task="openCheckin" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, shallowRef, ref, watch } from 'vue'
+import RouteMap from '@/components/exploration/RouteMap.uvue'
+import MapSideActions from '@/components/exploration/MapSideActions.uvue'
+import CurrentRoutePanel from '@/components/exploration/CurrentRoutePanel.uvue'
+import { demoEnabled } from '@/features/demo-mode.uts'
+import { findNode, findRoute, listNodes } from '@/features/exploration/catalog.uts'
+import { mapState, dispatchMapEvent } from '@/features/exploration/map-store.uts'
+import type { MapPosition, MapViewport } from '@/features/exploration/types.uts'
+import { openPage } from '@/features/navigation.uts'
+
+const statusBar = uni.getWindowInfo().statusBarHeight ?? 0
+const route = computed(() => findRoute(mapState.value.routeId))
+const nodes = computed(() => listNodes(mapState.value.routeId))
+const nextNode = computed(() => findNode(route.value?.nextNodeId ?? null))
+const commandedViewport = shallowRef<MapViewport>(mapState.value.viewport)
+const currentLocation = shallowRef<MapPosition | null>(null)
+const locating = ref(false)
+
+watch(() => mapState.value.routeId, id => {
+  if (id != null) commandedViewport.value = mapState.value.viewport
+})
+
+function saveViewport(viewport: MapViewport): void {
+  dispatchMapEvent({ type: 'set-viewport', viewport })
+}
+function moveMap(viewport: MapViewport): void {
+  saveViewport(viewport)
+  commandedViewport.value = viewport
+}
+function zoom(delta: number): void {
+  const viewport = mapState.value.viewport
+  moveMap({ ...viewport, scale: Math.max(5, Math.min(20, viewport.scale + delta)) })
+}
+function locate(): void {
+  if (locating.value) return
+  locating.value = true
+  uni.getLocation({
+    type: 'gcj02',
+    success: result => {
+      const position: MapPosition = { latitude: result.latitude, longitude: result.longitude }
+      currentLocation.value = position
+      moveMap({ ...position, scale: Math.max(16, mapState.value.viewport.scale) })
+    },
+    fail: () => uni.showModal({
+      title: '无法获取当前位置', content: '可以继续浏览地图，或在微信设置中开启定位后重试。', showCancel: false
+    }),
+    complete: () => { locating.value = false }
+  })
+}
+function togglePanel(): void {
+  dispatchMapEvent({ type: 'toggle-panel' })
+}
+function openNode(id: string): void {
+  dispatchMapEvent({ type: 'select-node', nodeId: id })
+  openPage('/packages/routes/checkin-detail/checkin-detail?nodeId=' + encodeURIComponent(id))
+}
+function openCheckin(id: string): void {
+  dispatchMapEvent({ type: 'select-node', nodeId: id })
+  openPage('/packages/routes/checkin/checkin?nodeId=' + encodeURIComponent(id))
+}
+</script>
+
+<style scoped>
+.home { position: fixed; inset: 0; background: #e7e8d9; }
+.home-header { position: absolute; left: 13px; z-index: 2; display: flex; flex-direction: column; padding: 8px 13px; border-radius: 22px; background: #fffffa; box-shadow: 0 3px 9px #2f30251a; }
+.home-title { font-size: 14px; font-weight: 700; color: #372b1e; }
+.home-caption { margin-top: 3px; font-size: 10px; color: #5d644e; }
+.map-rail { position: absolute; z-index: 2; }
+.left { left: 13px; }
+.right { right: 13px; }
+.home-bottom { position: absolute; z-index: 3; left: 13px; right: 13px; bottom: calc(14px + env(safe-area-inset-bottom)); }
+</style>

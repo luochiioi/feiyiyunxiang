@@ -1,0 +1,17 @@
+export function openPage(path: string): void {
+  uni.navigateTo({
+    url: path,
+    fail: () => uni.showToast({ title: '页面暂时无法打开，请重试', icon: 'none' })
+  })
+}
+
+export function returnToMap(): void {
+  const pages = getCurrentPages()
+  const home = pages.findIndex(page => page.route === 'pages/index/index')
+  if (home >= 0) {
+    const delta = pages.length - 1 - home
+    if (delta > 0) uni.navigateBack({ delta })
+    return
+  }
+  uni.reLaunch({ url: '/pages/index/index' })
+}

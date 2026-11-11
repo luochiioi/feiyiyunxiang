@@ -1,0 +1,42 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="路线查看" :show-back="true" />
+    <view class="content">
+      <DemoNotice />
+
+      <text class="title">海丝瓷绣</text>
+      <text class="body">选择一条本地路线，探索澳门或湖南的故事。</text>
+      <view v-for="item in routes" :key="item.id" class="card" @click="showRoute(item.id)">
+        <image class="cover" src="/packages/routes/static/silk-cover.jpg" mode="aspectFill" />
+        <view class="row spread"><text class="heading">{{ item.name }}</text><text class="tag">{{ item.region }}</text></view>
+        <text class="body">{{ item.description }}</text>
+        <text class="muted">{{ item.id === mapState.routeId ? '当前路线 · ' : '' }}{{ item.total }} 项探索任务</text>
+        <button class="secondary" @click.stop="showRoute(item.id)">查看路线</button>
+      </view>
+      <view v-if="routes.length === 0" class="card"><text class="body">暂无可查看的路线。</text></view>
+      <button v-if="mapState.routeId != null" class="secondary" @click="clearRoute">清除当前路线</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { listRoutes } from '@/features/exploration/catalog.uts'
+import { dispatchMapEvent, mapState } from '@/features/exploration/map-store.uts'
+import { openPage, returnToMap } from '@/features/navigation.uts'
+const routes = listRoutes()
+function showRoute(id: string): void {
+  openPage('/packages/routes/route-detail/route-detail?routeId=' + encodeURIComponent(id))
+}
+function clearRoute(): void {
+  dispatchMapEvent({ type: 'clear-route' })
+  returnToMap()
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+
+</style>

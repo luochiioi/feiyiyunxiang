@@ -1,0 +1,17 @@
+import { demoEnabled } from '../demo-mode.uts'
+import { demoNodes, demoRoutes } from './demo-fixtures.uts'
+import { visibleMapNodes } from './map-markers.uts'
+import type { RouteNode, RouteSummary } from './types.uts'
+
+export function listRoutes(): RouteSummary[] {
+  return demoEnabled ? demoRoutes : []
+}
+export function findRoute(id: string | null): RouteSummary | null {
+  return listRoutes().find(route => route.id === id) ?? null
+}
+export function listNodes(routeId: string | null): RouteNode[] {
+  return demoEnabled ? visibleMapNodes(demoNodes, routeId) : []
+}
+export function findNode(id: string | null): RouteNode | null {
+  return demoEnabled ? (demoNodes.find(node => node.id === id) ?? null) : null
+}

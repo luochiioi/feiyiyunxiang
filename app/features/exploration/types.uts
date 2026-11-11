@@ -1,0 +1,35 @@
+export type MapPosition = { latitude: number, longitude: number }
+export type MapViewport = { latitude: number, longitude: number, scale: number }
+export type MapState = {
+  routeId: string | null
+  selectedNodeId: string | null
+  viewport: MapViewport
+  panelExpanded: boolean
+}
+export type MapEvent =
+  | { type: 'select-route', routeId: string, viewport: MapViewport }
+  | { type: 'select-node', nodeId: string | null }
+  | { type: 'set-viewport', viewport: MapViewport }
+  | { type: 'toggle-panel' }
+  | { type: 'clear-route' }
+
+export type RouteSummary = {
+  id: string
+  name: string
+  region: string
+  description: string
+  total: number
+  done: number
+  nextNodeId: string | null
+  viewport: MapViewport
+}
+export type RouteNode = {
+  id: string
+  markerId: number
+  routeId: string
+  title: string
+  description: string
+  latitude: number
+  longitude: number
+  checked: boolean
+}

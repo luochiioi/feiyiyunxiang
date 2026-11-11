@@ -1,0 +1,19 @@
+import { demoEnabled } from '@/features/demo-mode.uts'
+
+export type Post = { id: string, author: string, title: string, body: string, place: string, image?: string, comments: Comment[] }
+type Comment = { author: string, body: string }
+const samples: Post[] = process.env.NODE_ENV === 'development' ? [
+  {
+    id: 'tile', author: '澳门探索者', title: '原来瓷与绣可以这样相遇',
+    body: '今天在路线故事里留意到蓝白图案的配色。想把看到的线条记下来，下次试着做一张自己的瓷砖配色卡。',
+    place: '澳门博物馆', image: '/packages/community/static/theme-preview.jpg', comments: [{ author: '湖南旅伴', body: '期待看到你的配色，湘绣里也有很多值得观察的纹样。' }]
+  },
+  {
+    id: 'thread', author: '湖南探索者', title: '在湖南遇见一针一线',
+    body: '这一站最想记下的是针法和线条。等旅伴做完澳门的配色，我们再把两边的作品放在一起看看。',
+    place: '湘绣博物馆', comments: []
+  }
+] : []
+export function listPosts(): Post[] {
+  return demoEnabled ? samples : []
+}

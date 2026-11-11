@@ -1,0 +1,24 @@
+import type { MapEvent, MapState } from './types.uts'
+
+export function initialMapState(): MapState {
+  return {
+    routeId: null, selectedNodeId: null, panelExpanded: false,
+    viewport: { latitude: 22.1974, longitude: 113.5413, scale: 16 }
+  }
+}
+
+export function reduceMapState(state: MapState, event: MapEvent): MapState {
+  switch (event.type) {
+    case 'select-route':
+      if (state.routeId === event.routeId) return state
+      return { routeId: event.routeId, viewport: event.viewport, selectedNodeId: null, panelExpanded: false }
+    case 'select-node':
+      return { ...state, selectedNodeId: event.nodeId }
+    case 'set-viewport':
+      return { ...state, viewport: event.viewport }
+    case 'toggle-panel':
+      return state.routeId === null ? state : { ...state, panelExpanded: !state.panelExpanded }
+    case 'clear-route':
+      return { ...state, routeId: null, selectedNodeId: null, panelExpanded: false }
+  }
+}

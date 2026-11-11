@@ -1,0 +1,35 @@
+<template>
+  <view v-if="route != null" class="route-panel">
+    <button class="route-toggle" :aria-expanded="expanded" @click="emit('toggle')">
+      <image class="route-icon" src="/static/map/route.png" mode="aspectFit" />
+      <view class="route-copy">
+        <text class="route-name">当前路线 · {{ route.name }}</text>
+        <text class="route-meta">探索进度 {{ route.done }} / {{ route.total }}</text>
+      </view>
+      <text class="route-meta">{{ expanded ? '收起 ⌄' : '展开 ⌃' }}</text>
+    </button>
+    <view v-if="expanded" class="route-task">
+      <text class="route-name">{{ nextNode == null ? '当前没有待打卡点' : '下一站 · ' + nextNode.title }}</text>
+      <text class="route-meta">{{ nextNode == null ? '可在路线详情查看任务' : '两地旅伴各自完成本地任务' }}</text>
+      <button v-if="nextNode != null" class="task-button" @click="emit('continue-task', nextNode.id)">打卡说明 · 待开发</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import type { RouteNode, RouteSummary } from '@/features/exploration/types.uts'
+defineProps<{ route: RouteSummary | null, nextNode: RouteNode | null, expanded: boolean }>()
+const emit = defineEmits<{ (event: 'toggle'): void, (event: 'continue-task', nodeId: string): void }>()
+</script>
+
+<style scoped>
+.route-panel { border-radius: 24px; background: #fffff4; box-shadow: 0 4px 16px #44573624; overflow: hidden; }
+.route-toggle { display: flex; align-items: center; gap: 10px; padding: 8px 14px; margin: 0; width: 100%; min-height: 52px; text-align: left; background: transparent; line-height: 1.3; }
+.route-toggle::after, .task-button::after { border: 0; }
+.route-icon { width: 32px; height: 32px; flex-shrink: 0; }
+.route-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.route-name { color: #443622; font-size: 14px; font-weight: 700; }
+.route-meta { color: #5e684f; font-size: 11px; flex-shrink: 0; }
+.route-task { display: flex; flex-direction: column; gap: 7px; padding: 11px 15px 13px; border-top: 1px solid #e4ead7; background: #eef5e4; }
+.task-button { width: 100%; margin: 0; background: #426240; color: white; border-radius: 14px; font-size: 14px; line-height: 38px; }
+</style>

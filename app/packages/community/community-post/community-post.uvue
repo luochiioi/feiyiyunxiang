@@ -1,0 +1,39 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="帖子详情" :show-back="true" />
+    <view class="content">
+      <DemoNotice description="验收帖子正文、图片、示例评论和返回。评论提交与互动待开发。" />
+
+      <template v-if="post != null">
+        <PostCard :post="post" :detail="true" />
+        <view class="card">
+          <text class="heading">评论</text>
+          <view v-for="comment in post.comments" :key="comment.author" class="stack divider">
+            <text class="muted">{{ comment.author }}</text><text class="body">{{ comment.body }}</text>
+          </view>
+          <text v-if="post.comments.length === 0" class="muted">暂无评论。</text>
+          <text class="muted">评论将在云端过滤和限流接通后开放。</text>
+        </view>
+      </template>
+      <view v-else class="card"><text class="body">找不到这条帖子。</text><button class="secondary" @click="openPage('/packages/community/community/community')">查看社区</button></view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { computed, ref } from 'vue'
+import PostCard from '../components/PostCard.uvue'
+import { listPosts } from '../catalog.uts'
+import { openPage } from '@/features/navigation.uts'
+const id = ref<string | null>(null)
+onLoad(query => { id.value = query['postId'] ?? null })
+const post = computed(() => listPosts().find(item => item.id === id.value) ?? null)
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+
+</style>

@@ -1,0 +1,25 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="旅伴" :show-back="true" />
+    <view class="content">
+      <DemoNotice :pending="true" description="本页只检查入口和返回。好友、两地合作及 PK 在阶段四实现。" />
+
+      <view class="card green"><text class="title">两地同行</text><text class="body">澳门与湖南的探索者先添加好友，再组队完成各自的本地任务，共同解锁成果。</text></view>
+      <view class="card"><text class="heading">好友与合作</text><text class="body">当前没有好友或合作记录。好友邀请与队伍将在微信登录接通后上线。</text></view>
+      <view class="card"><text class="heading">好友 PK</text><text class="body">可选玩法。按服务端记录的完成用时判定；失败任务可立即完成，分配满 72 小时后可主动拒绝。完成或拒绝后可参加下一场。</text><text class="muted">PK 功能尚未开放。</text></view>
+      <button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看两地路线</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { openPage } from '@/features/navigation.uts'
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+
+</style>

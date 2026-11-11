@@ -1,0 +1,26 @@
+import type { RouteNode, RouteSummary } from './types.uts'
+
+export const demoRoutes: RouteSummary[] = process.env.NODE_ENV === 'development' ? [
+  {
+    id: 'macau', name: '澳门博物馆', region: '澳门',
+    description: '从澳门博物馆出发，沿海上丝路的故事，认识蓝白瓷砖的图案与配色。',
+    total: 3, done: 1, nextNodeId: 'macau-museum',
+    viewport: { latitude: 22.1974, longitude: 113.5413, scale: 17 }
+  },
+  {
+    id: 'hunan', name: '湘绣博物馆', region: '湖南',
+    description: '在湘绣博物馆寻找绣线背后的故事，从针法辨认到学习卡，走完湖南一端。',
+    total: 2, done: 0, nextNodeId: 'hunan-museum',
+    viewport: { latitude: 28.2102, longitude: 112.9904, scale: 17 }
+  }
+] : []
+
+// Coordinates and completion are illustrative fixtures. Culture tasks have no map coordinates.
+export const demoNodes: RouteNode[] = process.env.NODE_ENV === 'development' ? [
+  { id: 'macau-start', markerId: 101, routeId: 'macau', title: '澳门探索起点',
+    description: '用于查看已记录状态的演示点。', latitude: 22.19785, longitude: 113.54172, checked: true },
+  { id: 'macau-museum', markerId: 102, routeId: 'macau', title: '澳门博物馆',
+    description: '到馆后用定位与一张照片记录这次探索。', latitude: 22.19689, longitude: 113.54098, checked: false },
+  { id: 'hunan-museum', markerId: 201, routeId: 'hunan', title: '湘绣博物馆',
+    description: '到馆后用定位与一张照片记录这次探索。', latitude: 28.2102, longitude: 112.9904, checked: false }
+] : []

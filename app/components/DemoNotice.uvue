@@ -1,0 +1,14 @@
+<template>
+  <view v-if="demoEnabled" class="notice">
+    <text class="notice-title">{{ props.pending ? '功能待开发 · 当前为说明页' : '阶段一页面验收 · 本地演示数据' }}</text>
+    <text>{{ props.description ?? '请检查页面显示、点击跳转和返回。示例数据不写入云端。' }}</text>
+  </view>
+</template>
+<script setup lang="uts">
+import { demoEnabled } from '@/features/demo-mode.uts'
+const props = defineProps<{ pending?: boolean, description?: string }>()
+</script>
+<style scoped>
+.notice { display: flex; flex-direction: column; gap: 4px; background: #f6edd9; color: #624c2d; padding: 8px 11px; border-radius: 10px; font-size: 12px; line-height: 1.5; }
+.notice-title { font-weight: 700; }
+</style>

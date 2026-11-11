@@ -1,0 +1,23 @@
+<template>
+  <view class="card" @click="emit('open')">
+    <view class="row">
+      <image class="post-avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+      <view class="stack"><text class="heading">{{ post.author }}</text><text class="muted">示例帖子</text></view>
+    </view>
+    <text class="heading">{{ post.title }}</text>
+    <text class="body">{{ post.body }}</text>
+    <image v-if="post.image != null" class="cover" :src="post.image" mode="aspectFill" aria-label="路线主题示意图" />
+    <view class="row spread">
+      <text class="tag">{{ post.place }}</text><text class="muted">{{ post.comments.length }} 条评论 {{ detail ? '' : '›' }}</text>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import type { Post } from '../catalog.uts'
+defineProps<{ post: Post, detail: boolean }>()
+const emit = defineEmits<{ (event: 'open'): void }>()
+</script>
+<style scoped>
+@import '@/styles/page.css';
+.post-avatar { width: 38px; height: 38px; border-radius: 19px; background: #f6ecd8; }
+</style>

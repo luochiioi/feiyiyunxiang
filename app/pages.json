@@ -1,0 +1,75 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "disableScroll": true,
+        "navigationBarTitleText": "非遗云享"
+      }
+    }
+  ],
+  "subPackages": [
+    {
+      "root": "packages/routes",
+      "pages": [
+        {
+          "path": "routes/routes"
+        },
+        {
+          "path": "route-detail/route-detail"
+        },
+        {
+          "path": "checkin-detail/checkin-detail"
+        },
+        {
+          "path": "checkin/checkin"
+        }
+      ]
+    },
+    {
+      "root": "packages/profile",
+      "pages": [
+        {
+          "path": "account/account"
+        },
+        {
+          "path": "my-checkins/my-checkins"
+        }
+      ]
+    },
+    {
+      "root": "packages/community",
+      "pages": [
+        {
+          "path": "community/community"
+        },
+        {
+          "path": "community-post/community-post"
+        }
+      ]
+    },
+    {
+      "root": "packages/story",
+      "pages": [
+        {
+          "path": "story/story"
+        }
+      ]
+    },
+    {
+      "root": "packages/partner",
+      "pages": [
+        {
+          "path": "partner/partner"
+        }
+      ]
+    }
+  ],
+  "globalStyle": {
+    "navigationStyle": "custom",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "非遗云享",
+    "navigationBarBackgroundColor": "#fffaf7",
+    "backgroundColor": "#fffaf7"
+  }
+}

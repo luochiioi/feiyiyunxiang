@@ -1,0 +1,14 @@
+.superpowers/
+**/unpackage/
+**/.hbuilderx/
+**/node_modules/
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/uni-config-center/uni-id/config.json
+**/uni-config-center/*/config.json

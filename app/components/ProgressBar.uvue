@@ -1,0 +1,55 @@
+<template>
+  <view class="progress-bar-wrapper">
+    <view class="progress-track" :style="{ height: trackHeight + 'rpx' }">
+      <view class="progress-fill" :style="{ width: displayValue + '%', height: trackHeight + 'rpx', backgroundColor: barColor }"></view>
+    </view>
+    <text v-if="showLabel" class="progress-label">{{ displayValue }}%</text>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref, watchEffect } from 'vue'
+
+const props = defineProps({
+  value: { type: Number, required: true },
+  color: { type: String, default: '#2ecc71' },
+  height: { type: Number, default: 16 },
+  showLabel: { type: Boolean, default: true }
+})
+
+const displayValue = ref<number>(0)
+const trackHeight = props.height as number
+const barColor = props.color as string
+
+watchEffect((): void => {
+  displayValue.value = Math.min(100, Math.max(0, props.value as number))
+})
+</script>
+
+<style>
+.progress-bar-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: 100%;
+}
+
+.progress-track {
+  flex: 1;
+  background-color: #e8ece8;
+  border-radius: 100rpx;
+  overflow: hidden;
+}
+
+.progress-fill {
+  border-radius: 100rpx;
+}
+
+.progress-label {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #666666;
+  min-width: 60rpx;
+  text-align: right;
+}
+</style>

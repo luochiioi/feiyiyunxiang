@@ -1,0 +1,36 @@
+<template>
+  <view class="app-page-header">
+    <view class="app-page-header-safe"></view>
+    <view class="app-page-header-row">
+      <view class="app-page-header-action" @click="goBack">
+        <text v-if="showBack" class="app-page-header-back">‹</text>
+      </view>
+      <text class="app-page-header-title">{{ title }}</text>
+      <view class="app-page-header-action"></view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+const props = defineProps<{ title: string, showBack: boolean }>()
+const title = props.title
+const showBack = props.showBack
+
+function goBack(): void {
+  if (!showBack) return
+  if (getCurrentPages().length > 1) {
+    uni.navigateBack({ delta: 1 })
+    return
+  }
+  uni.reLaunch({ url: '/pages/index/index' })
+}
+</script>
+
+<style>
+.app-page-header { width: 100%; flex-shrink: 0; background-color: #fffaf7; }
+.app-page-header-safe { height: var(--status-bar-height); }
+.app-page-header-row { height: 88rpx; display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20rpx; }
+.app-page-header-action { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.app-page-header-back { margin-top: -10rpx; color: #4a321c; font-size: 64rpx; line-height: 64rpx; }
+.app-page-header-title { flex: 1; color: #332b24; font-size: 32rpx; font-weight: 700; text-align: center; lines: 1; text-overflow: ellipsis; }
+</style>

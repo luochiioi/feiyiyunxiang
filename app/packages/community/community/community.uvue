@@ -1,0 +1,46 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="社区" :show-back="true" />
+    <view class="content">
+      <DemoNotice description="验收帖子列表、详情和返回。发帖、互动、好友内容及排行待开发。" />
+
+      <view class="row filters">
+        <button class="secondary" :class="{ active: tab === 'latest' }" @click="tab = 'latest'">最新</button>
+        <button class="secondary" :class="{ active: tab === 'friends' }" @click="tab = 'friends'">好友</button>
+        <button class="secondary" :class="{ active: tab === 'ranking' }" @click="tab = 'ranking'">好友排行</button>
+      </view>
+      <template v-if="tab === 'latest'">
+        <PostCard v-for="post in posts" :key="post.id" :post="post" :detail="false" @open="showPost(post.id)" />
+        <view v-if="posts.length === 0" class="card"><text class="body">暂无公开帖子。</text></view>
+      </template>
+      <view v-else class="card"><text class="body">{{ tab === 'friends' ? '暂无好友内容。' : '好友路线完成排行将在好友功能接通后开放。' }}</text></view>
+      <button class="primary compose" @click="compose">发帖 · 待开发</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { ref } from 'vue'
+import PostCard from '../components/PostCard.uvue'
+import { listPosts } from '../catalog.uts'
+import { openPage } from '@/features/navigation.uts'
+const posts = listPosts()
+const tab = ref('latest')
+function showPost(id: string): void {
+  openPage('/packages/community/community-post/community-post?postId=' + encodeURIComponent(id))
+}
+function compose(): void {
+  uni.showModal({ title: '发帖与审核', content: '发帖将在社区审核接通后开放。帖子及修改审核通过后才会公开。', showCancel: false })
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.filters .secondary { flex: 1; white-space: nowrap; }
+.filters .active { background: #426240; color: #fff; }
+.compose { position: fixed; width: auto; right: 16px; bottom: calc(15px + env(safe-area-inset-bottom)); box-shadow: 0 3px 12px #35503138; }
+.screen { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
+</style>

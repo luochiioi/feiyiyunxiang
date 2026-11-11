@@ -1,0 +1,35 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="剧情" :show-back="true" />
+    <view class="content">
+      <DemoNotice :pending="true" description="本页只检查入口和返回。章节阅读、文化任务和剧情解锁在阶段三实现。" />
+
+      <view class="card green">
+        <text class="title">海丝瓷绣·一念归期</text>
+        <text class="body">蓝白瓷砖与湘绣串起两地的故事。澳门探索者完成瓷砖配色，湖南探索者辨认湘绣针法并完成学习卡。</text>
+      </view>
+      <view class="card"><text class="heading">剧情介绍</text><text class="body">两地探索者分别推进本地任务，完成后共同解锁结尾。</text><text class="muted">正式章节、资源和解锁进度在剧情阶段接通。</text></view>
+      <view class="card">
+        <text class="heading">章节目录</text>
+        <view v-for="(chapter, index) in chapters" :key="chapter" class="row spread divider">
+          <text class="body">{{ chapter }}</text>
+          <text class="muted">{{ index === 6 ? '两地合作解锁' : (index === 0 ? '公共开场' : '随路线解锁') }}</text>
+        </view>
+      </view>
+      <button class="primary" @click="openPage('/packages/routes/routes/routes')">查看两地路线</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { openPage } from '@/features/navigation.uts'
+const chapters = ['触碰海丝地图', '海上风暴', '女儿与瓷砖', '澳门靠岸', '湘绣相遇', '针法学习', '共同终章']
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+
+</style>

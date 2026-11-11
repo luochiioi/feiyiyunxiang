@@ -1,0 +1,37 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="我的" :show-back="true" />
+    <view class="content">
+      <DemoNotice description="验收个人页布局和菜单跳转。当前为游客，真实微信登录在阶段二接通。" />
+
+      <view class="card row">
+        <image class="avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+        <view class="stack"><text class="heading">你好，探索者</text><text class="muted">游客 · 微信登录将在阶段二开放</text></view>
+      </view>
+      <view class="card green">
+        <text class="heading">探索档案</text><text class="body">回看打卡日记、文化作品和旅伴记录。</text>
+        <button class="primary" @click="openPage('/packages/profile/my-checkins/my-checkins')">查看档案</button>
+      </view>
+      <view class="card">
+        <view class="row spread menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
+        <view class="row spread divider menu-row" @click="openPage('/packages/community/community/community')"><text class="body">社区</text><text class="muted">›</text></view>
+        <view class="row spread divider menu-row" @click="showAi"><text class="body">AI 猜图</text><text class="muted">敬请期待 ›</text></view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import DemoNotice from '@/components/DemoNotice.uvue'
+
+import { openPage } from '@/features/navigation.uts'
+function showAi(): void {
+  uni.showToast({ title: 'AI 猜图 · 敬请期待', icon: 'none' })
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+
+</style>
