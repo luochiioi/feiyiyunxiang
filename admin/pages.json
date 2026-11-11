@@ -3,7 +3,8 @@
 		{
 			"path": "pages/index/index",
 			"style": {
-				"navigationBarTitleText": "uni-app x"
+                "navigationBarTitleText": "非遗云享运营后台",
+                "navigationStyle": "custom"
 			}
 		}
 	],
