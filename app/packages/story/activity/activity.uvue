@@ -9,7 +9,7 @@
       <view v-else class="card">
         <text v-if="status.testOnly" class="tag">开发测试 · 内容待校订</text>
         <text class="title">{{ status.title }}</text>
-        <text v-if="!status.unlocked" class="body">{{ activityId === 'learning' ? '完成湘绣辨认及路线指定的打卡后解锁。' : '完成路线指定的定位照片打卡后解锁。' }}</text>
+        <text v-if="!status.unlocked" class="body">{{ status.lockText ?? (activityId === 'learning' ? '完成湘绣辨认及路线指定的打卡后解锁。' : '完成路线指定的定位照片打卡后解锁。') }}</text>
         <template v-else-if="activityId === 'tile'">
           <text class="muted">图案示意 · 正式瓷砖纹样待校订</text>
           <TilePreview :pattern="selection.pattern" :palette="selection.palette" />
@@ -26,15 +26,23 @@
             <button class="primary" :disabled="busy" @click="save">{{ busy ? '保存中…' : '保存作品并完成任务' }}</button>
           </template>
         </template>
-        <template v-else-if="activityId === 'quiz'">
+        <template v-else-if="quizActivity">
           <text class="body">{{ status.prompt }}</text>
+          <template v-if="activityId === 'tileQuiz'">
+            <image class="quiz-clue" src="/packages/story/static/macau-shore.jpg" mode="aspectFit" />
+            <text class="muted">AI 场景插画</text>
+          </template>
           <text class="muted">辨认图为示意，馆藏图与科普文案待校订。</text>
           <view v-for="option in status.options" :key="option.id" class="option">
-            <StitchSample v-if="option.illustration === 'threads'" variant="color" />
-            <TilePreview v-else pattern="geometry" palette="cobalt" />
+            <StitchSample v-if="option.illustration.startsWith('threads')" :variant="option.illustration === 'threads-direction' ? 'direction' : 'color'" />
+            <TilePreview v-else :pattern="option.illustration === 'tile-sail' ? 'sail' : (option.illustration === 'tile-rose' ? 'rose' : 'geometry')" palette="cobalt" />
             <button class="secondary" :disabled="busy || status.done === true" @click="answer(option.id)">{{ option.label }}</button>
+            <template v-if="pickedOptionId === option.id">
+              <text v-if="message.length > 0" class="body">{{ message }}</text>
+              <text v-if="status.done" class="body">{{ status.explanation }}</text>
+            </template>
           </view>
-          <text v-if="status.done" class="body">{{ status.explanation }}</text>
+          <text v-if="status.done && pickedOptionId.length === 0" class="body">{{ status.explanation }}</text>
         </template>
         <template v-else>
           <text class="body">学习进度 {{ status.read?.length ?? 0 }} / {{ status.cards?.length ?? 0 }}</text>
@@ -49,14 +57,14 @@
             </template>
           </view>
         </template>
-        <text v-if="message.length > 0" class="muted">{{ message }}</text>
+        <text v-if="message.length > 0 && (!quizActivity || pickedOptionId.length === 0)" class="muted">{{ message }}</text>
       </view>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import TilePreview from '../components/TilePreview.uvue'
 import StitchSample from '../components/StitchSample.uvue'
@@ -67,24 +75,26 @@ import { decodePageId } from '@/features/navigation.uts'
 type Selection = { pattern: string, palette: string }
 type Option = { id: string, label: string, illustration: string }
 type Card = { id: string, title: string, hotspot: string, body: string, illustration?: string }
-type ActivityStatus = { title: string, unlocked: boolean, testOnly: boolean, work?: Selection | null, prompt?: string,
+type ActivityStatus = { title: string, unlocked: boolean, testOnly: boolean, lockText?: string, work?: Selection | null, prompt?: string,
   options?: Option[], done?: boolean, explanation?: string, cards?: Card[], read?: string[] }
 const patterns = [{ id: 'rose', name: '玫瑰' }, { id: 'sail', name: '海浪帆船' }, { id: 'geometry', name: '几何' }]
 const palettes = [{ id: 'indigo', name: '靛蓝' }, { id: 'cobalt', name: '钴蓝' }, { id: 'mist', name: '雾蓝' }]
 const selection = ref<Selection>({ pattern: 'rose', palette: 'indigo' })
 const status = ref<ActivityStatus | null>(null)
 const activityId = ref('')
+const quizActivity = computed(() => activityId.value === 'quiz' || activityId.value === 'tileQuiz')
+const pickedOptionId = ref('')
 const validEntry = ref(false)
 const openedCard = ref('')
 const busy = ref(false)
-const message = ref('微信登录后可继续探索并保存作品。')
+const message = ref('微信登录后可继续任务并保存进度。')
 let routeId = ''
 let runId = ''
 let draftKey = ''
 onLoad(query => {
   routeId = decodePageId(query['routeId'] ?? null) ?? ''
   activityId.value = decodePageId(query['activityId'] ?? null) ?? ''
-  validEntry.value = routeId.length > 0 && ['tile', 'quiz', 'learning'].includes(activityId.value)
+  validEntry.value = routeId.length > 0 && ['tile', 'tileQuiz', 'quiz', 'learning'].includes(activityId.value)
   if (!validEntry.value) {
     message.value = '请从路线详情打开文化任务。'
     return
@@ -126,11 +136,12 @@ async function answer(option: string): Promise<void> {
   const current = status.value
   if (busy.value || current == null || current.done === true) return
   busy.value = true
+  pickedOptionId.value = option
   message.value = ''
   try {
-    const result = await secured<{ done: boolean, explanation: string }>('answerQuiz', { runId, option })
+    const result = await secured<{ done: boolean, explanation: string, hint?: string }>('answerQuiz', { runId, activityId: activityId.value, option })
     status.value = { ...current, done: result.done, explanation: result.explanation }
-    message.value = result.done ? '已完成辨认题。' : '再观察一下图中的线材和表面，选另一项试试。'
+    message.value = result.done ? '已完成辨认题。' : (result.hint ?? '再观察一下图中的细节，选另一项试试。')
     if (result.done) await refreshCatalog()
   } catch (_) { message.value = '答案提交失败，请重试。' }
   finally { busy.value = false }
@@ -171,5 +182,6 @@ async function save(): Promise<void> {
 .choices { display: flex; flex-direction: row; flex-wrap: wrap; gap: 7px; }
 .choice { margin: 0; padding: 4px 10px; font-size: 14px; color: #2f5282; background: #edf3fa; }
 .selected { background: #2f5282; color: white; }
+.quiz-clue { width: 100%; height: 166px; border-radius: 12px; background: #fff7e9; }
 .option { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid #eee6db; }
 </style>

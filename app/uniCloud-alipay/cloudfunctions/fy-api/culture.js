@@ -1,7 +1,8 @@
 const tilePatterns = ['rose', 'sail', 'geometry']
 const tilePalettes = ['indigo', 'cobalt', 'mist']
-const activityIds = ['tile', 'quiz', 'learning']
-const illustrations = ['threads', 'tile']
+const quizIds = ['tileQuiz', 'quiz']
+const activityIds = ['tile', ...quizIds, 'learning']
+const illustrations = ['threads', 'threads-direction', 'tile', 'tile-rose', 'tile-sail']
 const cardIllustrations = ['direction', 'length', 'color', 'layers']
 
 function requireValue(ok, code) {
@@ -18,9 +19,9 @@ function checkGate(after, nodeIds, code, min = 1) {
   return after
 }
 
-function activityHeader(activity, nodeIds, code, min = 1) {
+function activityHeader(activity, nodeIds, code) {
   requireValue(isText(activity?.title, 80), code)
-  return { title: activity.title, after: checkGate(activity.after, nodeIds, code + '_GATE', min) }
+  return { title: activity.title, after: checkGate(activity.after, nodeIds, code + '_GATE', 0) }
 }
 
 function validateCulture(value, nodeIds) {
@@ -29,21 +30,24 @@ function validateCulture(value, nodeIds) {
     'INVALID_CULTURE_FIELDS')
   const result = {}
   if ('tile' in value) result.tile = activityHeader(value.tile, nodeIds, 'INVALID_TILE')
-  if ('quiz' in value) {
-    const quiz = value.quiz
+  for (const quizId of quizIds) {
+    if (!(quizId in value)) continue
+    const quiz = value[quizId]
     const header = activityHeader(quiz, nodeIds, 'INVALID_QUIZ')
     requireValue(isText(quiz.prompt, 300) && isText(quiz.explanation, 500) &&
+      (quiz.hint == null || isText(quiz.hint, 300)) &&
       Array.isArray(quiz.options) && quiz.options.length >= 2 && quiz.options.length <= 4, 'INVALID_QUIZ')
     const options = quiz.options.map(option => {
       requireValue(isId(option?.id) && isText(option.label, 80) && illustrations.includes(option.illustration), 'INVALID_QUIZ_OPTION')
       return { id: option.id, label: option.label, illustration: option.illustration }
     })
     requireValue(distinct(options.map(option => option.id)) && options.some(option => option.id === quiz.answer), 'INVALID_QUIZ_ANSWER')
-    result.quiz = { ...header, prompt: quiz.prompt, explanation: quiz.explanation, options, answer: quiz.answer }
+    result[quizId] = { ...header, prompt: quiz.prompt, explanation: quiz.explanation, options, answer: quiz.answer }
+    if (quiz.hint != null) result[quizId].hint = quiz.hint
   }
   if ('learning' in value) {
     const learning = value.learning
-    const header = activityHeader(learning, nodeIds, 'INVALID_LEARNING', 0)
+    const header = activityHeader(learning, nodeIds, 'INVALID_LEARNING')
     requireValue(result.quiz && Array.isArray(learning.cards) && learning.cards.length === 4, 'INVALID_LEARNING')
     const cards = learning.cards.map(card => {
       requireValue(isId(card?.id) && isText(card.title, 80) && isText(card.hotspot, 80) && isText(card.body, 500) &&
@@ -69,10 +73,13 @@ function validateChapters(chapters, nodeIds, activities) {
     requireValue(Number.isInteger(act) && Object.prototype.hasOwnProperty.call(chapterActivities, act) && !acts.has(act) &&
       isText(chapter.title, 80), 'INVALID_CHAPTER')
     acts.add(act)
-    const activity = chapterActivities[act]
+    const activity = act === 4 && activities.tileQuiz ? 'tileQuiz' : chapterActivities[act]
     requireValue(activity == null || activities[activity], 'INVALID_CHAPTER_GATE')
     const after = checkGate(chapter.after, nodeIds, 'INVALID_CHAPTER_GATE', activity == null ? 1 : 0)
-    return { act, title: chapter.title, after, activity, ...validateScenes(chapter) }
+    requireValue(chapter.checkinMode == null || (act === 2 && chapter.checkinMode === 'any'), 'INVALID_CHAPTER_GATE')
+    const result = { act, title: chapter.title, after, activity, ...validateScenes(chapter) }
+    if (chapter.checkinMode === 'any') result.checkinMode = 'any'
+    return result
   })
 }
 
@@ -134,7 +141,9 @@ function cultureSummary(culture) {
 function completedActivities(run) {
   const completed = []
   if (run.culture?.tile) completed.push('tile')
-  if (run.culture?.quiz) completed.push('quiz')
+  for (const id of quizIds) {
+    if (run.culture?.[id] === true) completed.push(id)
+  }
   if (run.snapshot.culture?.learning && run.culture?.cards?.length === run.snapshot.culture.learning.cards.length) completed.push('learning')
   return completed
 }
@@ -144,4 +153,4 @@ function tileWork(p, at) {
   return { pattern: p.pattern, palette: p.palette, savedAt: at }
 }
 
-module.exports = { activityIds, requireValue, validateCulture, cultureSummary, completedActivities, validPath, tileWork }
+module.exports = { activityIds, quizIds, requireValue, validateCulture, cultureSummary, completedActivities, validPath, tileWork }

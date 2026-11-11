@@ -81,11 +81,72 @@ const scenes = [
 ]
 const chapter = { act: 5, title: '湘绣相遇', after: [], start: 'start', scenes }
 const hunanCulture = { quiz, learning: { title: '针法学习', after: [], cards }, chapters: [chapter, { ...chapter, act: 6, title: '针法学习' }] }
-async function checkPoint(s, user, runId) {
-  const payload = { runId, nodeId: 'n1', requestId: 'complete-test-point' }
-  await s.registerMedia(user, { ...payload, id: 'photo', fileID: 'private-photo' })
-  await s.checkin(user, { ...payload, mediaId: 'photo', latitude: 22, longitude: 113 })
+async function checkPoint(s, user, runId, nodeId = 'n1') {
+  const payload = { runId, nodeId, requestId: 'complete-test-' + nodeId }
+  const mediaId = 'photo-' + nodeId
+  await s.registerMedia(user, { ...payload, id: mediaId, fileID: 'private-photo' })
+  await s.checkin(user, { ...payload, mediaId, latitude: 22, longitude: 113 })
 }
+
+test('new Macau release separates the first visit, tile design and motif quiz while an old run retains its gates', async () => {
+  const { s, admin, a, b } = setup()
+  const route = { ...draft, nodes: [...draft.nodes, { ...draft.nodes[0], id: 'n2' }] }
+  const tile = { title: '蓝白瓷砖配色', after: ['n1'] }
+  const storm = { ...chapter, act: 2, after: ['n1'] }
+  const shore = { ...chapter, act: 4, after: ['n1', 'n2'] }
+  await s.saveDraft(admin, { ...route, culture: { tile, chapters: [storm, shore] } })
+  await s.publish(admin, { id: route.id, revision: 1 })
+  const old = await s.start(a, { routeId: route.id, requestId: 'macau-old-gates' })
+
+  const tileQuiz = { ...quiz, title: '瓷砖纹样辨认', after: [], hint: '看看帆和浪',
+    options: [{ id: 'a', label: '图 A', illustration: 'tile-rose' }, { id: 'b', label: '图 B', illustration: 'tile-sail' }] }
+  const culture = { tile: { ...tile, after: [] }, tileQuiz, chapters: [
+    { ...storm, after: ['n1', 'n2'], checkinMode: 'any' },
+    { ...chapter, act: 3 },
+    { ...shore, after: [] }
+  ] }
+  await s.saveDraft(admin, { ...route, revision: 1, culture })
+  await s.publish(admin, { id: route.id, revision: 2 })
+  const { id: runId } = await s.start(b, { routeId: route.id, requestId: 'macau-cultural-gates' })
+
+  assert.equal((await s.activityStatus(a, { runId: old.id, activityId: 'tile' })).unlocked, false)
+  assert.deepEqual((await s.storyLibrary(a)).map(entry => [entry.act, entry.unlocked]), [[2, false], [4, false]])
+  await assert.rejects(s.storyChapter(b, { runId, act: 2 }), /ACTIVITY_LOCKED/)
+  assert.match((await s.storyLibrary(b))[0].gateText, /任一/)
+  await s.saveTile(b, { runId, pattern: 'sail', palette: 'cobalt' })
+  assert.equal((await s.storyChapter(b, { runId, act: 3 })).chapter.act, 3)
+  const question = await s.activityStatus(b, { runId, activityId: 'tileQuiz' })
+  assert.equal(question.unlocked, true)
+  assert.equal(question.answer, undefined)
+  assert.match((await s.answerQuiz(b, { runId, activityId: 'tileQuiz', option: 'a' })).hint, /帆和浪/)
+  await assert.rejects(s.storyChapter(b, { runId, act: 4 }), /ACTIVITY_LOCKED/)
+  await assert.rejects(s.answerQuiz(a, { runId, activityId: 'tileQuiz', option: 'b' }), /NOT_FOUND/)
+  await s.answerQuiz(b, { runId, activityId: 'tileQuiz', option: 'b' })
+  assert.equal((await s.storyChapter(b, { runId, act: 4 })).chapter.act, 4)
+  const progress = await s.progress(b, { runId })
+  assert.deepEqual(progress.completed, [])
+  assert.deepEqual(progress.activities, ['tile', 'tileQuiz'])
+  assert.deepEqual(await s.diary(b), [])
+  await checkPoint(s, b, runId, 'n2')
+  assert.equal((await s.storyChapter(b, { runId, act: 2 })).chapter.act, 2)
+  assert.deepEqual((await s.storyLibrary(b)).map(entry => [entry.act, entry.unlocked]), [[2, true], [3, true], [4, true]])
+})
+
+test('new Hunan release opens the quiz and unlocks acts five and six without a location check-in', async () => {
+  const { s, admin, a } = setup()
+  await s.saveDraft(admin, { ...hunan, culture: { ...hunanCulture, quiz: { ...quiz, after: [] } } })
+  await s.publish(admin, { id: hunan.id, revision: 1 })
+  const { id: runId } = await s.start(a, { routeId: hunan.id, requestId: 'hunan-no-visit' })
+  assert.equal((await s.activityStatus(a, { runId, activityId: 'quiz' })).unlocked, true)
+  await assert.rejects(s.readCard(a, { runId, cardId: cards[0].id }), /ACTIVITY_LOCKED/)
+  await s.answerQuiz(a, { runId, option: 'b' })
+  assert.equal((await s.storyChapter(a, { runId, act: 5 })).chapter.act, 5)
+  for (const card of cards.slice(0, 3)) await s.readCard(a, { runId, cardId: card.id })
+  await assert.rejects(s.storyChapter(a, { runId, act: 6 }), /ACTIVITY_LOCKED/)
+  await s.readCard(a, { runId, cardId: cards[3].id })
+  assert.equal((await s.storyChapter(a, { runId, act: 6 })).chapter.act, 6)
+  assert.deepEqual((await s.progress(a, { runId })).completed, [])
+})
 
 test('Hunan can complete quiz and all cards independently, and only its owner can read the story', async () => {
   const { s, admin, a, b } = setup()
@@ -155,10 +216,16 @@ test('the bundled route templates preview without writes and publish only their 
   const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64')
   const { macauContent, hunanContent } = await import(moduleUrl)
   const { s, repo, admin, a } = setup()
-  const macau = { ...draft, nodes: [...draft.nodes, { ...draft.nodes[0], id: 'n2' }], culture: macauContent('n1', 'n2') }
+  const macau = { ...draft, nodes: [...draft.nodes, { ...draft.nodes[0], id: 'n2' }], culture: macauContent(['n1', 'n2']) }
   const expected = [2, 3, 4]
-  assert.deepEqual((await s.previewDraft(admin, macau)).culture.chapters.map(chapter => chapter.act), expected)
-  assert.deepEqual((await s.previewDraft(admin, { ...hunan, culture: hunanContent('n1') })).culture.chapters.map(chapter => chapter.act), [5, 6])
+  const macauPreview = (await s.previewDraft(admin, macau)).culture
+  const hunanPreview = (await s.previewDraft(admin, { ...hunan, culture: hunanContent() })).culture
+  assert.deepEqual(macauPreview.chapters.map(chapter => chapter.act), expected)
+  assert.equal(macauPreview.chapters[0].checkinMode, 'any')
+  assert.equal(macauPreview.chapters[2].activity, 'tileQuiz')
+  assert.deepEqual(macauPreview.tile.after, [])
+  assert.deepEqual(hunanPreview.chapters.map(chapter => chapter.act), [5, 6])
+  assert.deepEqual(hunanPreview.quiz.after, [])
   await assert.rejects(s.previewDraft(a, macau), /FORBIDDEN/)
   assert.deepEqual(await s.drafts(admin), [])
   assert.deepEqual(await s.catalog(), [])

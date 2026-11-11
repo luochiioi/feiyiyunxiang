@@ -45,7 +45,7 @@
             </view>
             <button :disabled="busy" @click="addNode">增加定位照片节点</button>
             <text class="heading">文化任务与剧情</text>
-            <text class="hint">选填。可从模板载入可编辑的 JSON。after 使用上面的打卡节点编号。正式配图、馆藏资料和文化文案待校订。</text>
+            <text class="hint">选填。可从模板载入可编辑的 JSON。after 使用上面的打卡节点编号，空数组表示没有打卡门槛。正式配图、馆藏资料和文化文案待校订。</text>
             <textarea class="content-source" v-model="cultureSource" :maxlength="-1" placeholder="文化内容 JSON" />
             <view class="toolbar">
               <button :disabled="busy" @click="fillMacau">载入澳门模板</button>
@@ -161,9 +161,9 @@ function newDraft(): void {
 }
 function fillMacau(): void {
   const nodes = draft.value.nodes
-  if (nodes.length < 2) { message.value = '澳门模板需要两个打卡节点，请先补齐。'; return }
+  if (nodes.length === 0) { message.value = '澳门模板需要至少一个打卡节点。'; return }
   draft.value.region = '澳门'
-  cultureSource.value = JSON.stringify(macauContent(nodes[0].id, nodes[1].id), null, 2)
+  cultureSource.value = JSON.stringify(macauContent(nodes.map(node => node.id)), null, 2)
   preview.value = null
   message.value = '已载入澳门开发模板，请核对打卡坐标后校验。'
 }
@@ -171,7 +171,7 @@ function fillHunan(): void {
   const nodes = draft.value.nodes
   if (nodes.length === 0) { message.value = '湖南模板需要至少一个打卡节点。'; return }
   draft.value.region = '湖南'
-  cultureSource.value = JSON.stringify(hunanContent(nodes[0].id), null, 2)
+  cultureSource.value = JSON.stringify(hunanContent(), null, 2)
   preview.value = null
   message.value = '已载入湖南开发模板，请核对打卡坐标后校验。'
 }

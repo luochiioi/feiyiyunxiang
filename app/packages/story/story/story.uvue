@@ -12,7 +12,7 @@
         <view v-for="(chapter, index) in chapters" :key="chapter.title" class="row spread divider menu-row" @click="openChapter(index + 1)">
           <view class="stack">
             <text class="body">{{ '第 ' + (index + 1) + ' 幕 · ' + (chapterFor(index + 1)?.title ?? chapter.title) }}</text>
-            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapterFor(index + 1)?.local === true ? '澳门 · 完成本路线任一地点打卡' : chapter.gate }}</text>
+            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapterFor(index + 1)?.gateText ?? chapter.gate }}</text>
           </view>
           <text class="muted">{{ chapterLabel(index + 1) }}</text>
         </view>
@@ -31,7 +31,7 @@ import { secured, session } from '@/features/api.uts'
 import { decodePageId, openPage } from '@/features/navigation.uts'
 import { legacyStorm, localStoryPath, savedOpeningPath } from '../story-content.uts'
 import { readLegacyStorm } from '../legacy-story.uts'
-type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean, local?: boolean }
+type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean, gateText?: string, local?: boolean }
 const entries = ref<Entry[]>([])
 const openingStarted = ref(false)
 const loadFailed = ref(false)
@@ -41,9 +41,9 @@ let loading = false
 let preferredRoute = ''
 const chapters = [
   { title: '触碰海丝地图', gate: '' },
-  { title: '海上风暴', gate: '澳门 · 完成路线指定打卡' },
+  { title: '海上风暴', gate: '澳门 · 完成路线内任一地点打卡' },
   { title: '女儿与瓷砖', gate: '澳门 · 保存瓷砖配色作品' },
-  { title: '澳门靠岸', gate: '澳门 · 完成路线指定后续打卡' },
+  { title: '澳门靠岸', gate: '澳门 · 答对瓷砖纹样辨认题' },
   { title: '湘绣相遇', gate: '湖南 · 完成湘绣辨认' },
   { title: '针法学习', gate: '湖南 · 学完四张知识卡' }
 ]
@@ -75,7 +75,8 @@ async function load(): Promise<void> {
         const local = await readLegacyStorm(preferredRoute, '')
         if (local != null && !library.some(item => item.routeId === local.routeId)) {
           library.push({ act: 2, title: legacyStorm.title, routeId: local.routeId, runId: local.runId,
-            unlocked: local.unlocked, started: localStoryPath(local.storageKey, legacyStorm).length > 1, local: true })
+            unlocked: local.unlocked, started: localStoryPath(local.storageKey, legacyStorm).length > 1,
+            gateText: '澳门 · 完成本路线任一地点打卡', local: true })
         }
       } catch (error) {
         if (missing) throw error
@@ -98,8 +99,8 @@ async function load(): Promise<void> {
 }
 function chapterFor(act: number): Entry | null {
   const candidates = entries.value.filter(entry => entry.act === act)
-  return candidates.find(entry => entry.unlocked && entry.routeId === preferredRoute) ??
-    candidates.find(entry => entry.unlocked) ?? candidates.find(entry => entry.routeId === preferredRoute) ?? candidates[0] ?? null
+  return candidates.find(entry => entry.routeId === preferredRoute) ??
+    candidates.find(entry => entry.unlocked) ?? candidates[0] ?? null
 }
 function chapterLabel(act: number): string {
   if (act === 1) return '游客可读 ›'

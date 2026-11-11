@@ -8,14 +8,15 @@
       <text>{{ gateLabel(value.culture?.tile?.after ?? []) }}</text>
       <text>玫瑰、海浪帆船、几何 · 靛蓝、钴蓝、雾蓝</text>
     </view>
-    <view v-if="value.culture?.quiz != null" class="section">
-      <text class="heading">{{ value.culture?.quiz?.title }}</text>
-      <text>{{ gateLabel(value.culture?.quiz?.after ?? []) }}</text>
-      <text>{{ value.culture?.quiz?.prompt }}</text>
-      <text v-for="option in value.culture?.quiz?.options" :key="option.id">
-        {{ option.label }} · {{ option.illustration === 'threads' ? '绣线示意' : '瓷砖示意' }}{{ option.id === value.culture?.quiz?.answer ? ' · 正确项' : '' }}
+    <view v-for="(quiz, index) in quizzes" :key="index" class="section">
+      <text class="heading">{{ quiz.title }}</text>
+      <text>{{ gateLabel(quiz.after) }}</text>
+      <text>{{ quiz.prompt }}</text>
+      <text v-for="option in quiz.options" :key="option.id">
+        {{ option.label }} · {{ illustrationLabel(option.illustration) }}{{ option.id === quiz.answer ? ' · 正确项' : '' }}
       </text>
-      <text>{{ value.culture?.quiz?.explanation }}</text>
+      <text v-if="quiz.hint != null">答错提示 · {{ quiz.hint }}</text>
+      <text>{{ quiz.explanation }}</text>
     </view>
     <view v-if="value.culture?.learning != null" class="section">
       <text class="heading">{{ value.culture?.learning?.title }}</text>
@@ -51,9 +52,16 @@
 
 <script setup lang="uts">
 import { computed, ref } from 'vue'
-import type { DraftPreview } from '@/features/stage-three-content.uts'
+import type { DraftPreview, Quiz } from '@/features/stage-three-content.uts'
 const props = defineProps<{ value: DraftPreview }>()
 const chapters = computed(() => props.value.culture?.chapters ?? [])
+const quizzes = computed((): Quiz[] => {
+  const result: Quiz[] = []
+  const culture = props.value.culture
+  if (culture?.tileQuiz != null) result.push(culture.tileQuiz!)
+  if (culture?.quiz != null) result.push(culture.quiz!)
+  return result
+})
 const act = ref(0)
 const history = ref<string[]>([])
 const currentChapter = computed(() => chapters.value.find(chapter => chapter.act === act.value) ?? null)
@@ -62,15 +70,25 @@ const unlockLabel = computed(() => {
   const chapter = currentChapter.value
   if (chapter == null) return ''
   const labels = [] as string[]
-  if (chapter.after.length > 0) labels.push(gateLabel(chapter.after))
+  if (chapter.after.length > 0) labels.push(gateLabel(chapter.after, chapter.checkinMode === 'any'))
   const culture = props.value.culture
   if (chapter.activity === 'tile') labels.push('完成' + (culture?.tile?.title ?? '配色'))
+  if (chapter.activity === 'tileQuiz') labels.push('答对' + (culture?.tileQuiz?.title ?? '瓷砖辨认题'))
   if (chapter.activity === 'quiz') labels.push('完成' + (culture?.quiz?.title ?? '辨认'))
   if (chapter.activity === 'learning') labels.push('完成' + (culture?.learning?.title ?? '学习'))
-  return labels.join('；')
+  return labels.join('，')
 })
-function gateLabel(ids: string[]): string {
-  return '完成打卡：' + ids.map(id => props.value.nodes.find(node => node.id === id)?.title ?? id).join('、')
+function gateLabel(ids: string[], any: boolean = false): string {
+  if (ids.length === 0) return '可直接开始'
+  const names = ids.map(id => props.value.nodes.find(node => node.id === id)?.title ?? id).join('、')
+  return (any ? '任一地点完成打卡 · ' : '完成打卡 · ') + names
+}
+function illustrationLabel(illustration: string): string {
+  if (illustration === 'threads') return '同向针脚'
+  if (illustration === 'threads-direction') return '转向针脚'
+  if (illustration === 'tile-rose') return '花瓣纹样'
+  if (illustration === 'tile-sail') return '海浪与船帆纹样'
+  return '几何纹样'
 }
 function selectAct(value: number): void {
   act.value = value

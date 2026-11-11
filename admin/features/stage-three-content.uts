@@ -1,20 +1,30 @@
 export type DraftNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
 type Choice = { label: string, nextSceneId: string }
 type Scene = { id: string, kind: string, text: string, asset?: string, speaker?: string, nextSceneId?: string, choices?: Choice[] }
-type Chapter = { act: number, title: string, after: string[], start: string, scenes: Scene[], activity?: string | null }
+type Chapter = { act: number, title: string, after: string[], checkinMode?: string, start: string, scenes: Scene[], activity?: string | null }
 type Activity = { title: string, after: string[] }
-type Quiz = { title: string, after: string[], prompt: string, explanation: string, options: QuizOption[], answer: string }
+export type Quiz = { title: string, after: string[], prompt: string, hint?: string, explanation: string, options: QuizOption[], answer: string }
 type QuizOption = { id: string, label: string, illustration: string }
 type Learning = { title: string, after: string[], cards: LearningCard[] }
 type LearningCard = { id: string, title: string, hotspot: string, body: string, illustration?: string }
-export type CultureContent = { tile?: Activity, quiz?: Quiz, learning?: Learning, chapters?: Chapter[] }
+export type CultureContent = { tile?: Activity, tileQuiz?: Quiz, quiz?: Quiz, learning?: Learning, chapters?: Chapter[] }
 export type DraftPreview = { name: string, region: string, testOnly: boolean, releaseAllowed: boolean, nodes: DraftNode[], culture?: CultureContent }
 
-export function macauContent(first: string, second: string): CultureContent {
+export function macauContent(nodeIds: string[]): CultureContent {
   return {
-    tile: { title: '蓝白瓷砖配色', after: [first] },
+    tile: { title: '蓝白瓷砖配色', after: [] },
+    tileQuiz: {
+      title: '瓷砖纹样辨认', after: [], prompt: '观察码头插画里的瓷砖。哪张示意图同时画了船帆和波浪？',
+      options: [
+        { id: 'a', label: '选择图 A', illustration: 'tile-rose' },
+        { id: 'b', label: '选择图 B', illustration: 'tile-sail' },
+        { id: 'c', label: '选择图 C', illustration: 'tile' }
+      ],
+      answer: 'b', hint: '找找三角形的帆和弯曲的波浪线，它们出现在同一张图上。',
+      explanation: '图 B 的三角形是船帆，弯曲的线是海浪。两种形状放在一起，就能联想到海上的帆船。'
+    },
     chapters: [
-      { act: 2, title: '海上风暴', after: [first], start: 'wave', scenes: [
+      { act: 2, title: '海上风暴', after: nodeIds, checkinMode: 'any', start: 'wave', scenes: [
         { id: 'wave', kind: 'dialogue', speaker: '父亲', text: '浪把船身推得一斜。小心，先把脚边的瓷砖箱护好。', nextSceneId: 'hold' },
         { id: 'hold', kind: 'choice', text: '箱角从绳结里滑了出来。你伸手够到了两样东西。', choices: [
           { label: '拉紧固定箱子的绳子', nextSceneId: 'rope' },
@@ -29,21 +39,22 @@ export function macauContent(first: string, second: string): CultureContent {
         { id: 'color', kind: 'dialogue', speaker: '旁白', text: '桌上排着试稿。她把深蓝留给边线，又给中间留出一块白。', nextSceneId: 'work' },
         { id: 'work', kind: 'ending', text: '你的配色已收进作品页。窗外传来脚步声，有人从码头送来靠岸的消息。' }
       ] },
-      { act: 4, title: '澳门靠岸', after: [first, second], start: 'shore', scenes: [
+      { act: 4, title: '澳门靠岸', after: [], start: 'shore', scenes: [
         { id: 'shore', kind: 'dialogue', speaker: '旁白', text: '船停在岸边。女儿拿出试稿，渔村里的人围过来，指着画上的小帆。', nextSceneId: 'exchange' },
         { id: 'exchange', kind: 'dialogue', speaker: '女儿', text: '你们认识这片海。下次我想照着你们见过的浪，再画一块瓷砖。', nextSceneId: 'today' },
-        { id: 'today', kind: 'ending', asset: 'aomiao', text: '码头的声音慢慢退去。你回到今天的地图前，蓝白瓷砖已经留在自己的探索记录里。' }
+        { id: 'today', kind: 'ending', asset: 'aomiao', text: '码头的声音慢慢退去。你回到今天的地图前，记住了瓷砖上的风帆和海浪。' }
       ] }
     ]
   }
 }
 
-export function hunanContent(first: string): CultureContent {
+export function hunanContent(): CultureContent {
   return {
     quiz: {
-      title: '湘绣辨认', after: [first], prompt: '根据示意图，哪一幅呈现了绣线的质感？',
-      options: [{ id: 'a', label: '选择图 A', illustration: 'tile' }, { id: 'b', label: '选择图 B', illustration: 'threads' }],
-      answer: 'b', explanation: '图 B 用有方向的色线模拟绣线，图 A 用重复的边线模拟蓝白瓷砖。'
+      title: '湘绣辨认', after: [], prompt: '比较两幅针脚示意图。哪一幅里，上下两组针脚朝不同方向倾斜？',
+      options: [{ id: 'a', label: '选择图 A', illustration: 'threads' }, { id: 'b', label: '选择图 B', illustration: 'threads-direction' }],
+      answer: 'b', hint: '先看上半部分的线，再看下半部分，比较它们分别朝哪边倾斜。',
+      explanation: '图 B 的上下两组针脚朝不同方向倾斜。沿着线的走向看，可以发现它们是从哪里转向的。'
     },
     learning: {
       title: '针法学习卡', after: [],
@@ -56,7 +67,7 @@ export function hunanContent(first: string): CultureContent {
     },
     chapters: [
       { act: 5, title: '湘绣相遇', after: [], start: 'meet', scenes: [
-        { id: 'meet', kind: 'dialogue', speaker: '绣者', text: '把这两张图并排放着看。你刚才已经找到绣线，再看看它们是朝哪个方向排的。', nextSceneId: 'notice' },
+        { id: 'meet', kind: 'dialogue', speaker: '绣者', text: '你刚才找到了朝不同方向倾斜的针脚。现在再看看窗边的图样，你最先注意到哪里？', nextSceneId: 'notice' },
         { id: 'notice', kind: 'choice', text: '绣者把图样移到窗边。你先注意到什么？', choices: [
           { label: '线条的走向', nextSceneId: 'direction' },
           { label: '颜色的变化', nextSceneId: 'color' }
