@@ -1,34 +1,97 @@
 <template>
   <view class="screen">
-    <AppPageHeader title="拍照打卡" :show-back="true" />
+    <AppPageHeader title="私密打卡" :show-back="true" />
     <view class="content">
-      <DemoNotice :pending="true" description="本页只检查入口和返回。定位校验、拍照、上传及提交打卡在阶段二接通。" />
-
       <template v-if="node != null">
         <text class="title">{{ node.title }}</text>
-        <view class="card"><text class="heading">当前定位</text><text class="body">正式打卡需要在馆方确认的范围内获取位置。</text></view>
-        <view class="card"><text class="heading">照片与备注</text><text class="body">定位、拍照和提交将在微信登录与私密存储接通后开放。</text></view>
-        <view class="card green"><text class="body">打卡凭证默认私密。发布到社区时由你选图，并单独提交审核。</text></view>
-        <button class="secondary" @click="returnToMap">回到地图</button>
+        <view class="card green"><text class="body">照片默认仅本人可见，服务端核验定位和照片归属。提交成功才会记录进度。云端首次部署仍待联调。</text></view>
+        <button class="secondary" :disabled="busy" @click="prepare">{{ activeRun?.routeId === node.routeId ? '恢复本次探索与草稿' : '微信登录并开始探索' }}</button>
+        <view v-if="ready" class="card">
+          <text class="heading">照片与日记</text>
+          <image v-if="photo.length > 0" :src="photo" mode="aspectFit" style="width:100%;height:180px" />
+          <button class="secondary" :disabled="busy" @click="choose">拍照 / 选择照片（不超过 1MB）</button>
+          <textarea v-model="note" :disabled="busy" maxlength="1000" placeholder="记下这一站（仅自己可见）" @input="saveDraft" />
+          <text class="muted">每次提交重新获取位置。定位拒绝或上传失败后，可以保留照片与备注重试。</text>
+        </view>
+        <text v-if="status.length > 0" class="body">{{ status }}</text>
+        <button v-if="ready" class="primary" :disabled="busy || photo.length === 0 || completed" @click="submit">{{ busy ? '处理中…' : completed ? '本次打卡已保存' : '获取定位并提交私密打卡' }}</button>
       </template>
-      <view v-else class="card"><text class="body">请从路线或点位详情打开打卡。</text><button class="secondary" @click="returnToMap">回到地图</button></view>
+      <view v-else class="card"><text class="body">点位不可用，请从已发布路线进入。</text></view>
+      <button class="secondary" @click="returnToMap">回到地图</button>
     </view>
   </view>
 </template>
-
 <script setup lang="uts">
+import { ref, computed } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import DemoNotice from '@/components/DemoNotice.uvue'
-
-import { computed, ref } from 'vue'
-import { findNode } from '@/features/exploration/catalog.uts'
+import { findNode, activeRun, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
+import { secured, session, requestId } from '@/features/api.uts'
 import { returnToMap } from '@/features/navigation.uts'
+type Draft = { requestId: string, base64: string, mime: string, note: string, mediaId: string }
 const id = ref<string | null>(null)
-onLoad(query => { id.value = query['nodeId'] ?? null })
 const node = computed(() => findNode(id.value))
+const ready = ref(false), busy = ref(false), completed = ref(false)
+const photo = ref(''), note = ref(''), status = ref('')
+let draft: Draft = { requestId: '', base64: '', mime: '', note: '', mediaId: '' }
+let draftKey = ''
+onLoad(query => { id.value = query['nodeId'] ?? null })
+onShow(() => { refreshCatalog() })
+function saveDraft(): void {
+  if (draftKey.length === 0) return
+  draft.note = note.value
+  uni.setStorageSync(draftKey, JSON.stringify(draft))
+}
+async function prepare(): Promise<void> {
+  if (busy.value || node.value == null) return
+  busy.value = true
+  try {
+    await startRoute(node.value!.routeId)
+    draftKey = 'fy-draft-' + session.value!.uid + '-' + activeRun.value!.runId + '-' + id.value
+    const saved = uni.getStorageSync(draftKey) as string
+    draft = saved != null && saved.length > 0 ? JSON.parse<Draft>(saved)! : { requestId: requestId(), base64: '', mime: '', note: '', mediaId: '' }
+    note.value = draft.note
+    photo.value = draft.base64.length > 0 ? 'data:' + draft.mime + ';base64,' + draft.base64 : ''
+    ready.value = true
+  } catch (_) { status.value = '登录或探索未恢复，请检查网络与云端配置后重试。' } finally { busy.value = false }
+}
+function choose(): void {
+  uni.chooseImage({ count: 1, sizeType: ['compressed'], success: result => {
+    const path = result.tempFilePaths[0]
+    // #ifdef MP-WEIXIN
+    uni.getFileSystemManager().readFile({ filePath: path, encoding: 'base64', success: file => {
+      const base64 = file.data as string
+      if (base64.length > 1398104) { status.value = '照片过大，请选择小于 1MB 的 JPG 或 PNG。'; return }
+      draft.base64 = base64; draft.mime = base64.startsWith('iVBOR') ? 'image/png' : 'image/jpeg'
+      draft.mediaId = ''; photo.value = 'data:' + draft.mime + ';base64,' + base64; saveDraft()
+    }, fail: () => { status.value = '照片读取失败，请重新选择。' } })
+    // #endif
+  } })
+}
+async function submit(): Promise<void> {
+  if (busy.value || !ready.value || node.value == null || photo.value.length === 0 || completed.value) return
+  busy.value = true
+  saveDraft()
+  try {
+    const location = await new Promise<{ latitude: number, longitude: number }>((resolve, reject) => {
+      uni.getLocation({ type: 'gcj02', success: r => resolve({ latitude: r.latitude, longitude: r.longitude }), fail: () => reject(new Error('LOCATION_DENIED')) })
+    })
+    const runId = activeRun.value!.runId
+    const nodeId = node.value!.id.split(':')[1]
+    status.value = '正在保存私密照片…'
+    if (draft.mediaId.length === 0) {
+      const media = await secured<{ id: string }>('uploadMedia', { runId, nodeId, requestId: draft.requestId, base64: draft.base64 })
+      draft.mediaId = media.id; saveDraft()
+    }
+    status.value = '正在校验打卡…'
+    await secured<{ id: string }>('checkin', { runId, nodeId, requestId: draft.requestId, mediaId: draft.mediaId, latitude: location.latitude, longitude: location.longitude, note: note.value })
+    completed.value = true
+    uni.removeStorageSync(draftKey)
+    status.value = '打卡已保存，仅本人可见。'
+    await refreshCatalog()
+  } catch (e) { status.value = '未完成：请确认定位权限、到馆范围、网络及云端配置，然后重试。照片和备注已保留。' } finally { busy.value = false }
+}
 </script>
-
 <style scoped>
 @import '@/styles/page.css';
-
+textarea { width:100%; box-sizing:border-box; padding:12px; background:#f6f7f0; border-radius:12px; }
 </style>

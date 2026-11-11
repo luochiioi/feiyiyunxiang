@@ -11,7 +11,7 @@
     <view v-if="expanded" class="route-task">
       <text class="route-name">{{ nextNode == null ? '当前没有待打卡点' : '下一站 · ' + nextNode.title }}</text>
       <text class="route-meta">{{ nextNode == null ? '可在路线详情查看任务' : '两地旅伴各自完成本地任务' }}</text>
-      <button v-if="nextNode != null" class="task-button" @click="emit('continue-task', nextNode.id)">打卡说明 · 待开发</button>
+      <button v-if="nextNode != null" class="task-button" @click="emit('continue-task', nextNode.id)">前往私密打卡</button>
     </view>
   </view>
 </template>
@@ -28,7 +28,7 @@ const emit = defineEmits<{ (event: 'toggle'): void, (event: 'continue-task', nod
 .route-toggle::after, .task-button::after { border: 0; }
 .route-icon { width: 32px; height: 32px; flex-shrink: 0; }
 .route-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
-.route-name { color: #443622; font-size: 14px; font-weight: 700; }
+.route-name { color: #443622; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
 .route-meta { color: #5e684f; font-size: 11px; flex-shrink: 0; }
 .route-task { display: flex; flex-direction: column; gap: 7px; padding: 11px 15px 13px; border-top: 1px solid #e4ead7; background: #eef5e4; }
 .task-button { width: 100%; margin: 0; background: #426240; color: white; border-radius: 14px; font-size: 14px; line-height: 38px; }

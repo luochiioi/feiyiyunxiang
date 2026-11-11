@@ -1,5 +1,5 @@
 <template>
-  <view v-if="demoEnabled" class="notice">
+  <view v-if="demoEnabled || props.pending" class="notice">
     <text class="notice-title">{{ props.pending ? '功能待开发 · 当前为说明页' : '阶段一页面验收 · 本地演示数据' }}</text>
     <text>{{ props.description ?? '请检查页面显示、点击跳转和返回。示例数据不写入云端。' }}</text>
   </view>

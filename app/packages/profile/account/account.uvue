@@ -6,8 +6,10 @@
 
       <view class="card row">
         <image class="avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
-        <view class="stack"><text class="heading">你好，探索者</text><text class="muted">游客 · 微信登录将在阶段二开放</text></view>
+        <view class="stack"><text class="heading">你好，探索者</text><text class="muted">{{ session == null ? '游客，可浏览已发布路线' : '已登录 · 私密探索账号' }}</text></view>
       </view>
+      <button v-if="session == null" class="primary" :disabled="busy" @click="signIn">微信登录</button>
+      <button v-else class="secondary" :disabled="busy" @click="signOut">退出登录</button>
       <view class="card green">
         <text class="heading">探索档案</text><text class="body">回看打卡日记、文化作品和旅伴记录。</text>
         <button class="primary" @click="openPage('/packages/profile/my-checkins/my-checkins')">查看档案</button>
@@ -26,6 +28,12 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import DemoNotice from '@/components/DemoNotice.uvue'
 
 import { openPage } from '@/features/navigation.uts'
+import { ref } from 'vue'
+import { session, login, api, clearSession, showError } from '@/features/api.uts'
+import { activeRun } from '@/features/exploration/catalog.uts'
+const busy = ref(false)
+async function signIn(): Promise<void> { busy.value = true; try { await login() } catch (_) { showError() } finally { busy.value = false } }
+async function signOut(): Promise<void> { busy.value = true; try { await api<UTSJSONObject>('logout'); clearSession(); activeRun.value = null } catch (_) { showError() } finally { busy.value = false } }
 function showAi(): void {
   uni.showToast({ title: 'AI 猜图 · 敬请期待', icon: 'none' })
 }

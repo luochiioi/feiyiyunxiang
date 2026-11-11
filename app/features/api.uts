@@ -1,0 +1,41 @@
+import { ref } from 'vue'
+export type Session = { uid: string, token: string, expiresAt: number }
+type Reply<T> = { code: string, data: T }
+export const session = ref<Session | null>(null)
+const saved = uni.getStorageSync('fy-session') as string
+if (saved != null && saved.length > 0) {
+  try { session.value = JSON.parse<Session>(saved) } catch (_) { uni.removeStorageSync('fy-session') }
+}
+export function clearSession(): void { session.value = null; uni.removeStorageSync('fy-session') }
+export async function api<T>(action: string, payload: UTSJSONObject = {}): Promise<T> {
+  const result = await uniCloud.callFunction<Reply<T>>({ name: 'fy-api', data: { action, payload, token: session.value?.token ?? '' } })
+  if (result.result.code !== 'OK') {
+    if (result.result.code === 'AUTH_REQUIRED') clearSession()
+    throw new Error(result.result.code)
+  }
+  return result.result.data
+}
+let loginTask: Promise<void> | null = null
+export async function login(): Promise<void> {
+  if (loginTask != null) return loginTask!
+  const task = async (): Promise<void> => {
+    const code = await new Promise<string>((resolve, reject) => {
+      uni.login({ provider: 'weixin', success: res => resolve(res.code!), fail: () => reject(new Error('LOGIN_FAILED')) })
+    })
+    const value = await api<Session>('wxLogin', { code })
+    session.value = value
+    uni.setStorageSync('fy-session', JSON.stringify(value))
+  }
+  loginTask = task()
+  try { await loginTask } finally { loginTask = null }
+}
+export async function secured<T>(action: string, payload: UTSJSONObject = {}): Promise<T> {
+  if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
+  try { return await api<T>(action, payload) } catch (e) {
+    if (session.value != null) throw e
+    await login()
+    return await api<T>(action, payload)
+  }
+}
+export function showError(): void { uni.showToast({ title: '操作未完成，请检查网络或配置后重试，草稿已保留', icon: 'none' }) }
+export function requestId(): string { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 14) }

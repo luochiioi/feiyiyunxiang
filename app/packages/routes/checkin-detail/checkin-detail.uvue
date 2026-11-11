@@ -6,17 +6,17 @@
 
       <template v-if="node != null">
         <view class="card">
-          <text class="tag">{{ node.checked ? '已记录 · 示例' : '待探索' }}</text>
+          <text class="tag">{{ node.checked ? '本次探索已记录' : '待探索' }}</text>
           <text class="title">{{ node.title }}</text>
           <text class="body">{{ node.description }}</text>
-          <text class="muted">演示点位 · 坐标和打卡范围待内容核实</text>
+          <text class="muted">按已发布节点范围校验；开发测试内容不代表馆方信息。</text>
         </view>
         <view class="card green">
           <text class="heading">我的记录</text>
-          <text class="body">{{ node.checked ? '示例备注：记下旅程的第一站。' : '这里会显示你的私密照片和备注。' }}</text>
+          <text class="body">私密照片和备注请在「我的 → 探索档案」查看。</text>
           <text class="muted">照片默认仅本人可见，可自行选图提交社区审核。</text>
         </view>
-        <button v-if="!node.checked" class="primary" @click="checkin">打卡说明 · 待开发</button>
+        <button v-if="!node.checked" class="primary" @click="checkin">前往私密打卡</button>
         <button class="secondary" @click="showOnMap">在地图查看</button>
       </template>
       <view v-else class="card"><text class="body">找不到这个点位。</text><button class="secondary" @click="returnToMap">回到地图</button></view>

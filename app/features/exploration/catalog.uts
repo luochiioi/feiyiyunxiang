@@ -1,17 +1,70 @@
+import { shallowRef } from 'vue'
+import { api, secured, session, requestId, login } from '../api.uts'
 import { demoEnabled } from '../demo-mode.uts'
 import { demoNodes, demoRoutes } from './demo-fixtures.uts'
 import { visibleMapNodes } from './map-markers.uts'
-import type { RouteNode, RouteSummary } from './types.uts'
+import type { RouteNode, RouteSummary, MapViewport } from './types.uts'
+export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
+export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[] }
+export type RunProgress = { runId: string, routeId: string, done: number, total: number, completed: string[], snapshot: PublishedRoute }
+export const published = shallowRef<PublishedRoute[]>([])
+export const activeRun = shallowRef<RunProgress | null>(null)
+export const catalogError = shallowRef(false)
+export async function refreshCatalog(): Promise<void> {
+  if (demoEnabled) return
+  try { published.value = await api<PublishedRoute[]>('catalog'); catalogError.value = false } catch (_) { catalogError.value = true }
+  if (session.value != null) {
+    const runId = uni.getStorageSync('fy-run-' + session.value!.uid) as string
+    if (runId != null && runId.length > 0) {
+      try { activeRun.value = await secured<RunProgress>('progress', { runId }) } catch (_) { if (session.value == null) activeRun.value = null }
+    }
+  } else { activeRun.value = null }
+}
+export async function startRoute(routeId: string): Promise<void> {
+  if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
+  if (session.value != null && activeRun.value?.routeId === routeId) return
+  const existingId = uni.getStorageSync('fy-run-' + session.value!.uid) as string
+  if (existingId != null && existingId.length > 0) {
+    const existing = await secured<RunProgress>('progress', { runId: existingId })
+    if (existing.routeId === routeId) { activeRun.value = existing; return }
+  }
+  const pendingKey = 'fy-start-' + routeId
+  let rid = uni.getStorageSync(pendingKey) as string
+  if (rid == null || rid.length === 0) { rid = requestId(); uni.setStorageSync(pendingKey, rid) }
+  const run = await secured<{ id: string }>('start', { routeId, requestId: rid })
+  uni.setStorageSync('fy-run-' + session.value!.uid, run.id)
+  activeRun.value = await secured<RunProgress>('progress', { runId: run.id })
+  uni.removeStorageSync(pendingKey)
+}
 
 export function listRoutes(): RouteSummary[] {
-  return demoEnabled ? demoRoutes : []
+  if (demoEnabled) return demoRoutes
+  const routes = published.value.slice()
+  const run = activeRun.value
+  if (run != null) {
+    const i = routes.findIndex(r => r.id === run.routeId)
+    if (i >= 0) routes[i] = run.snapshot
+    else routes.push(run.snapshot)
+  }
+  return routes.map(r => {
+    const completed = run?.routeId === r.id ? run!.completed : []
+    const next = r.nodes.find(n => !completed.includes(n.id))
+    return { id: r.id, name: (r.testOnly ? '开发测试 · ' : '') + r.name, region: r.region, description: r.description, total: r.nodes.length, done: completed.length, nextNodeId: next == null ? null : r.id + ':' + next.id, viewport: r.viewport }
+  })
 }
 export function findRoute(id: string | null): RouteSummary | null {
   return listRoutes().find(route => route.id === id) ?? null
 }
 export function listNodes(routeId: string | null): RouteNode[] {
-  return demoEnabled ? visibleMapNodes(demoNodes, routeId) : []
+  if (demoEnabled) return visibleMapNodes(demoNodes, routeId)
+  const result: RouteNode[] = []
+  listRoutes().filter(r => routeId == null || r.id === routeId).forEach((r, i) => {
+    const run = activeRun.value
+    const route = run?.routeId === r.id ? run!.snapshot : published.value.find(v => v.id === r.id)
+    route?.nodes.forEach((n, j) => { result.push({ ...n, id: r.id + ':' + n.id, routeId: r.id, markerId: i * 100 + j + 1, checked: run?.routeId === r.id && run!.completed.includes(n.id) }) })
+  })
+  return result
 }
 export function findNode(id: string | null): RouteNode | null {
-  return demoEnabled ? (demoNodes.find(node => node.id === id) ?? null) : null
+  return listNodes(null).find(node => node.id === id) ?? null
 }

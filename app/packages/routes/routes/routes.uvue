@@ -13,7 +13,7 @@
         <text class="muted">{{ item.id === mapState.routeId ? '当前路线 · ' : '' }}{{ item.total }} 项探索任务</text>
         <button class="secondary" @click.stop="showRoute(item.id)">查看路线</button>
       </view>
-      <view v-if="routes.length === 0" class="card"><text class="body">暂无可查看的路线。</text></view>
+      <view v-if="routes.length === 0" class="card"><text class="body">{{ catalogError ? '路线暂未加载成功，请重试。云端部署及内容发布仍待联调。' : '暂无已发布路线。' }}</text><button class="secondary" @click="refreshCatalog">重新加载</button></view>
       <button v-if="mapState.routeId != null" class="secondary" @click="clearRoute">清除当前路线</button>
     </view>
   </view>
@@ -23,10 +23,12 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import DemoNotice from '@/components/DemoNotice.uvue'
 
-import { listRoutes } from '@/features/exploration/catalog.uts'
+import { listRoutes, refreshCatalog, catalogError } from '@/features/exploration/catalog.uts'
+import { computed } from 'vue'
 import { dispatchMapEvent, mapState } from '@/features/exploration/map-store.uts'
 import { openPage, returnToMap } from '@/features/navigation.uts'
-const routes = listRoutes()
+const routes = computed(() => listRoutes())
+onShow(() => { refreshCatalog() })
 function showRoute(id: string): void {
   openPage('/packages/routes/route-detail/route-detail?routeId=' + encodeURIComponent(id))
 }

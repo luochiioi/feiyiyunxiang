@@ -2,7 +2,7 @@
   <view class="screen">
     <AppPageHeader title="社区" :show-back="true" />
     <view class="content">
-      <DemoNotice description="验收帖子列表、详情和返回。发帖、互动、好友内容及排行待开发。" />
+      <DemoNotice :pending="true" description="社区真实接口与审核在阶段五接通。发帖、互动、好友内容及排行待开发。" />
 
       <view class="row filters">
         <button class="secondary" :class="{ active: tab === 'latest' }" @click="tab = 'latest'">最新</button>
