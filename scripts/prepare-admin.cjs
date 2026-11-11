@@ -1,0 +1,10 @@
+// Offline preparation only. Import the output manually after deployment authorization.
+// $env:FY_ADMIN_PASSWORD must be set securely outside shell history.
+const fs=require('node:fs')
+const {hashPassword}=require('../app/uniCloud-alipay/cloudfunctions/fy-api/security')
+const username=process.argv[2], output=process.argv[3]
+const password=process.env.FY_ADMIN_PASSWORD
+if(!/^[A-Za-z0-9_-]{3,40}$/.test(username??'')||!output||!password||password.length<16||password.length>128)throw new Error('Provide username, ignored local output path and FY_ADMIN_PASSWORD (16-128 characters)')
+if(!output.replaceAll('\\','/').startsWith('.superpowers/'))throw new Error('Output must be inside ignored .superpowers/')
+fs.writeFileSync(output,JSON.stringify({username,passwordHash:hashPassword(password),role:['admin'],status:0,token:[],register_date:Date.now()},null,2),{flag:'wx'})
+console.log('Prepared local administrator import. No cloud changes.')
