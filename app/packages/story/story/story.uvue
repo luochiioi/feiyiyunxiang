@@ -12,7 +12,7 @@
         <view v-for="(chapter, index) in chapters" :key="chapter.title" class="row spread divider menu-row" @click="openChapter(index + 1)">
           <view class="stack">
             <text class="body">{{ '第 ' + (index + 1) + ' 幕 · ' + (chapterFor(index + 1)?.title ?? chapter.title) }}</text>
-            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapter.gate }}</text>
+            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapterFor(index + 1)?.local === true ? '澳门 · 完成本路线任一地点打卡' : chapter.gate }}</text>
           </view>
           <text class="muted">{{ chapterLabel(index + 1) }}</text>
         </view>
@@ -29,12 +29,15 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { ref } from 'vue'
 import { secured, session } from '@/features/api.uts'
 import { decodePageId, openPage } from '@/features/navigation.uts'
-import { savedOpeningPath } from '../story-content.uts'
-type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean }
+import { legacyStorm, localStoryPath, savedOpeningPath } from '../story-content.uts'
+import { readLegacyStorm } from '../legacy-story.uts'
+type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean, local?: boolean }
 const entries = ref<Entry[]>([])
 const openingStarted = ref(false)
 const loadFailed = ref(false)
+const olderService = ref(false)
 const message = ref('')
+let loading = false
 let preferredRoute = ''
 const chapters = [
   { title: '触碰海丝地图', gate: '' },
@@ -50,16 +53,48 @@ onShow(() => {
   load()
 })
 async function load(): Promise<void> {
+  if (loading) return
   loadFailed.value = false
+  olderService.value = false
   message.value = ''
   if (session.value == null) { entries.value = []; return }
+  loading = true
+  const uid = session.value!.uid
   try {
-    entries.value = await secured<Entry[]>('storyLibrary')
-  } catch (_) {
+    let library: Entry[] = []
+    let missing = false
+    try {
+      library = await secured<Entry[]>('storyLibrary')
+    } catch (error) {
+      if ((error as Error).message !== 'NOT_FOUND') throw error
+      missing = true
+    }
+    if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
+    if (missing || !library.some(item => item.act === 2 && (preferredRoute.length === 0 || item.routeId === preferredRoute))) {
+      try {
+        const local = await readLegacyStorm(preferredRoute, '')
+        if (local != null && !library.some(item => item.routeId === local.routeId)) {
+          library.push({ act: 2, title: legacyStorm.title, routeId: local.routeId, runId: local.runId,
+            unlocked: local.unlocked, started: localStoryPath(local.storageKey, legacyStorm).length > 1, local: true })
+        }
+      } catch (error) {
+        if (missing) throw error
+      }
+    }
+    if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
+    entries.value = library
+    olderService.value = missing
+    if (missing) {
+      message.value = library.length > 0
+        ? '当前测试路线的第二幕可按已有打卡进度阅读，其余章节待剧情服务接入。'
+        : '当前开发环境尚未接入剧情服务。可从已打卡的澳门测试路线查看第二幕。'
+    }
+  } catch (error) {
     entries.value = []
     loadFailed.value = true
-    message.value = '解锁进度暂不可用。'
-  }
+    message.value = (error as Error).message === 'AUTH_REQUIRED' || session.value == null
+      ? '请在「我的」重新登录后读取解锁进度。' : '暂时无法读取路线打卡进度，请重试。'
+  } finally { loading = false }
 }
 function chapterFor(act: number): Entry | null {
   const candidates = entries.value.filter(entry => entry.act === act)
@@ -70,14 +105,15 @@ function chapterLabel(act: number): string {
   if (act === 1) return '游客可读 ›'
   const entry = chapterFor(act)
   if (entry?.unlocked === true) return entry.started ? '继续阅读 ›' : '阅读 ›'
-  return loadFailed.value ? '待重试' : '随路线解锁'
+  if (loadFailed.value) return '待重试'
+  return olderService.value && entry == null ? '待接入' : '随路线解锁'
 }
 function openOpening(): void { openPage('/packages/story/reader/reader?act=1') }
 function openChapter(act: number): void {
   if (act === 1) { openOpening(); return }
   const entry = chapterFor(act)
   if (entry?.unlocked === true) {
-    openPage('/packages/story/reader/reader?act=' + act + '&runId=' + encodeURIComponent(entry.runId))
+    openPage('/packages/story/reader/reader?act=' + act + '&runId=' + encodeURIComponent(entry.runId) + (entry.local === true ? '&legacy=1' : ''))
   }
 }
 </script>

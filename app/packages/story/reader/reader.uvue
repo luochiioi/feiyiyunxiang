@@ -10,9 +10,14 @@
             <button class="game-icon-control" :disabled="busy" @click="restart">重读</button>
           </view>
         </view>
-        <view class="illustration">
-          <image v-if="scene.asset === 'aomiao' && !imageFailed" class="character" src="/static/ip/aomiao-wave.png" mode="aspectFit" @error="imageFailed = true" />
-          <text class="asset-note">{{ imageFailed ? '图片暂不可用，仍可阅读对白' : (scene.asset === 'aomiao' ? '澳喵 · 场景图待补' : '场景图待补') }}</text>
+        <view v-if="art.length > 0 && !imageFailed" class="scene-art">
+          <image class="scene-image" :src="art" mode="aspectFit" @error="imageFailed = true" />
+          <image v-if="scene.asset === 'aomiao'" class="scene-guide" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+          <text class="asset-note image-credit">AI 场景插画</text>
+        </view>
+        <view v-else class="illustration">
+          <image v-if="scene.asset === 'aomiao'" class="character" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+          <text class="asset-note">{{ imageFailed ? '图片暂不可用，仍可阅读对白' : '场景图待补' }}</text>
         </view>
         <text v-if="testOnly" class="marker-caption review-note">虚构场景 · 剧情与文化内容待校订</text>
         <view v-if="scene.kind === 'choice'" class="choice-panel">
@@ -45,7 +50,8 @@ import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { secured } from '@/features/api.uts'
 import { decodePageId, openPage } from '@/features/navigation.uts'
-import { opening, openingStorageKey, savedOpeningPath } from '../story-content.uts'
+import { legacyStorm, localStoryPath, opening, openingStorageKey } from '../story-content.uts'
+import { readLegacyStorm } from '../legacy-story.uts'
 import type { Chapter, ChapterRead, Checkpoint } from '../story-content.uts'
 
 const chapter = ref<Chapter | null>(null)
@@ -59,18 +65,31 @@ const conflict = ref(false)
 const imageFailed = ref(false)
 const message = ref('正在读取章节…')
 const scene = computed(() => chapter.value?.scenes.find(item => item.id === path.value[path.value.length - 1]) ?? null)
+const art = computed((): string => {
+  if (act.value === 1) return '/packages/story/static/opening-map.jpg'
+  if (act.value === 2) return '/packages/story/static/storm-at-sea.jpg'
+  if (act.value === 4) return '/packages/story/static/macau-shore.jpg'
+  return ''
+})
+let legacy = false
+let localKey = ''
 
 onLoad(query => {
   act.value = Number(query['act'] ?? '0')
   runId.value = decodePageId(query['runId'] ?? null) ?? ''
+  legacy = query['legacy'] === '1' && act.value === 2
   load()
 })
+function loadLocal(content: Chapter, key: string): void {
+  localKey = key
+  chapter.value = content
+  path.value = localStoryPath(key, content)
+  message.value = ''
+}
 async function load(): Promise<void> {
   if (busy.value) return
   if (act.value === 1) {
-    chapter.value = opening
-    path.value = savedOpeningPath()
-    message.value = ''
+    loadLocal(opening, openingStorageKey)
     return
   }
   if (runId.value.length === 0 || act.value < 2 || act.value > 6) {
@@ -79,6 +98,13 @@ async function load(): Promise<void> {
   }
   busy.value = true
   try {
+    if (legacy) {
+      const access = await readLegacyStorm('', runId.value)
+      if (access == null) throw new Error('NOT_FOUND')
+      if (!access.unlocked) throw new Error('ACTIVITY_LOCKED')
+      loadLocal(legacyStorm, access.storageKey)
+      return
+    }
     const result = await secured<ChapterRead>('storyChapter', { runId: runId.value, act: act.value })
     chapter.value = result.chapter
     path.value = result.checkpoint.path
@@ -96,8 +122,8 @@ async function showPath(nextPath: string[]): Promise<void> {
   busy.value = true
   message.value = ''
   try {
-    if (act.value === 1) {
-      uni.setStorageSync(openingStorageKey, JSON.stringify(nextPath))
+    if (localKey.length > 0) {
+      uni.setStorageSync(localKey, JSON.stringify(nextPath))
       path.value = nextPath
     } else {
       const saved = await secured<Checkpoint>('saveReading', { runId: runId.value, act: act.value, path: nextPath, revision: revision.value })
@@ -133,6 +159,10 @@ function leave(): void {
 .game-icon-control { margin: 0; padding: 2px 12px; border-radius: 16px; background: #fff1d7; color: #5c3b10; font-size: 13px; }
 .marker-caption { color: #f5e9d5; font-size: 13px; }
 .illustration { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 192px; border-radius: 18px; background: #37485e; }
+.scene-art { position: relative; width: 100%; overflow: hidden; border-radius: 18px; background: #37485e; }
+.scene-image { display: block; width: 100%; height: calc((100vw - 32px) * 0.5625); }
+.scene-guide { position: absolute; top: 6px; right: 8px; width: 61px; height: 61px; }
+.image-credit { position: absolute; bottom: 0; right: 0; border-top-left-radius: 8px; background: rgba(35,29,22,.78); }
 .warm-scene .illustration { background: #5c4048; }
 .character { width: 138px; height: 138px; }
 .asset-note { color: #f5e9d5; font-size: 12px; padding: 8px; }

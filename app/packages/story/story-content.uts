@@ -21,13 +21,32 @@ export const opening: Chapter = {
   ]
 }
 
-export function savedOpeningPath(): string[] {
-  const raw = uni.getStorageSync(openingStorageKey) as string
+// Fixed companion scene for the Macau test route from before story releases existed.
+export const legacyStorm: Chapter = {
+  act: 2,
+  title: '海上风暴',
+  start: 'wave',
+  scenes: [
+    { id: 'wave', kind: 'dialogue', speaker: '父亲', text: '浪把船身推得一斜。小心，先把脚边的瓷砖箱护好。', nextSceneId: 'hold' },
+    { id: 'hold', kind: 'choice', text: '箱角从绳结里滑了出来。你伸手够到了两样东西。', choices: [
+      { label: '拉紧固定箱子的绳子', nextSceneId: 'rope' },
+      { label: '用布垫住箱角', nextSceneId: 'cloth' }
+    ] },
+    { id: 'rope', kind: 'dialogue', speaker: '旁白', text: '你重新打了个结，把箱子拉回木梁边。', nextSceneId: 'dawn' },
+    { id: 'cloth', kind: 'dialogue', speaker: '旁白', text: '你把布塞进缝里，箱子终于不再撞击甲板。', nextSceneId: 'dawn' },
+    { id: 'dawn', kind: 'ending', text: '浪声渐缓。父亲打开箱盖，一块蓝白瓷砖还完好地躺在里面。' }
+  ]
+}
+
+export function localStoryPath(key: string, chapter: Chapter): string[] {
+  const raw = uni.getStorageSync(key) as string
   if (raw != null && raw.length > 0) {
     try {
       const path = JSON.parse<string[]>(raw)
-      if (path != null && path.length > 0 && path[0] === opening.start && path.every(id => opening.scenes.some(scene => scene.id === id))) return path
-    } catch (_) { uni.removeStorageSync(openingStorageKey) }
+      if (path != null && path.length > 0 && path[0] === chapter.start && path.every(id => chapter.scenes.some(scene => scene.id === id))) return path
+    } catch (_) { uni.removeStorageSync(key) }
   }
-  return [opening.start]
+  return [chapter.start]
 }
+
+export function savedOpeningPath(): string[] { return localStoryPath(openingStorageKey, opening) }

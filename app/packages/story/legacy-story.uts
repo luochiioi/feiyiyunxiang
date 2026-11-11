@@ -1,0 +1,39 @@
+import { api, secured, session } from '@/features/api.uts'
+import type { PublishedRoute, RunProgress } from '@/features/exploration/catalog.uts'
+
+export type LegacyStormAccess = { routeId: string, runId: string, unlocked: boolean, storageKey: string }
+
+function legacyMacauRoute(route: PublishedRoute): boolean {
+  return route.testOnly === true && ['澳门', '澳門'].includes(route.region.trim()) &&
+    (route.activities?.length ?? 0) === 0 && route.nodes.length > 0
+}
+
+export function legacyStormAccess(progress: RunProgress | null, uid: string): LegacyStormAccess | null {
+  if (progress == null || uid.length === 0 || progress.version.length === 0 || !legacyMacauRoute(progress.snapshot)) return null
+  return {
+    routeId: progress.routeId,
+    runId: progress.runId,
+    unlocked: progress.snapshot.nodes.some(node => progress.completed.includes(node.id)),
+    storageKey: 'fy-story-legacy-storm-v1-' + uid + '-' + progress.runId + '-' + progress.version
+  }
+}
+
+export async function readLegacyStorm(routeId: string, runId: string): Promise<LegacyStormAccess | null> {
+  const uid = session.value?.uid
+  if (uid == null) return null
+  let progress: RunProgress | null
+  if (routeId.length > 0) {
+    progress = await secured<RunProgress | null>('routeProgress', { routeId })
+  } else {
+    const selected = runId.length > 0 ? runId : (uni.getStorageSync('fy-run-' + uid) as string)
+    if (selected != null && selected.length > 0) {
+      progress = await secured<RunProgress>('progress', { runId: selected })
+    } else {
+      const routes = (await api<PublishedRoute[]>('catalog')).filter(legacyMacauRoute)
+      if (routes.length !== 1) return null
+      progress = await secured<RunProgress | null>('routeProgress', { routeId: routes[0].id })
+    }
+  }
+  if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
+  return legacyStormAccess(progress, uid)
+}
