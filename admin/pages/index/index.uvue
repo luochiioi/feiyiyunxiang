@@ -11,16 +11,19 @@
         <text class="hint">使用单独开通的后台管理员账号登录。</text>
       </view>
       <template v-else>
-        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="showPasswordForm">修改密码</button><button :disabled="busy" @click="signOut">退出</button></view>
-        <view v-if="changingPassword" class="card password-form">
-          <text class="heading">修改管理员密码</text>
+        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="showAccountForm">修改登录账号或密码</button><button :disabled="busy" @click="signOut">退出</button></view>
+        <view v-if="editingAccount" class="card account-form">
+          <text class="heading">修改管理员登录信息</text>
+          <text>登录账号（3–40 字符）</text><input v-model="newUsername" :maxlength="40" :disabled="busy" />
           <text>当前密码</text><input v-model="currentPassword" :password="true" :maxlength="256" :disabled="busy" />
-          <text>新密码（16–128 字符）</text><input v-model="newPassword" :password="true" :maxlength="128" :disabled="busy" />
-          <text>确认新密码</text><input v-model="confirmPassword" :password="true" :maxlength="128" :disabled="busy" />
-          <text class="hint">修改后，需要在各设备上使用新密码重新登录。</text>
+          <text>新密码（10–128 字符，可留空）</text><input v-model="newPassword" :password="true" :maxlength="128" :disabled="busy" />
+          <template v-if="newPassword.length > 0">
+            <text>确认新密码</text><input v-model="confirmPassword" :password="true" :maxlength="128" :disabled="busy" />
+          </template>
+          <text class="hint">保存后，各设备需要重新登录。请先保存正在编辑的路线草稿。</text>
           <view class="toolbar">
-            <button class="primary" :disabled="busy" @click="savePassword">保存新密码</button>
-            <button :disabled="busy" @click="closePasswordForm">取消</button>
+            <button class="primary" :disabled="busy" @click="saveAccount">保存登录信息</button>
+            <button :disabled="busy" @click="closeAccountForm">取消</button>
           </view>
         </view>
         <view class="workspace">
@@ -57,50 +60,68 @@ type Museum = { name: string, description: string }
 type Viewport = { latitude: number, longitude: number, scale: number }
 type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: Node[] }
 const username = ref(''), password = ref(''), busy = ref(false), message = ref('')
-const changingPassword = ref(false)
+const editingAccount = ref(false), newUsername = ref('')
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 const drafts = ref<Draft[]>([])
 const editing = ref(false)
 const draft = ref<Draft>({ id: '', name: '', region: '', description: '', revision: 0, testOnly: true, museum: { name: '', description: '' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] })
 function numeric(value: string): number { return Number(value) }
 async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; await load() } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
-async function signOut(): Promise<void> { try { await api<UTSJSONObject>('adminLogout'); session.value = null; editing.value = false; drafts.value = []; closePasswordForm() } catch (_) { message.value = '退出未完成，请重试。' } }
-function showPasswordForm(): void {
+async function signOut(): Promise<void> { try { await api<UTSJSONObject>('adminLogout'); session.value = null; editing.value = false; drafts.value = []; closeAccountForm() } catch (_) { message.value = '退出未完成，请重试。' } }
+function showAccountForm(): void {
   message.value = ''
-  changingPassword.value = true
+  newUsername.value = session.value?.username ?? username.value
+  editingAccount.value = true
 }
-function closePasswordForm(): void {
+function closeAccountForm(): void {
+  newUsername.value = ''
   currentPassword.value = ''
   newPassword.value = ''
   confirmPassword.value = ''
-  changingPassword.value = false
+  editingAccount.value = false
 }
-async function savePassword(): Promise<void> {
+async function saveAccount(): Promise<void> {
   if (busy.value) return
-  if (currentPassword.value.length === 0 || newPassword.value.length < 16 || newPassword.value.length > 128 || newPassword.value.trim().length === 0) {
-    message.value = '请输入当前密码，并设置 16–128 字符的新密码。'
+  const loginName = newUsername.value.trim()
+  if (!/^[A-Za-z0-9_-]{3,40}$/.test(loginName)) {
+    message.value = '账号需为 3–40 个英文字母、数字、下划线或连字符。'
     return
   }
-  if (newPassword.value !== confirmPassword.value) {
+  if (currentPassword.value.length === 0) {
+    message.value = '请输入当前密码确认修改。'
+    return
+  }
+  const changingPassword = newPassword.value.length > 0
+  if (changingPassword && (newPassword.value.length < 10 || newPassword.value.length > 128 || newPassword.value.trim().length === 0)) {
+    message.value = '新密码应为 10–128 字符。'
+    return
+  }
+  if (changingPassword && newPassword.value !== confirmPassword.value) {
     message.value = '两次输入的新密码不一致。'
     return
   }
   busy.value = true
   try {
-    await api<UTSJSONObject>('adminChangePassword', { currentPassword: currentPassword.value, newPassword: newPassword.value })
+    const payload: UTSJSONObject = { currentPassword: currentPassword.value, newUsername: loginName }
+    if (changingPassword) payload['newPassword'] = newPassword.value
+    await api<UTSJSONObject>('adminUpdateCredentials', payload)
     session.value = null
+    username.value = loginName
     editing.value = false
     drafts.value = []
-    message.value = '密码已修改，请用新密码重新登录。'
-    closePasswordForm()
+    message.value = '登录信息已更新，请重新登录。'
+    closeAccountForm()
   } catch (error) {
     const code = (error as Error | null)?.message ?? ''
     if (code === 'PASSWORD_INCORRECT') message.value = '当前密码不正确。'
     else if (code === 'PASSWORD_UNCHANGED') message.value = '请设置与当前密码不同的新密码。'
-    else if (code === 'INVALID_PASSWORD') message.value = '新密码应为 16–128 字符。'
+    else if (code === 'INVALID_PASSWORD') message.value = '新密码应为 10–128 字符。'
+    else if (code === 'USERNAME_TAKEN') message.value = '这个账号已被使用，请换一个。'
+    else if (code === 'INVALID_USERNAME') message.value = '账号格式不正确。'
+    else if (code === 'CREDENTIALS_UNCHANGED') message.value = '请输入要修改的账号或新密码。'
     else if (code === 'RATE_LIMITED') message.value = '尝试次数过多，请稍后再试。'
-    else if (code === 'AUTH_REQUIRED') { message.value = '登录已过期，请重新登录后修改密码。'; closePasswordForm() }
-    else message.value = '暂未确认密码是否修改，请重新登录核对。'
+    else if (code === 'AUTH_REQUIRED') { message.value = '登录已过期，请重新登录后修改。'; closeAccountForm() }
+    else message.value = '暂未确认修改结果，请重新登录核对。'
   } finally { busy.value = false }
 }
 async function load(): Promise<void> { try { drafts.value = await api<Draft[]>('drafts'); message.value = '' } catch (_) { message.value = '读取失败或会话已过期。编辑内容仍保留。' } }

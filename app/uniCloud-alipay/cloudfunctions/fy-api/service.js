@@ -37,6 +37,11 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     if (!node) fail('NOT_FOUND')
     return {run,node}
   }
+  async function runProgress(u, runId, run) {
+    const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
+    const completed = checks.map(check => check.nodeId)
+    return { runId, routeId: run.routeId, version: run.version, snapshot: run.snapshot, completed, done: completed.length, total: run.snapshot.nodes.length }
+  }
   return {
     async drafts(u) { adminOnly(u); return repo.list('fy-drafts',{}) },
     async saveDraft(u,p) {
@@ -125,10 +130,23 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       })
     },
     async progress(u,p) {
-      const run=await owned(repo,u,p.runId)
-      const checks=await repo.list('fy-checkins',{runId:p.runId,uid:u.uid})
-      const completed=checks.map(c=>c.nodeId)
-      return {runId:p.runId,routeId:run.routeId,version:run.version,snapshot:run.snapshot,completed,done:completed.length,total:run.snapshot.nodes.length}
+      return runProgress(u, p.runId, await owned(repo, u, p.runId))
+    },
+    async routeProgress(u, p) {
+      if (!u?.uid) fail('AUTH_REQUIRED')
+      if (!id(p.routeId)) fail('INVALID_ROUTE')
+      const runs = await repo.list('fy-runs', { uid: u.uid, routeId: p.routeId })
+      const run = runs.sort((a, b) => b.createdAt - a.createdAt)[0]
+      return run == null ? null : runProgress(u, run._id, run)
+    },
+    async nodeRecord(u, p) {
+      if (!u?.uid) fail('AUTH_REQUIRED')
+      if (!id(p.routeId) || !id(p.nodeId)) fail('INVALID_NODE')
+      const records = await repo.list('fy-diary', { uid: u.uid, routeId: p.routeId, nodeId: p.nodeId })
+      const record = records.sort((a, b) => b.createdAt - a.createdAt)[0]
+      if (!record) return null
+      const { title, createdAt, note, mediaId } = record
+      return { title, createdAt, note, mediaId }
     },
     async diary(u) { if (!u?.uid) fail('AUTH_REQUIRED'); return (await repo.list('fy-diary',{uid:u.uid})).sort((a,b)=>b.createdAt-a.createdAt) }
   }

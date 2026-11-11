@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-export type AdminSession = { uid: string, token: string, expiresAt: number }
+export type AdminSession = { uid: string, username: string, token: string, expiresAt: number }
 export const session = ref<AdminSession | null>(null)
 type Reply<T> = { code: string, data: T }
 // Keep administrator tokens only in memory; reload requires login again.

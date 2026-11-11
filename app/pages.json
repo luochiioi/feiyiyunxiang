@@ -19,9 +19,6 @@
           "path": "route-detail/route-detail"
         },
         {
-          "path": "checkin-detail/checkin-detail"
-        },
-        {
           "path": "checkin/checkin"
         }
       ]

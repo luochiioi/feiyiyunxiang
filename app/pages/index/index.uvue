@@ -12,7 +12,18 @@
     <view class="map-rail right" :style="{ top: statusBar + 75 + 'px', bottom: railBottom }">
       <MapSideActions side="right" @navigate="openPage" @zoom="zoom" @locate="locate" />
     </view>
-    <view v-if="route != null" class="home-bottom">
+    <view v-if="selectedNode != null" class="home-bottom node-panel">
+      <view class="node-panel-heading">
+        <view class="node-panel-title">
+          <text class="node-title">{{ selectedNode.title }}</text>
+          <text v-if="selectedNode.checked" class="node-checked">已打卡</text>
+        </view>
+        <button class="node-close" aria-label="关闭点位简介" @click="closeNode">×</button>
+      </view>
+      <text class="node-description">{{ selectedNode.description }}</text>
+      <button class="node-action" @click="openCheckin(selectedNode.id)">{{ selectedNode.checked ? '查看我的打卡' : '去打卡' }}</button>
+    </view>
+    <view v-else-if="route != null" class="home-bottom">
       <CurrentRoutePanel :route="route" :next-node="nextNode" :expanded="mapState.panelExpanded"
         @toggle="togglePanel" @continue-task="openCheckin" />
     </view>
@@ -28,13 +39,14 @@ import { demoEnabled } from '@/features/demo-mode.uts'
 import { findNode, findRoute, listNodes, refreshCatalog } from '@/features/exploration/catalog.uts'
 import { mapState, dispatchMapEvent } from '@/features/exploration/map-store.uts'
 import type { MapPosition, MapViewport } from '@/features/exploration/types.uts'
-import { openPage } from '@/features/navigation.uts'
+import { openCheckin, openPage } from '@/features/navigation.uts'
 
 const statusBar = uni.getWindowInfo().statusBarHeight ?? 0
 const route = computed(() => findRoute(mapState.value.routeId))
 const nodes = computed(() => listNodes(mapState.value.routeId))
+const selectedNode = computed(() => nodes.value.find(node => node.id === mapState.value.selectedNodeId) ?? null)
 const nextNode = computed(() => findNode(route.value?.nextNodeId ?? null))
-const railBottom = computed(() => 'calc(' + (route.value == null ? 14 : mapState.value.panelExpanded ? 220 : 85) + 'px + env(safe-area-inset-bottom))')
+const railBottom = computed(() => 'calc(' + (selectedNode.value != null ? 180 : route.value == null ? 14 : mapState.value.panelExpanded ? 220 : 85) + 'px + env(safe-area-inset-bottom))')
 const commandedViewport = shallowRef<MapViewport>(mapState.value.viewport)
 const currentLocation = shallowRef<MapPosition | null>(null)
 const locating = ref(false)
@@ -76,11 +88,9 @@ function togglePanel(): void {
 }
 function openNode(id: string): void {
   dispatchMapEvent({ type: 'select-node', nodeId: id })
-  openPage('/packages/routes/checkin-detail/checkin-detail?nodeId=' + encodeURIComponent(id))
 }
-function openCheckin(id: string): void {
-  dispatchMapEvent({ type: 'select-node', nodeId: id })
-  openPage('/packages/routes/checkin/checkin?nodeId=' + encodeURIComponent(id))
+function closeNode(): void {
+  dispatchMapEvent({ type: 'select-node', nodeId: null })
 }
 </script>
 
@@ -93,4 +103,13 @@ function openCheckin(id: string): void {
 .left { left: 13px; }
 .right { right: 13px; }
 .home-bottom { position: absolute; z-index: 3; left: 13px; right: 13px; bottom: calc(14px + env(safe-area-inset-bottom)); }
+.node-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 15px; border-radius: 22px; background: #fffff4; box-shadow: 0 4px 16px #44573624; }
+.node-panel-heading, .node-panel-title { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.node-panel-title { flex: 1; min-width: 0; }
+.node-title { color: #443622; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+.node-checked { flex-shrink: 0; color: #426240; font-size: 11px; }
+.node-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: #5e684f; font-size: 13px; line-height: 1.4; }
+.node-close { flex-shrink: 0; width: 38px; margin: 0; padding: 0; border-radius: 19px; background: #f3ead6; color: #443622; font-size: 22px; line-height: 38px; }
+.node-action { width: 100%; margin: 0; border-radius: 14px; background: #426240; color: white; font-size: 14px; line-height: 38px; }
+.node-close::after, .node-action::after { border: 0; }
 </style>

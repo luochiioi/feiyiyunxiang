@@ -2,9 +2,9 @@ const crypto=require('node:crypto')
 const {createService,key}=require('./service')
 const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
-const { createAdminSession, authenticateAdmin, revokeAdminSession, changeAdminPassword } = require('./admin-session')
-const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED'])
+const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCredentials } = require('./admin-session')
+const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -52,9 +52,14 @@ exports.main=async(event,context)=>{
     } else if (action === 'adminLogout') {
       await revokeAdminSession(repo, user)
       data = {}
-    } else if (action === 'adminChangePassword') {
+    } else if (action === 'adminChangePassword' || action === 'adminUpdateCredentials') {
       await limited('admin-password:' + user.uid, 5)
-      await changeAdminPassword(repo, user, p.currentPassword, p.newPassword)
+      if (action === 'adminChangePassword' && p.newPassword === undefined) throw new Error('INVALID_PASSWORD')
+      await updateAdminCredentials(repo, user, {
+        currentPassword: p.currentPassword,
+        newPassword: p.newPassword,
+        newUsername: action === 'adminUpdateCredentials' ? p.newUsername : undefined
+      })
       data = {}
     } else if(action==='session') data=user
     else if(action==='logout') {
@@ -77,7 +82,7 @@ exports.main=async(event,context)=>{
       const {fileContent}=await uniCloud.downloadFile({fileID:media.fileID})
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
     } else {
-      const methods={saveDraft:'saveDraft',publish:'publish',drafts:'drafts',start:'start',checkin:'checkin',progress:'progress',diary:'diary'}
+      const methods={saveDraft:'saveDraft',publish:'publish',drafts:'drafts',start:'start',checkin:'checkin',progress:'progress',routeProgress:'routeProgress',diary:'diary',nodeRecord:'nodeRecord'}
       const method=methods[action]
       if(!method)throw new Error('NOT_FOUND')
       data=await service[method](user,p)

@@ -42,7 +42,7 @@ test('changing the admin password verifies the current password and revokes all 
   const g = gateway()
   const { hashPassword, verifyPassword } = nativeRequire('./security')
   const oldPassword = 'fixture-initial-admin-password'
-  const newPassword = 'fixture-replacement-admin-password'
+  const newPassword = 'Test-12345'
   const uid = 'operator'
   g.rows.set('fy-admin-users' + uid, { _id: uid, username: uid, passwordHash: hashPassword(oldPassword), role: ['admin'], status: 0 })
 
@@ -68,4 +68,24 @@ test('changing the admin password verifies the current password and revokes all 
   const renewed = await login(newPassword)
   assert.equal(renewed.code, 'OK')
   assert.equal((await g.main({ action: 'drafts', token: renewed.data.token })).code, 'OK')
+})
+
+test('renaming an administrator preserves their account ID and rejects an occupied name', async () => {
+  const g = gateway()
+  const { hashPassword } = nativeRequire('./security')
+  const password = 'fixture-admin-password'
+  const account = { username: 'operator', passwordHash: hashPassword(password), role: ['admin'], status: 0 }
+  g.rows.set('fy-admin-usersoperator', account)
+  g.rows.set('fy-admin-userscolleague', { ...account, username: 'colleague' })
+  const login = username => g.main({ action: 'adminLogin', payload: { username, password } })
+  const oldSession = (await login('operator')).data
+  const rename = newUsername => g.main({ action: 'adminUpdateCredentials', token: oldSession.token, payload: { currentPassword: password, newUsername } })
+  assert.equal((await rename('colleague')).code, 'USERNAME_TAKEN')
+  assert.equal((await rename('new-operator')).code, 'OK')
+  assert.equal((await g.main({ action: 'drafts', token: oldSession.token })).code, 'AUTH_REQUIRED')
+  assert.equal((await login('operator')).code, 'LOGIN_FAILED')
+  const result = await login('new-operator')
+  assert.equal(result.code, 'OK')
+  assert.equal(result.data.uid, oldSession.uid)
+  assert.equal(result.data.username, 'new-operator')
 })

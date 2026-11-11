@@ -2,71 +2,133 @@
   <view class="screen">
     <AppPageHeader title="私密打卡" :show-back="true" />
     <view class="content">
-      <template v-if="node != null">
+      <view v-if="loading" class="card"><text class="body">正在加载打卡点…</text></view>
+      <template v-else-if="node != null">
         <text class="title">{{ node.title }}</text>
-        <view class="card green"><text class="body">照片默认仅本人可见。提交成功后记录日记和路线进度。</text></view>
-        <button class="secondary" :disabled="busy" @click="prepare">{{ prepareLabel }}</button>
-        <view v-if="ready" class="card">
-          <text class="heading">打卡位置</text>
-          <button class="secondary" :disabled="busy" @click="previewLocation">检查当前位置</button>
-          <text v-if="locationStatus.length > 0" class="body">{{ locationStatus }}</text>
-          <button v-if="locationPermissionDenied" class="secondary" :disabled="busy" @click="openLocationSettings">打开定位授权设置</button>
-          <text class="heading">照片与日记</text>
-          <image v-if="photo.length > 0" :src="photo" mode="aspectFit" style="width:100%;height:180px" />
-          <button class="secondary" :disabled="busy" @click="choose">拍照 / 选择照片（不超过 1MB）</button>
-          <textarea v-model="note" :disabled="busy" maxlength="1000" placeholder="记下这一站（仅自己可见）" @input="saveDraft" />
-          <text class="muted">每次提交重新获取位置。定位拒绝或上传失败后，可以保留照片与备注重试。</text>
+        <text class="body">{{ node.description }}</text>
+        <view v-if="completed" class="card green">
+          <view class="row spread"><text class="heading">我的打卡</text><text class="tag">仅本人可见</text></view>
+          <template v-if="record != null">
+            <text class="muted">{{ new Date(record.createdAt).toLocaleString() }}</text>
+            <image v-if="recordPhoto.length > 0" :src="recordPhoto" mode="aspectFit" class="saved-photo" />
+            <button v-if="photoFailed" class="secondary" :disabled="busy" @click="loadRecordPhoto">重试读取照片</button>
+            <text v-if="record.note.length > 0" class="body">{{ record.note }}</text>
+          </template>
+          <button v-else class="secondary" :disabled="busy" @click="prepare">查看我的打卡</button>
         </view>
+        <view v-else-if="session == null" class="card">
+          <text class="body">登录后可以打卡和查看自己的记录。</text>
+          <button class="primary" :disabled="busy" @click="signIn">{{ busy ? '正在登录…' : '微信登录' }}</button>
+        </view>
+        <template v-else-if="ready">
+          <view class="card green">
+            <text class="body">{{ locationStatus }}</text>
+            <button v-if="locationPermissionDenied" class="secondary" :disabled="busy" @click="openLocationSettings">打开定位授权设置</button>
+            <button v-else-if="locationRetry" class="secondary" :disabled="busy" @click="previewLocation">重新定位</button>
+          </view>
+          <view class="card">
+            <text class="heading">照片与日记</text>
+            <image v-if="photo.length > 0" :src="photo" mode="aspectFit" class="saved-photo" />
+            <button class="secondary" :disabled="busy" @click="choose">拍照 / 选择照片（不超过 1MB）</button>
+            <textarea v-model="note" :disabled="busy" maxlength="1000" placeholder="记下这一站（仅自己可见）" @input="saveDraft" />
+          </view>
+          <button class="primary" :disabled="busy || photo.length === 0" @click="submit">{{ busy ? '处理中…' : '提交打卡' }}</button>
+        </template>
+        <text v-else-if="busy" class="body">正在准备打卡…</text>
+        <button v-else class="secondary" @click="prepare">重试加载打卡</button>
         <text v-if="status.length > 0" class="body">{{ status }}</text>
-        <button v-if="ready" class="primary" :disabled="busy || photo.length === 0 || completed" @click="submit">{{ busy ? '处理中…' : completed ? '本次打卡已保存' : '获取定位并提交私密打卡' }}</button>
       </template>
       <view v-else class="card"><text class="body">点位不可用，请从已发布路线进入。</text></view>
-      <button class="secondary" @click="returnToMap">回到地图</button>
     </view>
   </view>
 </template>
 <script setup lang="uts">
 import { ref, computed } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import { findNode, activeRun, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
-import type { PublishedNode } from '@/features/exploration/catalog.uts'
+import { findNode, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
+import type { PublishedNode, RunProgress } from '@/features/exploration/catalog.uts'
 import type { MapPosition } from '@/features/exploration/types.uts'
 import { distanceMeters, locationFailureCode, validLocation } from '@/features/exploration/checkin-location.uts'
-import { secured, session, requestId } from '@/features/api.uts'
-import { decodePageId, returnToMap } from '@/features/navigation.uts'
+import { login, secured, session, requestId } from '@/features/api.uts'
+import { decodePageId } from '@/features/navigation.uts'
 type Draft = { requestId: string, base64: string, mime: string, note: string, mediaId: string }
+type NodeRecord = { createdAt: number, note: string, mediaId: string }
 const id = ref<string | null>(null)
 const node = computed(() => findNode(id.value))
-const prepareLabel = computed(() => {
-  if (session.value == null) return '微信登录并开始探索'
-  return activeRun.value?.routeId === node.value?.routeId ? '恢复本次探索与草稿' : '开始探索与打卡'
-})
+const loading = ref(false)
 const ready = ref(false), busy = ref(false), completed = ref(false)
+const record = ref<NodeRecord | null>(null), recordPhoto = ref(''), photoFailed = ref(false)
 const photo = ref(''), note = ref(''), status = ref('')
-const locationStatus = ref(''), locationPermissionDenied = ref(false)
+const locationStatus = ref(''), locationPermissionDenied = ref(false), locationRetry = ref(false)
 let draft: Draft = { requestId: '', base64: '', mime: '', note: '', mediaId: '' }
 let draftKey = ''
-onLoad(query => { id.value = decodePageId(query['nodeId'] ?? null) })
-onShow(() => { refreshCatalog() })
+let exploration: RunProgress | null = null
+onLoad(async query => {
+  id.value = decodePageId(query['nodeId'] ?? null)
+  if (id.value != null && node.value == null) {
+    loading.value = true
+    await refreshCatalog()
+    loading.value = false
+  }
+  if (session.value != null) await prepare()
+})
 function saveDraft(): void {
   if (draftKey.length === 0) return
   draft.note = note.value
   uni.setStorageSync(draftKey, JSON.stringify(draft))
 }
 async function prepare(): Promise<void> {
-  if (busy.value || node.value == null) return
+  const item = node.value
+  if (busy.value || item == null || session.value == null) return
   busy.value = true
+  status.value = ''
   try {
-    await startRoute(node.value!.routeId)
-    draftKey = 'fy-draft-' + session.value!.uid + '-' + activeRun.value!.runId + '-' + id.value
+    if (await loadRecord()) return
+    exploration = await startRoute(item.routeId)
+    draftKey = 'fy-draft-' + session.value!.uid + '-' + exploration!.runId + '-' + id.value
     const saved = uni.getStorageSync(draftKey) as string
-    draft = saved != null && saved.length > 0 ? JSON.parse<Draft>(saved)! : { requestId: requestId(), base64: '', mime: '', note: '', mediaId: '' }
+    draft = { requestId: requestId(), base64: '', mime: '', note: '', mediaId: '' }
+    if (saved != null && saved.length > 0) {
+      try { draft = JSON.parse<Draft>(saved) ?? draft } catch (_) { uni.removeStorageSync(draftKey) }
+    }
     note.value = draft.note
     photo.value = draft.base64.length > 0 ? 'data:' + draft.mime + ';base64,' + draft.base64 : ''
-    locationStatus.value = ''
-    locationPermissionDenied.value = false
     ready.value = true
-  } catch (_) { status.value = '登录或探索未恢复，请检查网络与云端配置后重试。' } finally { busy.value = false }
+    await checkLocation()
+  } catch (_) { status.value = '打卡信息暂时无法加载，请检查网络后重试。' }
+  finally { busy.value = false }
+}
+async function signIn(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  status.value = ''
+  try { await login() }
+  catch (_) { status.value = '微信登录未完成，请重试。' }
+  finally { busy.value = false }
+  if (session.value != null) await prepare()
+}
+async function loadRecord(): Promise<boolean> {
+  const item = node.value
+  const owner = session.value?.uid
+  if (item == null || owner == null) return false
+  const saved = await secured<NodeRecord | null>('nodeRecord', { routeId: item.routeId, nodeId: item.id.split(':')[1] })
+  if (session.value?.uid !== owner) throw new Error('AUTH_REQUIRED')
+  if (saved == null) return false
+  record.value = saved
+  completed.value = true
+  ready.value = false
+  await loadRecordPhoto()
+  return true
+}
+async function loadRecordPhoto(): Promise<void> {
+  const item = record.value
+  const owner = session.value?.uid
+  if (item == null || owner == null) return
+  photoFailed.value = false
+  try {
+    const result = await secured<{ src: string }>('readMedia', { id: item.mediaId })
+    if (session.value?.uid === owner) recordPhoto.value = result.src
+  } catch (_) { photoFailed.value = true }
 }
 function choose(): void {
   uni.chooseImage({ count: 1, sizeType: ['compressed'], success: result => {
@@ -83,7 +145,7 @@ function choose(): void {
 }
 function currentRunNode(): PublishedNode {
   const item = node.value
-  const run = activeRun.value
+  const run = exploration
   if (item == null || run == null || run.routeId !== item.routeId) throw new Error('NOT_FOUND')
   const nodeId = item.id.split(':')[1]
   const target = run.snapshot.nodes.find(n => n.id === nodeId)
@@ -93,6 +155,7 @@ function currentRunNode(): PublishedNode {
 function getCheckinLocation(): Promise<MapPosition> {
   locationStatus.value = '正在获取当前位置…'
   locationPermissionDenied.value = false
+  locationRetry.value = false
   return new Promise<MapPosition>((resolve, reject) => {
     uni.getLocation({
       type: 'gcj02',
@@ -108,31 +171,36 @@ function getCheckinLocation(): Promise<MapPosition> {
 function showLocationResult(target: PublishedNode, position: MapPosition): boolean {
   const meters = distanceMeters({ latitude: target.latitude, longitude: target.longitude }, position)
   const withinRange = meters <= target.radius
+  locationRetry.value = !withinRange
   locationStatus.value = (withinRange ? '在打卡范围内' : '超出打卡范围') +
     '。距点位约 ' + Math.round(meters) + ' 米，打卡范围 ' + target.radius + ' 米。'
   return withinRange
 }
 function showLocationFailure(code: string): void {
   locationPermissionDenied.value = code === 'LOCATION_PERMISSION'
-  if (code === 'LOCATION_PERMISSION') locationStatus.value = '定位权限未开启，请授权后再检查位置。'
+  locationRetry.value = !locationPermissionDenied.value
+  if (code === 'LOCATION_PERMISSION') locationStatus.value = '请开启定位权限后继续打卡。'
   else if (code === 'LOCATION_PRIVACY') locationStatus.value = '微信隐私授权未完成，请同意隐私指引或联系管理员检查配置。'
-  else if (code === 'NOT_FOUND') locationStatus.value = '当前探索已变更，请恢复本次探索后再检查位置。'
-  else locationStatus.value = '无法取得有效定位。请确认系统定位已开启，或在开发者工具设置模拟位置后重试。'
+  else if (code === 'NOT_FOUND') locationStatus.value = '当前探索已变更，请返回后重新进入打卡点。'
+  else locationStatus.value = '无法获取当前位置，请确认系统定位已开启后重试。'
 }
 function openLocationSettings(): void {
   // #ifdef MP-WEIXIN
-  uni.openSetting({})
+  uni.openSetting({ success: result => { if (result.authSetting['scope.userLocation'] === true) previewLocation() } })
   // #endif
 }
-async function previewLocation(): Promise<void> {
-  if (busy.value || !ready.value) return
-  busy.value = true
+async function checkLocation(): Promise<void> {
   try {
     const target = currentRunNode()
     showLocationResult(target, await getCheckinLocation())
   } catch (error) {
     showLocationFailure((error as Error | null)?.message ?? '')
-  } finally { busy.value = false }
+  }
+}
+async function previewLocation(): Promise<void> {
+  if (busy.value || !ready.value) return
+  busy.value = true
+  try { await checkLocation() } finally { busy.value = false }
 }
 async function submit(): Promise<void> {
   if (busy.value || !ready.value || node.value == null || photo.value.length === 0 || completed.value) return
@@ -143,7 +211,7 @@ async function submit(): Promise<void> {
     stage = 'location'
     status.value = ''
     const target = currentRunNode()
-    const runId = activeRun.value!.runId
+    const runId = exploration!.runId
     const nodeId = target.id
     const location = await getCheckinLocation()
     const withinRange = showLocationResult(target, location)
@@ -162,9 +230,10 @@ async function submit(): Promise<void> {
     status.value = '正在校验打卡…'
     await secured<{ id: string }>('checkin', { runId, nodeId, requestId: draft.requestId, mediaId: draft.mediaId, latitude: location.latitude, longitude: location.longitude, note: note.value })
     completed.value = true
+    ready.value = false
     status.value = '打卡已保存，仅本人可见。'
     uni.removeStorageSync(draftKey)
-    await refreshCatalog()
+    await Promise.allSettled([refreshCatalog(), loadRecord()])
   } catch (error) {
     if (completed.value) return
     const code = (error as Error | null)?.message ?? ''
@@ -184,4 +253,5 @@ async function submit(): Promise<void> {
 <style scoped>
 @import '@/styles/page.css';
 textarea { width:100%; box-sizing:border-box; padding:12px; background:#f6f7f0; border-radius:12px; }
+.saved-photo { width: 100%; height: 220px; }
 </style>

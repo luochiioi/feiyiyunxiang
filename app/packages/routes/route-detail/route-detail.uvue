@@ -15,15 +15,11 @@
         </view>
         <view class="card">
           <text class="heading">探索任务</text>
-          <view v-for="node in nodes" :key="node.id" class="row spread divider menu-row" @click="showNode(node.id)">
-            <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '已记录' : '定位拍照' }} ›</text>
+          <view v-for="node in nodes" :key="node.id" class="row spread divider menu-row" @click="openCheckin(node.id)">
+            <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : '去打卡' }} ›</text>
           </view>
-          <view class="row spread divider"><text class="body">文化任务</text><text class="muted">阶段三待开发</text></view>
         </view>
-        <button class="primary" @click="showOnMap">{{ route.id === mapState.routeId ? '返回当前路线地图' : '选择路线并查看地图' }}</button>
-        <button class="primary" :disabled="starting" @click="begin">{{ startLabel }}</button>
-        <button class="secondary" @click="openPage('/packages/story/story/story')">剧情介绍 · 阅读待开发</button>
-        <button class="secondary" @click="openPage('/packages/partner/partner/partner')">旅伴介绍 · 合作待开发</button>
+        <button class="secondary" @click="showOnMap">在地图查看路线</button>
       </template>
       <view v-else class="card"><text class="body">找不到这条路线。</text><button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看路线列表</button></view>
     </view>
@@ -36,34 +32,19 @@ import DemoNotice from '@/components/DemoNotice.uvue'
 
 import { computed, ref } from 'vue'
 import ProgressBar from '@/components/ProgressBar.uvue'
-import { activeRun, findRoute, listNodes, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
-import { session, showError } from '@/features/api.uts'
-import { dispatchMapEvent, mapState } from '@/features/exploration/map-store.uts'
-import { openPage, returnToMap } from '@/features/navigation.uts'
+import { findRoute, listNodes, refreshCatalog } from '@/features/exploration/catalog.uts'
+import { dispatchMapEvent } from '@/features/exploration/map-store.uts'
+import { decodePageId, openCheckin, openPage, returnToMap } from '@/features/navigation.uts'
 const id = ref<string | null>(null)
-onLoad(query => { id.value = query['routeId'] ?? null })
+onLoad(query => { id.value = decodePageId(query['routeId'] ?? null) })
 const route = computed(() => findRoute(id.value))
-const nodes = computed(() => listNodes(route.value?.id ?? null))
-const starting = ref(false)
-const startLabel = computed(() => {
-  if (starting.value) return '正在准备探索…'
-  if (session.value == null) return '微信登录并开始探索'
-  return activeRun.value?.routeId === id.value ? '继续探索' : '开始探索'
-})
+const nodes = computed(() => route.value == null ? [] : listNodes(route.value!.id))
 onShow(() => { refreshCatalog() })
-async function begin(): Promise<void> {
-  if (starting.value || route.value == null) return
-  starting.value = true
-  try { await startRoute(route.value!.id); showOnMap() } catch (_) { showError() } finally { starting.value = false }
-}
 function showOnMap(): void {
   const item = route.value
   if (item == null) return
   dispatchMapEvent({ type: 'select-route', routeId: item.id, viewport: item.viewport })
   returnToMap()
-}
-function showNode(nodeId: string): void {
-  openPage('/packages/routes/checkin-detail/checkin-detail?nodeId=' + encodeURIComponent(nodeId))
 }
 </script>
 

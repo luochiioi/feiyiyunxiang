@@ -1,12 +1,15 @@
 <template>
-  <view class="app-page-header">
+  <view class="app-page-header-space">
     <view class="app-page-header-safe"></view>
-    <view class="app-page-header-row">
-      <view class="app-page-header-action" @click="goBack">
-        <text v-if="showBack" class="app-page-header-back">‹</text>
+    <view class="app-page-header">
+      <view class="app-page-header-safe"></view>
+      <view class="app-page-header-row">
+        <view class="app-page-header-action" aria-label="返回" @click="goBack">
+          <text v-if="showBack" class="app-page-header-back">‹</text>
+        </view>
+        <text class="app-page-header-title">{{ title }}</text>
+        <view class="app-page-header-action"></view>
       </view>
-      <text class="app-page-header-title">{{ title }}</text>
-      <view class="app-page-header-action"></view>
     </view>
   </view>
 </template>
@@ -27,7 +30,8 @@ function goBack(): void {
 </script>
 
 <style>
-.app-page-header { width: 100%; flex-shrink: 0; background-color: #fffaf7; }
+.app-page-header-space { padding-bottom: 88rpx; flex-shrink: 0; }
+.app-page-header { position: fixed; top: 0; left: 0; right: 0; z-index: 10; background-color: #fffaf7; }
 .app-page-header-safe { height: var(--status-bar-height); }
 .app-page-header-row { height: 88rpx; display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20rpx; }
 .app-page-header-action { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }

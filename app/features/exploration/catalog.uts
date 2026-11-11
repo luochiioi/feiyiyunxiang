@@ -14,27 +14,36 @@ export async function refreshCatalog(): Promise<void> {
   if (demoEnabled) return
   try { published.value = await api<PublishedRoute[]>('catalog'); catalogError.value = false } catch (_) { catalogError.value = true }
   if (session.value != null) {
-    const runId = uni.getStorageSync('fy-run-' + session.value!.uid) as string
+    const uid = session.value!.uid
+    const key = 'fy-run-' + uid
+    const runId = uni.getStorageSync(key) as string
     if (runId != null && runId.length > 0) {
-      try { activeRun.value = await secured<RunProgress>('progress', { runId }) } catch (_) { if (session.value == null) activeRun.value = null }
+      try {
+        const progress = await secured<RunProgress>('progress', { runId })
+        if (session.value?.uid === uid && uni.getStorageSync(key) === runId) activeRun.value = progress
+      } catch (_) { if (session.value == null) activeRun.value = null }
     }
   } else { activeRun.value = null }
 }
-export async function startRoute(routeId: string): Promise<void> {
+export async function startRoute(routeId: string): Promise<RunProgress> {
   if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
-  if (session.value != null && activeRun.value?.routeId === routeId) return
-  const existingId = uni.getStorageSync('fy-run-' + session.value!.uid) as string
-  if (existingId != null && existingId.length > 0) {
-    const existing = await secured<RunProgress>('progress', { runId: existingId })
-    if (existing.routeId === routeId) { activeRun.value = existing; return }
+  const uid = session.value!.uid
+  const runKey = 'fy-run-' + uid
+  const pendingKey = 'fy-start-' + uid + '-' + routeId
+  const selected = activeRun.value
+  if (selected != null && selected.routeId === routeId && uni.getStorageSync(runKey) === selected.runId) return selected
+  let progress = await secured<RunProgress | null>('routeProgress', { routeId })
+  if (progress == null) {
+    let rid = uni.getStorageSync(pendingKey) as string
+    if (rid == null || rid.length === 0) { rid = requestId(); uni.setStorageSync(pendingKey, rid) }
+    const run = await secured<{ id: string }>('start', { routeId, requestId: rid })
+    progress = await secured<RunProgress>('progress', { runId: run.id })
   }
-  const pendingKey = 'fy-start-' + routeId
-  let rid = uni.getStorageSync(pendingKey) as string
-  if (rid == null || rid.length === 0) { rid = requestId(); uni.setStorageSync(pendingKey, rid) }
-  const run = await secured<{ id: string }>('start', { routeId, requestId: rid })
-  uni.setStorageSync('fy-run-' + session.value!.uid, run.id)
-  activeRun.value = await secured<RunProgress>('progress', { runId: run.id })
+  if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
+  uni.setStorageSync(runKey, progress.runId)
+  activeRun.value = progress
   uni.removeStorageSync(pendingKey)
+  return progress
 }
 
 export function listRoutes(): RouteSummary[] {
