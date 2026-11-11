@@ -12,3 +12,5 @@ Thumbs.db
 *.key
 **/uni-config-center/uni-id/config.json
 **/uni-config-center/*/config.json
+app/uniCloud-alipay/cloudfunctions/fy-api/fy/config.json
+app/uniCloud-alipay/database/fy-admin-users.init_data.json

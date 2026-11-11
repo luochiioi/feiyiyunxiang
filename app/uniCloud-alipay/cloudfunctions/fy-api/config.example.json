@@ -3,5 +3,10 @@
   "wechatAppId": "wx54dea9a4a48bfed5",
   "wechatSecret": "",
   "privateStorageVerified": false,
-  "mediaEncryptionKey": ""
+  "mediaEncryptionKey": "",
+  "identity": {
+    "tokenSecret": "",
+    "tokenExpiresIn": 7200,
+    "tokenExpiresThreshold": 0
+  }
 }

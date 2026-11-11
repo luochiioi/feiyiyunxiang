@@ -1,7 +1,11 @@
 function createRepository(database) {
   function access(db) {
     return {
-      async get(c,id) { const {data}=await db.collection(c).doc(id).get(); return data[0]??null },
+      async get(c, id) {
+        const { data } = await db.collection(c).doc(id).get()
+        // The cloud transaction API returns one document or null.
+        return Array.isArray(data) ? data[0] ?? null : data ?? null
+      },
       async put(c,id,value) { const {_id,...safe}=value; await db.collection(c).doc(id).set(safe) },
       async list(c,q) { const {data}=await db.collection(c).where(q).limit(100).get(); return data }
     }

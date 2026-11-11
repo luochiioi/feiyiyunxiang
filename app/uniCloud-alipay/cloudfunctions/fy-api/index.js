@@ -1,18 +1,31 @@
 const crypto=require('node:crypto')
 const {createService,key}=require('./service')
 const {createRepository}=require('./repository')
-const {encrypt,decrypt,decodeImage,verifyPassword,authenticate}=require('./security')
+const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
+const { createAdminSession, authenticateAdmin, revokeAdminSession } = require('./admin-session')
+const adminActions = new Set(['saveDraft', 'publish', 'drafts', 'adminLogout'])
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
-    const cfg=require('uni-config-center')({pluginId:'fy'}).config()
+    const cfg=require('uni-config-center')({pluginId:'fy', root:__dirname, cache:false}).config()
     if(!cfg?.wechatAppId) throw new Error('CONFIG_REQUIRED')
-    const identity=require('uni-id-common').createInstance({context})
+    function memberIdentity() {
+      if (!cfg.identity?.tokenSecret) throw new Error('CONFIG_REQUIRED')
+      return require('uni-id-common').createInstance({ context, config: cfg.identity })
+    }
     const service=createService({repo,allowTestContent:cfg.environment==='development'})
     const action=event.action, p=event.payload??{}
     let user=null
-    if(!['catalog','wxLogin','adminLogin'].includes(action)) user=await authenticate(identity,event.token,id=>repo.get('uni-id-users',id))
+    if (adminActions.has(action)) {
+      user = await authenticateAdmin(repo, event.token)
+    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action)) {
+      if (typeof event.token === 'string' && event.token.startsWith('fy_admin_')) {
+        throw new Error('AUTH_REQUIRED')
+      }
+      const member = await authenticate(memberIdentity(), event.token, id => repo.get('uni-id-users', id))
+      user = { uid: member.uid }
+    }
     async function limited(subject,limit) {
       const bucket=key(subject,Math.floor(Date.now()/60000))
       await repo.tx(async t=>{const value=await t.get('fy-limits',bucket);if((value?.count??0)>=limit)throw new Error('RATE_LIMITED');await t.put('fy-limits',bucket,{count:(value?.count??0)+1,expiresAt:Date.now()+120000})})
@@ -30,18 +43,15 @@ exports.main=async(event,context)=>{
       await repo.tx(async t=>{if(!await t.get('uni-id-users',uid))await t.put('uni-id-users',uid,{role:[],token:[],status:0,dcloud_appid:[context.APPID],register_date:Date.now()})})
       const account=await repo.get('uni-id-users',uid)
       if(account.status!==0)throw new Error('LOGIN_FAILED')
-      const token=await identity.createToken({uid})
+      const token=await memberIdentity().createToken({uid})
       if(token.errCode)throw new Error('LOGIN_FAILED')
       data={uid,token:token.token,expiresAt:token.tokenExpired}
     } else if(action==='adminLogin') {
       await limited('admin:'+context.CLIENTIP,6)
-      if(typeof p.username!=='string'||!/^[A-Za-z0-9_-]{3,40}$/.test(p.username)||typeof p.password!=='string'||p.password.length>256)throw new Error('LOGIN_FAILED')
-      const rows=await repo.list('uni-id-users',{username:p.username})
-      const account=rows[0]
-      if(!verifyPassword(p.password,account?.passwordHash??'0'.repeat(32)+':'+'0'.repeat(128))||!account?.role?.includes('admin')||account.status!==0)throw new Error('LOGIN_FAILED')
-      const token=await identity.createToken({uid:account._id})
-      if(token.errCode)throw new Error('LOGIN_FAILED')
-      data={uid:account._id,token:token.token,expiresAt:token.tokenExpired}
+      data = await createAdminSession(repo, p.username, p.password)
+    } else if (action === 'adminLogout') {
+      await revokeAdminSession(repo, user)
+      data = {}
     } else if(action==='session') data=user
     else if(action==='logout') {
       await repo.tx(async t=>{const account=await t.get('uni-id-users',user.uid);await t.put('uni-id-users',user.uid,{...account,token:(account.token??[]).filter(v=>v!==event.token)})});data={}
