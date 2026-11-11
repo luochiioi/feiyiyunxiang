@@ -7,8 +7,9 @@ const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCr
 const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
   'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
-  'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED'])
+  'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends',
+  'inviteCoop', 'respondCoop', 'withdrawCoop', 'leaveCoop', 'coopStatus', 'settleCoop'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)

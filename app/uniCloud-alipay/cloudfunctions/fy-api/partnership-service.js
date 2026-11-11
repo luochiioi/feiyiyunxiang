@@ -22,6 +22,12 @@ function createPartnershipService({ repo, now = Date.now }) {
     fail('SERVICE_UNAVAILABLE')
   }
 
+  async function friendIdFor(db, u, requestId) {
+    const request = await db.get('fy-requests', key(u.uid, 'friend', requestId)) ?? await db.get('fy-requests', key(u.uid, 'friend-in', requestId))
+    if (!request) fail('NOT_FOUND')
+    return request.friendId
+  }
+
   return {
     async ensureProfile(u) {
       member(u)
@@ -61,7 +67,7 @@ function createPartnershipService({ repo, now = Date.now }) {
           from: u.uid, to: target.uid, status: 'pending', createdAt: now(), expiresAt: now() + 24 * HOUR
         })
         await db.put('fy-requests', requestKey, { friendId, role: 'from' })
-        await db.put('fy-requests', key(target.uid, 'friend', p.requestId), { friendId, role: 'to' })
+        await db.put('fy-requests', key(target.uid, 'friend-in', p.requestId), { friendId, role: 'to' })
         return { id: friendId }
       })
     },
@@ -107,14 +113,158 @@ function createPartnershipService({ repo, now = Date.now }) {
         if (profile) cards.push(card(profile))
       }
       return cards
+    },
+
+    async inviteCoop(u, p) {
+      member(u)
+      if (!codeOf(p.code) || !requestOf(p.requestId) || !requestOf(p.routeId)) fail('INVALID_REQUEST')
+      const requestKey = key(u.uid, 'coop', p.requestId)
+      return repo.tx(async db => {
+        const replay = await db.get('fy-requests', requestKey)
+        if (replay) return { id: replay.teamId }
+        const target = (await db.list('fy-profiles', { code: p.code }))[0]
+        if (!target) fail('NOT_FOUND')
+        const pair = [u.uid, target.uid].sort()
+        const friendship = await db.get('fy-friends', key('friend', ...pair))
+        if (!friendship || friendship.status !== 'accepted') fail('NOT_FRIENDS')
+        if (await activeTeam(db, u.uid) || await activeTeam(db, target.uid)) fail('CONFLICT')
+        const route = await db.get('fy-routes', p.routeId)
+        if (!route?.enabled) fail('NOT_FOUND')
+        const snapshot = await db.get('fy-versions', route.version)
+        const plan = seatPlan(snapshot)
+        if (!plan) fail('INVALID_ROUTE')
+        const mySeat = p.seat ?? 'macau'
+        if (mySeat !== 'macau' && mySeat !== 'hunan') fail('INVALID_REQUEST')
+        const seats = { ...plan, macau: mySeat === 'macau' ? u.uid : target.uid, hunan: mySeat === 'hunan' ? u.uid : target.uid }
+        const teamId = key('team', u.uid, p.requestId)
+        await db.put('fy-teams', teamId, {
+          members: pair, seats, routeId: p.routeId, version: route.version, status: 'invited',
+          invitedBy: u.uid, invitedAt: now(), expiresAt: now() + 24 * HOUR
+        })
+        await db.put('fy-requests', requestKey, { teamId })
+        await db.put('fy-requests', key(target.uid, 'coop', p.requestId), { teamId })
+        return { id: teamId }
+      })
+    },
+
+    async respondCoop(u, p) {
+      member(u)
+      if (!requestOf(p.teamId) || typeof p.accept !== 'boolean') fail('INVALID_REQUEST')
+      return repo.tx(async db => {
+        const team = await loadTeam(db, p.teamId, u.uid)
+        if (team.invitedBy === u.uid) fail('NOT_FOUND')
+        if (team.status !== 'invited') fail('NOT_PENDING')
+        if (team.expiresAt <= now()) { await db.put('fy-teams', p.teamId, { ...team, status: 'expired' }); fail('EXPIRED') }
+        if (!p.accept) { await db.put('fy-teams', p.teamId, { ...team, status: 'declined' }); return { id: p.teamId, status: 'declined' } }
+        if (await activeTeam(db, u.uid, p.teamId)) fail('CONFLICT')
+        const snapshot = await db.get('fy-versions', team.version)
+        const runs = {}
+        for (const uid of team.members) {
+          const runId = key(uid, 'coop', p.teamId)
+          await db.put('fy-runs', runId, {
+            uid, routeId: team.routeId, version: team.version, snapshot, purpose: 'coop', teamId: p.teamId, createdAt: now(), revision: 0
+          })
+          runs[uid] = runId
+        }
+        await db.put('fy-teams', p.teamId, { ...team, status: 'active', runs, startedAt: now() })
+        return { id: p.teamId, status: 'active' }
+      })
+    },
+
+    async withdrawCoop(u, p) {
+      member(u)
+      return repo.tx(async db => {
+        const team = await loadTeam(db, p.teamId, u.uid)
+        if (team.invitedBy !== u.uid || team.status !== 'invited') fail('NOT_PENDING')
+        await db.put('fy-teams', p.teamId, { ...team, status: 'withdrawn' })
+        return { id: p.teamId }
+      })
+    },
+
+    async leaveCoop(u, p) {
+      member(u)
+      return repo.tx(async db => {
+        const team = await loadTeam(db, p.teamId, u.uid)
+        if (team.status !== 'active') fail('NOT_PENDING')
+        await db.put('fy-teams', p.teamId, { ...team, status: 'left', leftBy: u.uid, leftAt: now() })
+        return { id: p.teamId }
+      })
+    },
+
+    async coopStatus(u, p) {
+      member(u)
+      const team = await loadTeam(repo, p.teamId, u.uid)
+      const mine = team.seats.macau === u.uid ? 'macau' : 'hunan'
+      const other = team.members.find(uid => uid !== u.uid)
+      const partnerProfile = (await repo.list('fy-profiles', { uid: other }))[0]
+      const view = { id: p.teamId, status: team.status, mySeat: mine, routeId: team.routeId, version: team.version,
+        myRunId: team.runs?.[u.uid] ?? null, partner: partnerProfile ? card(partnerProfile) : null }
+      if (team.status === 'done') {
+        const result = await repo.get('fy-results', key(p.teamId, 'result'))
+        view.result = { partnerLabel: mine === 'macau' ? '湖南旅伴' : '澳门旅伴', work: result.work, completedAt: result.completedAt }
+        view.public = { partnerLabel: view.result.partnerLabel, completedAt: result.completedAt }
+      }
+      return view
+    },
+
+    async settleCoop(u, p) {
+      member(u)
+      return repo.tx(async db => {
+        const team = await loadTeam(db, p.teamId, u.uid)
+        if (team.status === 'done') return { id: p.teamId, alreadySettled: true }
+        if (team.status !== 'active') fail('NOT_PENDING')
+        for (const uid of team.members) {
+          const run = await db.get('fy-runs', team.runs[uid])
+          const checks = await db.list('fy-checkins', { runId: team.runs[uid], uid })
+          const seat = team.seats.macau === uid ? 'macau' : 'hunan'
+          const nodesDone = seatNodes(run, seat).every(id => checks.some(check => check.nodeId === id))
+          const cultureDone = seatActivities(run, seat).every(id => run.culture?.[id])
+          if (!nodesDone || !cultureDone) fail('NOT_READY')
+        }
+        const macauRun = await db.get('fy-runs', team.runs[team.seats.macau])
+        const resultId = key(p.teamId, 'result')
+        if (!await db.get('fy-results', resultId)) {
+          await db.put('fy-results', resultId, {
+            teamId: p.teamId, routeId: team.routeId, version: team.version,
+            work: macauRun.culture?.tile ?? null, theme: 'xiang-embroidery', completedAt: now()
+          })
+        }
+        await db.put('fy-teams', p.teamId, { ...team, status: 'done', completedAt: now() })
+        return { id: p.teamId, alreadySettled: false }
+      })
     }
   }
+}
 
-  async function friendIdFor(db, u, requestId) {
-    const request = await db.get('fy-requests', key(u.uid, 'friend', requestId))
-    if (!request) fail('NOT_FOUND')
-    return request.friendId
-  }
+async function activeTeam(db, uid, except) {
+  const rows = await db.list('fy-teams', {})
+  return rows.find(row => (row.status === 'invited' || row.status === 'active') && row.members.includes(uid) && row._id !== except) ?? null
+}
+
+async function loadTeam(db, teamId, uid) {
+  if (typeof teamId !== 'string') fail('NOT_FOUND')
+  const team = await db.get('fy-teams', teamId)
+  if (!team || !team.members.includes(uid)) fail('NOT_FOUND')
+  return team
+}
+
+// Seats come from the published culture gates, so the assignment is fixed with the route version.
+function seatPlan(snapshot) {
+  const culture = snapshot?.culture ?? {}
+  const macau = [...new Set([...(culture.tile?.after ?? []), ...(culture.tileQuiz?.after ?? [])])]
+  const hunan = [...new Set([...(culture.quiz?.after ?? []), ...(culture.learning?.after ?? [])])]
+  if (macau.length === 0 || hunan.length === 0) return null
+  return { macauNodes: macau, hunanNodes: hunan }
+}
+
+function seatNodes(run, seat) {
+  const plan = seatPlan(run.snapshot)
+  return seat === 'macau' ? plan.macauNodes : plan.hunanNodes
+}
+
+function seatActivities(run, seat) {
+  const ids = seat === 'macau' ? ['tile', 'tileQuiz'] : ['quiz', 'learning']
+  return ids.filter(id => run.snapshot.culture?.[id])
 }
 
 module.exports = { createPartnershipService }
