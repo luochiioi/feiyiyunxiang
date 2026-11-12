@@ -3,9 +3,9 @@ const assert=require('node:assert/strict')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{createRequire}=require('node:module')
 const entry=path.resolve(__dirname,'../uniCloud-alipay/cloudfunctions/fy-api/index.js')
 const nativeRequire=createRequire(entry)
-function gateway({configured=true,validCode=true,privateStorageVerified=false,storage=null}={}) {
+function gateway({configured=true,validCode=true,privateStorageVerified=false,storage=null,missingCollection=null}={}) {
  const rows=new Map()
- const db={collection(c){return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([k,v])=>({...v,_id:k.slice(c.length)}))}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
+ const db={collection(c){if(c===missingCollection)throw new Error('collection does not exist');return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([k,v])=>({...v,_id:k.slice(c.length)}))}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
  let exchanges=0,uploads=0
  const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:40029}}}},async uploadFile(args){uploads++;assert.ok(storage,'unexpected upload');return storage.uploadFile(args)},async downloadFile(args){assert.ok(storage,'unexpected download');return storage.downloadFile(args)}}
  const identity={async checkToken(token){return token==='fixture-token'?{uid:'member',errCode:0}:{errCode:'expired'}},async createToken({uid}){return {errCode:0,token:'issued-token',tokenExpired:1000,uid}}}
@@ -127,4 +127,53 @@ test('renaming an administrator preserves their account ID and rejects an occupi
   assert.equal(result.code, 'OK')
   assert.equal(result.data.uid, oldSession.uid)
   assert.equal(result.data.username, 'new-operator')
+})
+
+test('community gateway separates guest reads, author previews and reviewer privileges', async () => {
+  const g = gateway()
+  const { hashPassword } = nativeRequire('./security')
+  const password = 'fixture-reviewer-password'
+  g.rows.set('fy-admin-usersreviewer', { username: 'reviewer', passwordHash: hashPassword(password), role: ['reviewer'], status: 0 })
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: ['admin'] })
+  const result = await g.main({ action: 'adminLogin', payload: { username: 'reviewer', password } })
+  assert.equal(result.code, 'OK')
+  assert.equal(result.data.admin, false)
+  const reviewerToken = result.data.token
+  const call = (action, token, payload) => g.main({ action, token, payload })
+  const pending = await call('communitySubmit', 'fixture-token', { title: 'Fixture', body: 'Pending', requestId: 'submit' })
+  assert.equal(pending.code, 'OK')
+  const preview = { ...pending.data, preview: true, uid: 'member', admin: true }
+  assert.equal((await call('communityPost', '', preview)).code, 'NOT_FOUND')
+  assert.equal((await call('communityPost', 'fixture-token', preview)).code, 'OK')
+  assert.equal((await call('communityReviewDetail', 'fixture-token', preview)).code, 'AUTH_REQUIRED')
+  assert.equal((await call('communityReviewDetail', reviewerToken, preview)).code, 'OK')
+  assert.equal((await call('communitySavePolicy', reviewerToken, {})).code, 'FORBIDDEN')
+  assert.equal((await call('drafts', reviewerToken, {})).code, 'FORBIDDEN')
+  assert.equal((await call('readMedia', reviewerToken, {})).code, 'AUTH_REQUIRED')
+  assert.equal((await call('communityReviewPost', reviewerToken, { ...pending.data, decision: 'approve' })).code, 'OK')
+  assert.equal((await call('communityPost', '', { postId: pending.data.postId })).data.title, 'Fixture')
+})
+
+test('community distinguishes a missing staging collection from an object storage rejection', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aiekAAAAASUVORK5CYII='
+  const call = (g, payload) => g.main({ action: 'communityStageImage', token: 'fixture-token', payload })
+  const album = { requestId: 'request', slot: 'slot', imageSource: 'upload', base64: png }
+  const diary = { requestId: 'request', slot: 'slot', imageSource: 'diary', diaryId: 'entry' }
+  const account = { status: 0, token: ['fixture-token'], role: [] }
+  const uninitialized = gateway({ privateStorageVerified: true, missingCollection: 'fy-community-uploads' })
+  uninitialized.rows.set('uni-id-usersmember', account)
+  assert.equal((await call(uninitialized, album)).code, 'UPLOAD_STAGING_UNAVAILABLE')
+  assert.equal((await call(uninitialized, diary)).code, 'UPLOAD_STAGING_UNAVAILABLE')
+  assert.equal(uninitialized.counts().uploads, 0)
+
+  const blocked = gateway({ privateStorageVerified: true, storage: {
+    async uploadFile({ cloudPath }) {
+      assert.match(cloudPath, /^fy-private\/community\/[a-f0-9]+\.bin$/)
+      throw new Error('Storage provider internal detail')
+    }
+  } })
+  blocked.rows.set('uni-id-usersmember', account)
+  assert.equal((await call(blocked, album)).code, 'MEDIA_UPLOAD_FAILED')
+  assert.equal(blocked.counts().uploads, 1)
+  assert.equal([...blocked.rows.keys()].some(key => key.startsWith('fy-community-uploads')), false)
 })

@@ -1,0 +1,290 @@
+<template>
+  <view class="governance">
+    <view class="tools">
+      <button @click="switchTo('pending')">待审帖子</button>
+      <button @click="switchTo('published')">已发布帖子</button>
+      <button @click="switchTo('comments')">待审评论</button>
+      <button @click="switchTo('publicComments')">公开评论</button>
+      <button @click="switchTo('reports')">待处理举报</button>
+      <button @click="switchTo('resolvedReports')">已处理举报</button>
+      <button @click="switchTo('mutes')">禁言记录</button>
+      <button @click="switchTo('policy')">词库与限流</button>
+      <button @click="switchTo('audit')">审计记录</button>
+    </view>
+    <view v-if="targetUid.length > 0" class="tools"><text class="muted">当前筛选用户 {{ targetLabel }}</text><button :disabled="busy" @click="clearUser">清除筛选</button></view>
+    <view class="tools"><text class="heading">{{ groupName() }}</text><button :disabled="busy" @click="reload">刷新</button></view>
+    <text v-if="message.length > 0" class="status">{{ message }}</text>
+    <view v-if="group === 'policy' && policy != null" class="panel">
+      <view class="tools">
+        <view><text>最短间隔（秒）</text><input v-model="minSeconds" type="number" :disabled="!policy?.canEdit" /></view>
+        <view><text>每 10 分钟上限</text><input v-model="maxPerWindow" type="number" :disabled="!policy?.canEdit" /></view>
+        <view><text>相同内容去重（秒）</text><input v-model="duplicateSeconds" type="number" :disabled="!policy?.canEdit" /></view>
+      </view>
+      <text class="muted">先检查拒绝规则。允许词条完整匹配评论时可直接公开，其余评论按待审词条判断。未命中时直接公开。</text>
+      <view v-for="(rule, i) in rules" :key="i" class="tools">
+        <input v-model="rule.word" placeholder="词条" :maxlength="80" :disabled="!policy?.canEdit" />
+        <text>{{ ruleName(rule.action) }}</text>
+        <template v-if="policy?.canEdit">
+          <button @click="rule.action = 'reject'">拒绝</button><button @click="rule.action = 'pending'">待审</button>
+          <button @click="rule.action = 'allow'">允许</button><button @click="removeRule(i)">删除词条</button>
+        </template>
+      </view>
+      <view v-if="policy?.canEdit" class="tools">
+        <button @click="addRule">新增词条</button><button :disabled="busy" @click="savePolicy">保存规则</button>
+      </view>
+    </view>
+    <template v-else-if="group !== 'policy'">
+      <view class="workspace">
+        <view class="panel results">
+          <text v-if="!busy && rows.length === 0 && next.length === 0" class="muted">当前没有记录。</text>
+          <view v-for="row in rows" :key="row.id" class="result">
+            <text class="heading">{{ row.title ?? row.action ?? row.author ?? '举报' }}</text>
+            <text class="excerpt">{{ row.body ?? row.reason ?? '' }}</text>
+            <text v-if="group === 'audit'" class="muted">{{ new Date(row.at ?? 0).toLocaleString() }} · 操作人 {{ row.actor }} · 对象 {{ row.target }}</text>
+            <button :disabled="busy" @click="select(row)">{{ group === 'audit' ? '查看审计记录' : '查看详情' }}</button>
+          </view>
+          <button v-if="next.length > 0" :disabled="busy" @click="more">加载更多</button>
+        </view>
+        <view v-if="selected != null" class="panel inspector">
+          <template v-if="group === 'audit'">
+            <text class="heading">审计详情</text><text class="record">{{ auditText }}</text>
+          </template>
+          <template v-else>
+            <template v-if="group === 'mutes'">
+              <text class="heading">{{ selected?.author }} · {{ selected?.status === 'muted' ? '禁言中' : '已到期或解除' }}</text>
+              <text v-if="selected?.status === 'muted'" class="record">到期时间 {{ new Date(selected?.until ?? 0).toLocaleString() }}</text>
+              <text class="record">{{ selected?.reason }}</text>
+            </template>
+            <template v-if="group === 'reports' || group === 'resolvedReports'">
+              <text class="heading">举报原因</text><text class="record">{{ selected?.reason }}</text>
+              <text v-if="selected?.resolution" class="record">处理结果 · {{ selected?.resolution }}</text>
+            </template>
+            <template v-if="detail != null">
+              <text class="heading">{{ detail?.author }} · {{ statusName(detail?.status ?? '') }}</text>
+              <view class="versions">
+                <view class="version">
+                  <text class="heading">当前公开版</text>
+                  <template v-if="currentVersion != null">
+                    <text class="muted">{{ currentVersion?.id }}</text>
+                    <text>{{ currentVersion?.title }}</text><text class="record">{{ currentVersion?.body }}</text>
+                    <view v-if="currentSlots.length > 0" class="tools"><button v-for="index in currentSlots" :key="index" :disabled="busy" @click="loadImage(true, index)">图 {{ index + 1 }}</button></view>
+                    <text v-if="currentImage.length > 0" class="muted">当前预览第 {{ currentIndex + 1 }} 张</text>
+                    <image v-if="currentImage.length > 0" :src="currentImage" mode="aspectFit" />
+                  </template>
+                  <text v-else class="muted">当前无公开版本。</text>
+                </view>
+                <view class="version">
+                  <text class="heading">所选版本 · {{ statusName(selectedVersion?.status ?? '') }}</text>
+                  <text class="muted">{{ selectedVersion?.id }}</text>
+                  <text>{{ selectedVersion?.title }}</text><text class="record">{{ selectedVersion?.body }}</text>
+                  <text v-if="selectedVersion?.reason" class="muted">{{ selectedVersion?.reason }}</text>
+                  <view v-if="selectedSlots.length > 0" class="tools"><button v-for="index in selectedSlots" :key="index" :disabled="busy" @click="loadImage(false, index)">图 {{ index + 1 }}</button></view>
+                  <text v-if="selectedImage.length > 0" class="muted">当前预览第 {{ selectedIndex + 1 }} 张</text>
+                  <image v-if="selectedImage.length > 0" :src="selectedImage" mode="aspectFit" />
+                </view>
+              </view>
+            </template>
+            <template v-if="comment != null">
+              <text class="heading">评论 · {{ comment?.author }} · {{ statusName(comment?.status ?? '') }}</text>
+              <text class="record">{{ comment?.body }}</text>
+            </template>
+            <text>审核或处理原因</text>
+            <textarea v-model="reason" :maxlength="300" placeholder="驳回、下架、举报处理和禁言须填写原因" />
+            <view class="tools">
+              <button v-if="group === 'pending'" :disabled="busy" @click="reviewPost('approve')">通过所选版本</button>
+              <button v-if="group === 'pending'" :disabled="busy" @click="reviewPost('reject')">驳回所选版本</button>
+              <button v-if="detail != null && detail?.current != null" :disabled="busy" @click="reviewPost('remove')">下架当前公开版</button>
+              <button v-if="comment != null && comment?.status === 'pending'" :disabled="busy" @click="reviewComment('approve')">通过评论</button>
+              <button v-if="comment != null && comment?.status === 'pending'" :disabled="busy" @click="reviewComment('reject')">驳回评论</button>
+              <button v-if="comment != null && comment?.status === 'public'" :disabled="busy" @click="reviewComment('remove')">移除评论</button>
+              <button v-if="group === 'reports'" :disabled="busy" @click="resolveReport">结束举报处理</button>
+            </view>
+            <view v-if="target().length > 0" class="tools">
+              <input v-model="minutes" type="number" placeholder="禁言分钟数" />
+              <button :disabled="busy" @click="mute(false)">{{ group === 'mutes' ? '更新禁言时长' : comment != null ? '禁言评论作者' : '禁言帖子作者' }}</button>
+              <button :disabled="busy" @click="mute(true)">解除禁言</button>
+            </view>
+          </template>
+        </view>
+      </view>
+    </template>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, ref } from 'vue'
+import { api } from '@/features/api.uts'
+type Row = { id: string, title?: string, author?: string, body?: string, status?: string, postId?: string, revisionId?: string, commentId?: string, targetUid?: string, reason?: string, resolution?: string, at?: number, until?: number, actor?: string, action?: string, target?: string }
+type Revision = { id: string, title: string, body: string, status: string, hasImage: boolean, imageCount?: number, reason: string }
+type Detail = { postId: string, status: string, author: string, targetUid: string, selected: Revision, current: Revision | null, reportedComment: Row | null }
+type Rule = { word: string, action: string }
+type Policy = { revision: number, canEdit: boolean, minSeconds: number, maxPerWindow: number, duplicateSeconds: number, rules: Rule[] }
+type Page = { items: Row[], next: string }
+const props = defineProps<{ initialGroup: string, targetUid: string, targetLabel: string }>()
+const group = ref(props.initialGroup), targetUid = ref(props.targetUid), targetLabel = ref(props.targetLabel)
+const busy = ref(false), message = ref(''), rows = ref<Row[]>([]), next = ref('')
+const selected = ref<Row | null>(null), detail = ref<Detail | null>(null), comment = ref<Row | null>(null)
+const currentVersion = computed(() => detail.value?.current ?? null)
+const selectedVersion = computed(() => detail.value?.selected ?? null)
+function slots(version: Revision | null): number[] {
+  return Array.from({ length: version?.imageCount ?? (version?.hasImage === true ? 1 : 0) }, (_, index) => index)
+}
+const currentSlots = computed(() => slots(currentVersion.value)), selectedSlots = computed(() => slots(selectedVersion.value))
+const currentIndex = ref(0), selectedIndex = ref(0)
+const reason = ref(''), minutes = ref('60'), currentImage = ref(''), selectedImage = ref(''), auditText = ref('')
+const policy = ref<Policy | null>(null), rules = ref<Rule[]>([])
+const minSeconds = ref('10'), maxPerWindow = ref('20'), duplicateSeconds = ref('300')
+onMounted(() => { reload() })
+function groupName(): string {
+  switch (group.value) {
+    case 'pending': return '待审帖子'
+    case 'published': return '已发布帖子'
+    case 'comments': return '待审评论'
+    case 'publicComments': return '公开评论'
+    case 'reports': return '待处理举报'
+    case 'resolvedReports': return '已处理举报'
+    case 'mutes': return '禁言记录'
+    case 'policy': return '词库与限流'
+    default: return '审计记录'
+  }
+}
+function statusName(value: string): string {
+  switch (value) {
+    case 'pending': return '待审核'
+    case 'approved': return '已通过'
+    case 'public': return '已公开'
+    case 'rejected': return '已驳回'
+    case 'removed': return '已下架'
+    case 'deleted': return '作者已撤下'
+    case 'superseded': return '已有更新版本'
+    default: return '未发布'
+  }
+}
+function ruleName(value: string): string { return value === 'reject' ? '拒绝' : value === 'pending' ? '待审' : '允许' }
+function target(): string { return comment.value?.targetUid ?? detail.value?.targetUid ?? selected.value?.targetUid ?? '' }
+function clearDetail(): void {
+  selected.value = null; detail.value = null; comment.value = null; reason.value = ''; minutes.value = '60'
+  selectedImage.value = ''; currentImage.value = ''; auditText.value = ''
+}
+async function task(work: () => Promise<void>): Promise<void> {
+  if (busy.value) return
+  busy.value = true; message.value = ''
+  try { await work() }
+  catch (error) {
+    const code = (error as Error).message
+    switch (code) {
+      case 'FORBIDDEN': message.value = '当前账号没有此权限。'; break
+      case 'STALE_VERSION':
+      case 'NOT_PENDING':
+      case 'CONFLICT': message.value = '记录已变化，请刷新后再操作。'; break
+      case 'INVALID_CONTENT': message.value = '请填写处理原因，最多 300 字。'; break
+      case 'INVALID_POLICY': message.value = '请检查词条是否重复、留空，以及频率数字是否有效。'; break
+      case 'INVALID_DURATION': message.value = '禁言时间须为 1 至 43200 分钟。'; break
+      default: message.value = '操作未完成（' + code + '）。'
+    }
+  } finally { busy.value = false }
+}
+async function load(append: boolean): Promise<void> {
+  if (group.value === 'policy') {
+    const value = await api<Policy>('communityPolicy')
+    policy.value = value; rules.value = value.rules
+    minSeconds.value = '' + value.minSeconds; maxPerWindow.value = '' + value.maxPerWindow; duplicateSeconds.value = '' + value.duplicateSeconds
+    return
+  }
+  const result = await api<Page>('communityReviewList', { group: group.value, targetUid: targetUid.value, cursor: append ? next.value : '' })
+  rows.value = append ? [...rows.value, ...result.items] : result.items; next.value = result.next
+}
+function reload(): void { task(async () => { clearDetail(); await load(false) }) }
+function clearUser(): void { targetUid.value = ''; targetLabel.value = ''; reload() }
+function more(): void { task(async () => { await load(true) }) }
+function switchTo(value: string): void {
+  if (busy.value) return
+  group.value = value; rows.value = []; next.value = ''; policy.value = null; reload()
+}
+async function loadSelection(row: Row): Promise<void> {
+  clearDetail(); selected.value = row
+  if (group.value === 'audit') { auditText.value = JSON.stringify(row, null, 2); return }
+  if (group.value === 'mutes') return
+  if (group.value === 'comments' || group.value === 'publicComments') comment.value = row
+  const value = await api<Detail>('communityReviewDetail', {
+    postId: row.postId ?? '', revisionId: row.revisionId ?? '', commentId: comment.value?.id ?? row.commentId ?? ''
+  })
+  detail.value = value
+  if (value.reportedComment != null) comment.value = value.reportedComment
+}
+function select(row: Row): void { task(async () => { await loadSelection(row) }) }
+function loadImage(current: boolean, index: number): void {
+  task(async () => {
+    const version = current ? detail.value?.current : detail.value?.selected
+    if (version == null) return
+    const result = await api<{ src: string }>('communityReviewImage', { postId: detail.value?.postId ?? '', revisionId: version.id, index })
+    if (current) { currentImage.value = result.src; currentIndex.value = index }
+    else { selectedImage.value = result.src; selectedIndex.value = index }
+  })
+}
+function reviewPost(decision: string): void {
+  task(async () => {
+    const version = decision === 'remove' ? detail.value?.current : detail.value?.selected
+    if (version == null) return
+    await api<UTSJSONObject>('communityReviewPost', { postId: detail.value?.postId ?? '', revisionId: version.id, decision, reason: reason.value })
+    await afterDecision()
+  })
+}
+function reviewComment(decision: string): void {
+  task(async () => {
+    await api<UTSJSONObject>('communityReviewComment', { commentId: comment.value?.id ?? '', decision, reason: reason.value })
+    await afterDecision()
+  })
+}
+async function afterDecision(): Promise<void> {
+  const row = selected.value
+  if (group.value === 'reports' && row != null) await loadSelection(row)
+  else { clearDetail(); await load(false) }
+  message.value = '已记录处理结果。'
+}
+function resolveReport(): void {
+  task(async () => {
+    await api<UTSJSONObject>('communityResolveReport', { reportId: selected.value?.id ?? '', reason: reason.value })
+    clearDetail(); await load(false); message.value = '举报已处理。'
+  })
+}
+function mute(release: boolean): void {
+  task(async () => {
+    if (!release && Number(minutes.value) <= 0) throw new Error('INVALID_DURATION')
+    const value = await api<{ until: number }>('communityMute', { targetUid: target(), minutes: release ? 0 : Number(minutes.value), reason: reason.value })
+    if (group.value === 'mutes') { clearDetail(); await load(false) }
+    message.value = value.until > 0 ? '已禁言至 ' + new Date(value.until).toLocaleString() : '已解除禁言。'
+  })
+}
+function addRule(): void { rules.value = [...rules.value, { word: '', action: 'pending' }] }
+function removeRule(index: number): void { rules.value.splice(index, 1) }
+function savePolicy(): void {
+  task(async () => {
+    await api<UTSJSONObject>('communitySavePolicy', { revision: policy.value?.revision ?? -1,
+      minSeconds: Number(minSeconds.value), maxPerWindow: Number(maxPerWindow.value),
+      duplicateSeconds: Number(duplicateSeconds.value), rules: rules.value })
+    await load(false); message.value = '规则已保存。'
+  })
+}
+</script>
+
+<style scoped>
+.governance, .panel, .version, .result { display: flex; flex-direction: column; gap: 12px; }
+.tools, .workspace, .versions { display: flex; flex-direction: row; gap: 10px; align-items: flex-start; }
+.tools { flex-wrap: wrap; align-items: center; }
+.tools button { margin: 0; }
+.workspace { flex-wrap: wrap; }
+.panel { background: #fff; border-radius: 12px; padding: 16px; }
+.results { width: 260px; }
+.inspector { flex: 1; min-width: 420px; }
+.version { flex: 1; min-width: 0; background: #faf7ef; border-radius: 10px; padding: 12px; }
+.version image { width: 100%; height: 220px; }
+.result { border-bottom: 1px solid #ede8dc; padding-bottom: 12px; }
+.heading { color: #2c3b28; font-weight: 700; }
+.muted { color: #685d53; font-size: 13px; overflow-wrap: anywhere; }
+.record, .excerpt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.excerpt { max-height: 56px; overflow: hidden; }
+.status { color: #784b20; }
+input, textarea { background: #f7f4eb; padding: 10px; border-radius: 8px; }
+textarea { width: 100%; min-height: 80px; }
+</style>

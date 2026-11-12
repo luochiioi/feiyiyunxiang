@@ -2,38 +2,149 @@
   <view class="screen">
     <AppPageHeader title="帖子详情" :show-back="true" />
     <view class="content">
-      <DemoNotice description="验收帖子正文、图片、示例评论和返回。评论提交与互动待开发。" />
-
+      <text v-if="message.length > 0" class="body">{{ message }}</text>
       <template v-if="post != null">
-        <PostCard :post="post" :detail="true" />
-        <view class="card">
-          <text class="heading">评论</text>
-          <view v-for="comment in post.comments" :key="comment.author" class="stack divider">
-            <text class="muted">{{ comment.author }}</text><text class="body">{{ comment.body }}</text>
+        <PostCard :key="post.revisionId" :post="post" :detail="true" :preview="revisionId.length > 0" :visible="visible" />
+        <view v-if="post.owner" class="card">
+          <text v-if="post.reason.length > 0" class="body">{{ post.reason }}</text>
+          <text v-if="post.latestRevision !== post.revisionId" class="muted">已有更新版本，可在我的帖子查看审核结果。</text>
+          <view v-if="post.status !== 'removed' && post.status !== 'deleted'" class="row actions">
+            <button class="secondary" :disabled="busy" @click="edit">编辑最新版本</button>
+            <button class="secondary" :disabled="busy" @click="remove">撤下帖子</button>
           </view>
-          <text v-if="post.comments.length === 0" class="muted">暂无评论。</text>
-          <text class="muted">评论将在云端过滤和限流接通后开放。</text>
+          <button v-if="revisionId.length > 0 && !post.publicView" class="secondary" @click="openPublic">查看公开版</button>
         </view>
+        <template v-if="post.publicView">
+          <view class="row actions">
+            <button class="secondary" :disabled="busy" @click="react('like')">{{ post.liked ? '取消点赞' : '点赞' }}</button>
+            <button class="secondary" :disabled="busy" @click="react('favorite')">{{ post.saved ? '取消收藏' : '收藏' }}</button>
+            <button class="secondary" open-type="share">分享</button>
+            <button class="secondary" :disabled="busy" @click="beginReport('')">举报</button>
+          </view>
+          <view v-if="reporting" class="card">
+            <text class="heading">{{ reportId.length > 0 ? '举报评论' : '举报帖子' }}</text>
+            <textarea v-model="reason" :maxlength="300" placeholder="填写举报原因" />
+            <view class="row actions"><button class="primary" :disabled="busy" @click="report">提交举报</button><button class="secondary" @click="reporting = false">取消</button></view>
+          </view>
+          <view class="card">
+            <text class="heading">评论</text>
+            <view v-for="comment in comments" :key="comment.id" class="stack divider">
+              <text class="muted">{{ comment.author }}{{ comment.parentId.length > 0 ? ' 回复 ' + parentName(comment.parentId) : '' }}</text>
+              <text class="body">{{ comment.body }}</text>
+              <view class="row actions"><button class="secondary" @click="reply(comment)">回复</button><button class="secondary" @click="beginReport(comment.id)">举报</button></view>
+            </view>
+            <text v-if="comments.length === 0" class="muted">暂无公开评论。</text>
+            <button v-if="next.length > 0" class="secondary" :disabled="busy" @click="more">更多评论</button>
+            <view v-for="comment in mine" :key="comment.id" class="stack divider">
+              <text class="muted">我的评论 · {{ statusLabel(comment.status) }}</text>
+              <text class="body">{{ comment.body }}</text><text v-if="comment.reason" class="muted">{{ comment.reason }}</text>
+            </view>
+            <view v-if="replyId.length > 0" class="row spread"><text class="muted">回复 {{ replyName }}</text><button class="secondary" @click="cancelReply">取消回复</button></view>
+            <textarea v-model="body" :disabled="busy" :maxlength="500" placeholder="写评论" />
+            <button class="primary" :disabled="busy" @click="submitComment">发送评论</button>
+          </view>
+        </template>
       </template>
-      <view v-else class="card"><text class="body">找不到这条帖子。</text><button class="secondary" @click="openPage('/packages/community/community/community')">查看社区</button></view>
+      <view v-else class="card"><button class="secondary" :disabled="busy" @click="refresh">重新加载</button><button class="secondary" @click="openPage(communityPath)">查看社区</button></view>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
+import { ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import DemoNotice from '@/components/DemoNotice.uvue'
-
-import { computed, ref } from 'vue'
 import PostCard from '../components/PostCard.uvue'
-import { listPosts } from '../catalog.uts'
+import { requestId, secured } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
-const id = ref<string | null>(null)
-onLoad(query => { id.value = query['postId'] ?? null })
-const post = computed(() => listPosts().find(item => item.id === id.value) ?? null)
+import { publicRead, statusLabel, communityError, communityPath, postPath, composePath } from '@/features/community/community.uts'
+import type { Post, Comment, CommentPage } from '@/features/community/community.uts'
+const postId = ref(''), revisionId = ref(''), post = ref<Post | null>(null)
+const comments = ref<Comment[]>([]), mine = ref<Comment[]>([]), next = ref('')
+const message = ref(''), busy = ref(false), visible = ref(false)
+const body = ref(''), replyId = ref(''), replyName = ref(''), reason = ref(''), reportId = ref(''), reporting = ref(false)
+let commentRequest = '', commentDraft = ''
+onLoad(query => { postId.value = query['postId'] ?? ''; revisionId.value = query['revisionId'] ?? '' })
+onShow(() => { visible.value = true; refresh() })
+onHide(() => { visible.value = false; post.value = null })
+onShareAppMessage(() => {
+  const fallback = { title: '非遗云享社区', path: communityPath, imageUrl: '/static/ip/aomiao-wave.png' }
+  if (post.value?.publicView !== true) return fallback
+  const id = postId.value
+  const promise = publicRead<{ title: string, postId: string }>('communityShare', { postId: id })
+    .then(value => ({ ...fallback, title: value.title, path: postPath + '?postId=' + encodeURIComponent(value.postId) }))
+    .catch(() => fallback)
+  return { ...fallback, promise }
+})
+async function loadComments(append: boolean): Promise<void> {
+  const value = await publicRead<CommentPage>('communityComments', { postId: postId.value, cursor: append ? next.value : '' })
+  comments.value = append ? [...comments.value, ...value.items] : value.items
+  if (!append) mine.value = value.mine
+  next.value = value.next
+}
+async function load(): Promise<void> {
+  const value = await publicRead<Post>('communityPost', { postId: postId.value, revisionId: revisionId.value, preview: revisionId.value.length > 0 })
+  if (!visible.value) return
+  post.value = value
+  if (value.publicView) await loadComments(false)
+}
+async function run(task: () => Promise<void>): Promise<void> {
+  if (busy.value) return
+  busy.value = true; message.value = ''
+  try { await task() }
+  catch (error) {
+    if ((error as Error).message === 'NOT_FOUND') post.value = null
+    message.value = communityError(error)
+  } finally { busy.value = false }
+}
+function refresh(): void { run(load) }
+function more(): void { run(async () => { await loadComments(true) }) }
+function openPublic(): void { openPage(postPath + '?postId=' + encodeURIComponent(postId.value)) }
+function edit(): void {
+  openPage(composePath + '?postId=' + encodeURIComponent(postId.value) + '&revisionId=' + encodeURIComponent(post.value?.latestRevision ?? ''))
+}
+function remove(): void {
+  uni.showModal({ title: '撤下帖子', content: '撤下后，原分享链接将无法打开。', success: result => {
+    if (result.confirm) run(async () => {
+      await secured<UTSJSONObject>('communityRemoveOwn', { postId: postId.value, revisionId: post.value?.latestRevision ?? '' })
+      uni.navigateBack()
+    })
+  } })
+}
+function react(kind: string): void {
+  const current = post.value
+  if (current == null) return
+  run(async () => {
+    await secured<UTSJSONObject>('communityReaction', { postId: postId.value, revisionId: current.revisionId, kind, active: kind === 'like' ? current.liked !== true : current.saved !== true })
+    await load()
+  })
+}
+function parentName(id: string): string { return comments.value.find(item => item.id === id)?.author ?? '一条评论' }
+function reply(comment: Comment): void { replyId.value = comment.id; replyName.value = comment.author }
+function cancelReply(): void { replyId.value = ''; replyName.value = '' }
+function submitComment(): void {
+  run(async () => {
+    const draft = replyId.value + '\n' + body.value
+    if (draft !== commentDraft || commentRequest.length === 0) { commentRequest = requestId(); commentDraft = draft }
+    const value = await secured<{ status: string }>('communityComment', {
+      postId: postId.value, revisionId: post.value?.revisionId ?? '', parentId: replyId.value, body: body.value, requestId: commentRequest
+    })
+    body.value = ''; cancelReply(); commentRequest = ''
+    await load()
+    message.value = value.status === 'pending' ? '评论已提交审核。' : '评论已发布。'
+  })
+}
+function beginReport(id: string): void { reportId.value = id; reason.value = ''; reporting.value = true }
+function report(): void {
+  run(async () => {
+    await secured<UTSJSONObject>('communityReport', { postId: postId.value, revisionId: post.value?.revisionId ?? '', commentId: reportId.value, reason: reason.value })
+    reporting.value = false; message.value = '举报已提交。'
+  })
+}
 </script>
 
 <style scoped>
 @import '@/styles/page.css';
-
+.actions { flex-wrap: wrap; }
+.actions button { width: auto; margin: 0; }
+textarea { width: 100%; min-height: 72px; background: #faf5ec; padding: 10px; border-radius: 10px; }
 </style>

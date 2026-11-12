@@ -1,0 +1,81 @@
+<template>
+  <view v-if="count > 0" class="gallery">
+    <view v-for="(path, index) in paths" :key="index" class="photo-frame" :class="frameClass">
+      <image v-if="path.length > 0" class="photo" :src="path" mode="aspectFill" aria-label="帖子照片" @click="openImage(index)" />
+      <button v-else class="photo placeholder" :disabled="loading[index]" @click.stop="loadImage(index)">{{ loading[index] ? '加载中…' : errors[index] ? '点击重试' : '查看照片' }}</button>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import { computed, getCurrentInstance, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { imageCount, publicRead, removePreview, savePreview, schedulePhoto } from '@/features/community/community.uts'
+import type { Post } from '@/features/community/community.uts'
+
+const props = defineProps<{ post: Post, detail: boolean, preview: boolean, visible: boolean }>()
+const component = getCurrentInstance()?.proxy
+const count = computed(() => imageCount(props.post))
+const frameClass = computed(() => count.value === 1 ? 'single' : count.value === 2 || count.value === 4 ? 'half' : 'third')
+const paths = ref<string[]>([]), loading = ref<boolean[]>([]), errors = ref<boolean[]>([])
+let observer: IntersectionObserver | null = null, generation = 0, disposed = false
+
+function clear(): void {
+  generation++
+  observer?.disconnect(); observer = null
+  paths.value.forEach(path => removePreview(path))
+  paths.value = Array.from({ length: count.value }, () => '')
+  loading.value = Array.from({ length: count.value }, () => false)
+  errors.value = Array.from({ length: count.value }, () => false)
+}
+function start(): void {
+  if (disposed || !props.visible || count.value === 0) return
+  if (props.detail) { loadAll(); return }
+  if (component == null || observer != null) return
+  observer = uni.createIntersectionObserver(component, {})
+  observer!.relativeToViewport({ bottom: 120 }).observe('.gallery', entry => {
+    if (entry.intersectionRatio <= 0) return
+    observer?.disconnect(); observer = null
+    loadAll()
+  })
+}
+function loadAll(): void { for (let index = 0; index < count.value; index++) loadImage(index) }
+function reset(): void { clear(); nextTick(() => start()) }
+watch(() => props.visible, value => { if (value) reset(); else clear() })
+watch(count, reset)
+onMounted(reset)
+onUnmounted(() => { disposed = true; clear() })
+
+async function loadImage(index: number): Promise<void> {
+  if (disposed || !props.visible || loading.value[index] || paths.value[index]?.length > 0) return
+  const current = generation
+  const revision = props.post.revisionId
+  loading.value[index] = true
+  errors.value[index] = false
+  try {
+    await schedulePhoto(async () => {
+      if (current !== generation || !props.visible) return
+      const image = await publicRead<{ src: string }>('communityImage', {
+        postId: props.post.id, revisionId: revision, preview: props.preview, index
+      }, 18000)
+      if (current !== generation || !props.visible) return
+      const path = await savePreview(image.src)
+      if (current === generation && props.visible) paths.value[index] = path
+      else removePreview(path)
+    })
+  } catch (_) { if (current === generation) errors.value[index] = true }
+  finally { if (current === generation) loading.value[index] = false }
+}
+function openImage(index: number): void {
+  if (!props.detail || !paths.value[index]) return
+  uni.previewImage({ current: paths.value[index], urls: paths.value.filter(path => path.length > 0) })
+}
+</script>
+<style scoped>
+.gallery { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.photo-frame { overflow: hidden; border-radius: 9px; background: #faf5ec; }
+.single { width: 100%; height: 420rpx; }
+.half { width: calc((100% - 6px) / 2); height: 302rpx; }
+.third { width: calc((100% - 12px) / 3); height: 194rpx; }
+.photo { width: 100%; height: 100%; }
+.placeholder { margin: 0; padding: 0; color: #6e6153; font-size: 12px; background: #faf5ec; }
+.placeholder::after { border: 0; }
+</style>

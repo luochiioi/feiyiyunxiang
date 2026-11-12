@@ -10,7 +10,22 @@ function createRepository(database) {
       async list(c,q) { const {data}=await db.collection(c).where(q).limit(100).get(); return data }
     }
   }
-  return {...access(database),async tx(fn) {
+  function queryFilter(query) {
+    return Object.fromEntries(Object.entries(query).map(([name, value]) =>
+      [name, Array.isArray(value) ? database.command.in(value) : value]))
+  }
+  return {...access(database),async page(c, query, {field, before, after, size}) {
+    const command = database.command
+    const filter = queryFilter(query)
+    if (before) filter[field] = command.lt(before)
+    if (after) filter[field] = command.gt(after)
+    const { data } = await database.collection(c).where(filter)
+      .orderBy(field, field === '_id' ? 'asc' : 'desc').limit(size).get()
+    return data
+  },async count(c, query) {
+    const { total } = await database.collection(c).where(queryFilter(query)).count()
+    return total
+  },async tx(fn) {
     // Retry database transaction conflicts only; every attempt rereads server state.
     for(let attempt=0;attempt<3;attempt++) {
       const tx=await database.startTransaction()

@@ -1,0 +1,14 @@
+[
+  {
+    "IndexName": "order",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "order",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

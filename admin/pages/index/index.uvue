@@ -1,8 +1,8 @@
 <template>
   <view class="desktop">
-    <view class="sidebar"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text><text>运营工作台</text><text class="hint">路线、文化任务与剧情发布</text></view>
+    <view class="sidebar"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text><template v-if="session != null"><text class="hint">{{ session?.username }}</text><button @click="section = 'overview'">运营工作台</button><button @click="openReview('pending', '', '')">社区审核与治理</button><button v-if="session?.admin !== false" @click="section = 'users'">用户管理</button><button v-if="session?.admin !== false" @click="openRoutes">路线与博物馆</button></template></view>
     <view class="main">
-      <text class="title">{{ session == null ? '管理员登录' : '路线与博物馆' }}</text>
+      <text class="title">{{ session == null ? '管理员登录' : sectionTitle() }}</text>
       <text class="message">{{ message }}</text>
       <view v-if="session == null" class="card login">
         <text>管理员账号</text><input v-model="username" placeholder="受控初始化的账号" />
@@ -11,6 +11,13 @@
         <text class="hint">使用单独开通的后台管理员账号登录。</text>
       </view>
       <template v-else>
+        <template v-if="section !== 'routes'">
+          <view class="toolbar"><button :disabled="busy" @click="signOut">退出</button></view>
+          <CommunityOverview v-if="section === 'overview'" @review="openQueue" />
+          <CommunityUsers v-else-if="section === 'users'" @review="openReview" />
+          <CommunityGovernance v-else :key="reviewKey" :initial-group="reviewGroup" :target-uid="reviewUid" :target-label="reviewLabel" />
+        </template>
+        <template v-else>
         <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="showAccountForm">修改登录账号或密码</button><button :disabled="busy" @click="signOut">退出</button></view>
         <view v-if="editingAccount" class="card account-form">
           <text class="heading">修改管理员登录信息</text>
@@ -63,6 +70,7 @@
             <text class="hint">{{ draft.cultureUpgrade != null ? '已有探索会加入这次发布的文化任务，沿用原有地图点位和打卡记录。' : '发布后生成固定版本，正在探索的用户继续使用原版本。' }}</text>
           </view>
         </view>
+        </template>
       </template>
     </view>
   </view>
@@ -71,6 +79,9 @@
 import { ref } from 'vue'
 import { api, session, AdminSession } from '@/features/api.uts'
 import ContentPreview from './ContentPreview.uvue'
+import CommunityGovernance from './CommunityGovernance.uvue'
+import CommunityOverview from './CommunityOverview.uvue'
+import CommunityUsers from './CommunityUsers.uvue'
 import { combinedContent, macauContent, hunanContent } from '@/features/stage-three-content.uts'
 import type { DraftNode, DraftPreview } from '@/features/stage-three-content.uts'
 type Museum = { name: string, description: string }
@@ -88,7 +99,22 @@ const previewId = ref(0)
 let savedPayload = ''
 const draft = ref<Draft>({ id: '', name: '', region: '', description: '', revision: 0, testOnly: true, museum: { name: '', description: '' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] })
 function numeric(value: string): number { return Number(value) }
-async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; await load() } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
+const section = ref('overview'), reviewGroup = ref('pending'), reviewUid = ref(''), reviewLabel = ref(''), reviewKey = ref(0)
+function sectionTitle(): string {
+  switch (section.value) {
+    case 'routes': return '路线与博物馆'
+    case 'users': return '用户管理'
+    case 'review': return '社区审核与治理'
+    default: return '运营工作台'
+  }
+}
+function openRoutes(): void { section.value = 'routes'; load() }
+function openQueue(group: string): void { openReview(group, '', '') }
+function openReview(group: string, uid: string, label: string): void {
+  reviewGroup.value = group; reviewUid.value = uid; reviewLabel.value = label; reviewKey.value++
+  section.value = 'review'
+}
+async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; message.value = ''; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; section.value = 'overview' } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
 async function signOut(): Promise<void> { try { await api<UTSJSONObject>('adminLogout'); session.value = null; editing.value = false; drafts.value = []; closeAccountForm() } catch (_) { message.value = '退出未完成，请重试。' } }
 function showAccountForm(): void {
   message.value = ''

@@ -1,16 +1,25 @@
 const crypto=require('node:crypto')
 const {createService,key}=require('./service')
 const {createPartnershipService}=require('./partnership-service')
+const {createCommunityService}=require('./community-service')
+const {createCommunityMedia}=require('./community-media')
+const {createCommunityOperations}=require('./community-operations')
 const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
 const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCredentials } = require('./admin-session')
-const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials'])
+const reviewActions = new Set(['communityReviewList', 'communityReviewDetail', 'communityReviewImage', 'communityReviewPost',
+  'communityReviewComment', 'communityResolveReport', 'communityMute', 'communityPolicy', 'communitySavePolicy'])
+const operationsActions = new Set(['communityOverview', 'communityUsers', 'communityUserDetail', 'communityAccountStatus'])
+const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', ...reviewActions, ...operationsActions])
+const guestActions = new Set(['communityFeed', 'communityPost', 'communityImage', 'communityShare', 'communityComments'])
+const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment',
+  'communityReport', 'communityRanking', 'communityRemoveOwn'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
   'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
   'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends',
   'inviteCoop', 'respondCoop', 'withdrawCoop', 'leaveCoop', 'coopStatus', 'myCoop', 'settleCoop',
   'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'assignment', 'completeAssignment', 'rejectAssignment'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -26,7 +35,7 @@ exports.main=async(event,context)=>{
     let user=null
     if (adminActions.has(action)) {
       user = await authenticateAdmin(repo, event.token)
-    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action)) {
+    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action) && !(guestActions.has(action) && !event.token)) {
       if (typeof event.token === 'string' && event.token.startsWith('fy_admin_')) {
         throw new Error('AUTH_REQUIRED')
       }
@@ -49,7 +58,7 @@ exports.main=async(event,context)=>{
       const uid=key(cfg.wechatAppId,result.data.openid)
       await repo.tx(async t=>{if(!await t.get('uni-id-users',uid))await t.put('uni-id-users',uid,{role:[],token:[],status:0,dcloud_appid:[context.APPID],register_date:Date.now()})})
       const account=await repo.get('uni-id-users',uid)
-      if(account.status!==0)throw new Error('LOGIN_FAILED')
+      if(account.status!==0)throw new Error(account.status===1?'ACCOUNT_DISABLED':'LOGIN_FAILED')
       const token=await memberIdentity().createToken({uid})
       if(token.errCode)throw new Error('LOGIN_FAILED')
       data={uid,token:token.token,expiresAt:token.tokenExpired}
@@ -92,6 +101,13 @@ exports.main=async(event,context)=>{
       const {fileContent}=await uniCloud.downloadFile({fileID:media.fileID})
       if (!Buffer.isBuffer(fileContent) || fileContent.length < 28) throw new Error('SERVICE_UNAVAILABLE')
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
+    } else if (operationsActions.has(action)) {
+      data = await createCommunityOperations({ repo })[action](user, p)
+    } else if (communityActions.has(action)) {
+      const media = createCommunityMedia({ cloud: uniCloud, cfg, service, limited })
+      const community = createCommunityService({ repo, media })
+      if (action === 'communitySubmitGallery' && !Array.isArray(p.images)) throw new Error('INVALID_IMAGES')
+      data = await community[action === 'communitySubmitGallery' ? 'communitySubmit' : action](user, p)
     } else {
       if(!serviceActions.has(action))throw new Error('NOT_FOUND')
       data=await (partners[action] ?? service[action])(user,p)

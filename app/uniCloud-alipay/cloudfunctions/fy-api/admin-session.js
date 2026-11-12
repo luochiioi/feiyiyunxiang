@@ -8,7 +8,8 @@ const dummyPasswordHash = '0'.repeat(32) + ':' + '0'.repeat(128)
 const validUsername = username => typeof username === 'string' && /^[A-Za-z0-9_-]{3,40}$/.test(username)
 
 function isActiveAdmin(account) {
-  return account?.status === 0 && account.role?.includes('admin') === true
+  return account?.status === 0 && Array.isArray(account.role) &&
+    account.role.some(role => role === 'admin' || role === 'reviewer')
 }
 
 async function createAdminSession(repo, username, password) {
@@ -24,7 +25,7 @@ async function createAdminSession(repo, username, password) {
   const token = 'fy_admin_' + randomBytes(32).toString('hex')
   const expiresAt = Date.now() + 2 * 60 * 60 * 1000
   await repo.put(sessions, key(token), { uid: account._id, expiresAt, passwordVersion: account.passwordVersion ?? 0 })
-  return { uid: account._id, username: account.username, token, expiresAt }
+  return { uid: account._id, username: account.username, token, expiresAt, admin: account.role.includes('admin') }
 }
 
 async function authenticateAdmin(repo, token) {
@@ -39,7 +40,7 @@ async function authenticateAdmin(repo, token) {
   if (!isActiveAdmin(account)) throw new Error('FORBIDDEN')
   const passwordVersion = account.passwordVersion ?? 0
   if ((session.passwordVersion ?? 0) !== passwordVersion) throw new Error('AUTH_REQUIRED')
-  return { uid: session.uid, admin: true, sessionId, passwordVersion }
+  return { uid: session.uid, admin: account.role.includes('admin'), reviewer: account.role.includes('reviewer'), sessionId, passwordVersion }
 }
 
 async function updateAdminCredentials(repo, user, { currentPassword, newUsername, newPassword }) {

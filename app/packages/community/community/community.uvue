@@ -2,38 +2,70 @@
   <view class="screen">
     <AppPageHeader title="社区" :show-back="true" />
     <view class="content">
-      <DemoNotice :pending="true" description="社区真实接口与审核在阶段五接通。发帖、互动、好友内容及排行待开发。" />
-
       <view class="row filters">
-        <button class="secondary" :class="{ active: tab === 'latest' }" @click="tab = 'latest'">最新</button>
-        <button class="secondary" :class="{ active: tab === 'friends' }" @click="tab = 'friends'">好友</button>
-        <button class="secondary" :class="{ active: tab === 'ranking' }" @click="tab = 'ranking'">好友排行</button>
+        <button class="secondary" :class="{ active: tab === 'latest' }" @click="select('latest')">最新</button>
+        <button class="secondary" :class="{ active: tab === 'friends' }" @click="select('friends')">好友</button>
+        <button class="secondary" :class="{ active: tab === 'ranking' }" @click="select('ranking')">好友排行</button>
       </view>
-      <template v-if="tab === 'latest'">
-        <PostCard v-for="post in posts" :key="post.id" :post="post" :detail="false" @open="showPost(post.id)" />
-        <view v-if="posts.length === 0" class="card"><text class="body">暂无公开帖子。</text></view>
+      <view class="row filters">
+        <button class="secondary" :class="{ active: tab === 'mine' }" @click="select('mine')">我的帖子</button>
+        <button class="secondary" :class="{ active: tab === 'saved' }" @click="select('saved')">我的收藏</button>
+      </view>
+      <text v-if="message.length > 0" class="body">{{ message }}</text>
+      <button v-if="message.length > 0" class="secondary" :disabled="busy" @click="load(false)">重试</button>
+      <template v-if="tab === 'ranking'">
+        <view class="card">
+          <text class="heading">路线完成榜</text>
+          <text class="muted">仅本人和好友 · 按完成的探索路线数排名</text>
+          <view v-for="row in ranks" :key="row.mine ? 'me' : row.code" class="row spread divider">
+            <text class="body">{{ row.rank }}. {{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text>
+            <text class="tag">{{ row.count }} 条</text>
+          </view>
+        </view>
       </template>
-      <view v-else class="card"><text class="body">{{ tab === 'friends' ? '暂无好友内容。' : '好友路线完成排行将在好友功能接通后开放。' }}</text></view>
-      <button class="primary compose" @click="compose">发帖 · 待开发</button>
+      <template v-else>
+        <PostCard v-for="post in posts" :key="post.revisionId" :post="post" :detail="false" :preview="tab === 'mine'" :visible="visible" @open="showPost(post)" />
+        <view v-if="!busy && message.length === 0 && posts.length === 0 && next.length === 0" class="card"><text class="body">暂无帖子。</text></view>
+        <button v-if="next.length > 0" class="secondary" :disabled="busy" @click="load(true)">加载更多</button>
+      </template>
+      <button class="primary compose" @click="openPage(composePath)">发帖</button>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
-import AppPageHeader from '@/components/AppPageHeader.uvue'
-import DemoNotice from '@/components/DemoNotice.uvue'
-
 import { ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PostCard from '../components/PostCard.uvue'
-import { listPosts } from '../catalog.uts'
+import { secured } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
-const posts = listPosts()
-const tab = ref('latest')
-function showPost(id: string): void {
-  openPage('/packages/community/community-post/community-post?postId=' + encodeURIComponent(id))
+import { publicRead, communityError, postPath, composePath } from '@/features/community/community.uts'
+import type { Post, PostPage, Ranking } from '@/features/community/community.uts'
+const posts = ref<Post[]>([]), ranks = ref<Ranking[]>([]), tab = ref('latest')
+const next = ref(''), message = ref(''), busy = ref(false), visible = ref(false)
+let sequence = 0
+onShow(() => { visible.value = true; load(false) })
+onHide(() => { visible.value = false; sequence++ })
+function select(value: string): void { if (tab.value !== value) { tab.value = value; load(false) } }
+async function load(append: boolean): Promise<void> {
+  const call = ++sequence, active = tab.value
+  busy.value = true; message.value = ''
+  if (!append) { posts.value = []; ranks.value = []; next.value = '' }
+  try {
+    if (active === 'ranking') {
+      const result = await secured<Ranking[]>('communityRanking')
+      if (call === sequence) ranks.value = result
+    } else {
+      const payload: UTSJSONObject = { tab: active, cursor: append ? next.value : '' }
+      const result = active === 'latest' ? await publicRead<PostPage>('communityFeed', payload) : await secured<PostPage>('communityFeed', payload)
+      if (call === sequence) { posts.value = [...posts.value, ...result.items]; next.value = result.next }
+    }
+  } catch (error) { if (call === sequence) message.value = communityError(error) }
+  finally { if (call === sequence) busy.value = false }
 }
-function compose(): void {
-  uni.showModal({ title: '发帖与审核', content: '发帖将在社区审核接通后开放。帖子及修改审核通过后才会公开。', showCancel: false })
+function showPost(post: Post): void {
+  const preview = tab.value === 'mine' ? '&revisionId=' + encodeURIComponent(post.revisionId) : ''
+  openPage(postPath + '?postId=' + encodeURIComponent(post.id) + preview)
 }
 </script>
 

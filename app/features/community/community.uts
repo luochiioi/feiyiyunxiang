@@ -1,0 +1,105 @@
+import { api, secured, session, requestId } from '@/features/api.uts'
+
+export type Post = {
+  id: string, revisionId: string, latestRevision: string, title: string, body?: string, author: string,
+  authorCode?: string, authorAvatar?: string,
+  hasImage: boolean, imageCount?: number, owner: boolean, publicView: boolean, status: string, reason: string,
+  commentCount: number, likeCount: number, liked?: boolean, saved?: boolean
+}
+export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string }
+export type PostPage = { items: Post[], next: string }
+export type CommentPage = { items: Comment[], next: string, mine: Comment[] }
+export type Ranking = { code: string, nickname: string, count: number, rank: number, mine: boolean }
+export type DiaryPhoto = { _id: string, title: string, createdAt: number, mediaId: string }
+export const communityPath = '/packages/community/community/community'
+export const postPath = '/packages/community/community-post/community-post'
+export const composePath = '/packages/community/community-compose/community-compose'
+export function imageCount(post: Post): number { return post.imageCount ?? (post.hasImage ? 1 : 0) }
+export function postTitle(post: Post): string { return post.title.length > 0 ? post.title : post.hasImage ? '图片动态' : '文字动态' }
+
+const photoQueue: (() => void)[] = []
+let photosInFlight = 0
+function startPhotos(): void {
+  while (photosInFlight < 3 && photoQueue.length > 0) {
+    const start = photoQueue.shift()
+    if (start != null) start()
+  }
+}
+export function schedulePhoto(work: () => Promise<void>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    photoQueue.push(() => {
+      photosInFlight++
+      work().then(() => resolve()).catch(error => reject(error)).finally(() => {
+        photosInFlight--; startPhotos()
+      })
+    })
+    startPhotos()
+  })
+}
+
+export function savePreview(src: string): Promise<string> {
+  const prefix = src.startsWith('data:image/png;base64,') ? 'data:image/png;base64,' : 'data:image/jpeg;base64,'
+  if (!src.startsWith(prefix)) return Promise.reject(new Error('PHOTO_UNAVAILABLE'))
+  const extension = prefix.includes('png') ? '.png' : '.jpg'
+  const path = uni.env.USER_DATA_PATH + '/fy-community-preview-' + requestId() + extension
+  return new Promise<string>((resolve, reject) => {
+    uni.getFileSystemManager().writeFile({
+      filePath: path, data: src.slice(prefix.length), encoding: 'base64',
+      success: () => resolve(path), fail: () => reject(new Error('PHOTO_UNAVAILABLE'))
+    })
+  })
+}
+
+export function removePreview(path: string): void {
+  if (path.startsWith(uni.env.USER_DATA_PATH + '/fy-community-preview-')) {
+    uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} })
+  }
+}
+
+export async function publicRead<T>(action: string, payload: UTSJSONObject, timeout = 60000): Promise<T> {
+  if (session.value != null && session.value!.expiresAt <= Date.now()) {
+    return await secured<T>(action, payload, timeout)
+  }
+  try { return await api<T>(action, payload, timeout) }
+  catch (error) {
+    if ((error as Error).message !== 'AUTH_REQUIRED') throw error
+    return await api<T>(action, payload, timeout)
+  }
+}
+
+export function statusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return '待审核'
+    case 'approved': return '已通过'
+    case 'rejected': return '已驳回'
+    case 'removed': return '已下架'
+    case 'deleted': return '已撤下'
+    case 'superseded': return '已有更新版本'
+    default: return '已公开'
+  }
+}
+
+export function communityError(error: any, submitting = false): string {
+  switch ((error as Error).message) {
+    case 'NOT_FOUND': return submitting ? '图片来源已失效，或社区接口尚未更新。' : '内容已不可访问。'
+    case 'RATE_LIMITED': return '操作太频繁，请稍后再试。'
+    case 'DUPLICATE_COMMENT': return '近期已提交相同评论。'
+    case 'COMMENT_REJECTED': return '这条评论未通过发布规则，请修改后再试。'
+    case 'COMMUNITY_MUTED': return '当前处于禁言期间。'
+    case 'STALE_VERSION': return '帖子版本已变化，请返回后刷新。'
+    case 'INVALID_IMAGE': return '照片须为 JPG 或 PNG，压缩后仍超过 1 MB 时请换一张。'
+    case 'INVALID_IMAGES': return '请检查照片，最多可选 9 张。'
+    case 'UPLOAD_NOT_AVAILABLE': return '照片暂存已过期，请重新提交以恢复上传。'
+    case 'UPLOAD_STAGING_UNAVAILABLE': return '云端照片暂存暂不可用，已保留选图和草稿。'
+    case 'MEDIA_UPLOAD_FAILED': return '照片上传失败，请重试。'
+    case 'ACCOUNT_DISABLED': return '该账户已停用，请联系运营人员。'
+    case 'LOGIN_FAILED': return '微信登录失败，请重试。'
+    case 'LOGIN_TIMEOUT': return '微信登录超时，请重试。'
+    case 'CONFIG_REQUIRED': return '社区服务或图片存储尚未配置。'
+    case 'SERVICE_UNAVAILABLE': return '社区服务暂不可用，已保留草稿。'
+    case 'PHOTO_UNAVAILABLE': return '照片暂时无法读取，请换一张图片。'
+    case 'INVALID_CONTENT': return '请填写内容并检查字数。'
+    case 'AUTH_REQUIRED': return '请先微信登录。'
+    default: return submitting ? '未收到确认，草稿已保留。请检查网络后重试。' : '操作未完成，请检查网络后重试。'
+  }
+}

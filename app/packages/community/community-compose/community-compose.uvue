@@ -1,0 +1,228 @@
+<template>
+  <view class="screen">
+    <AppPageHeader :title="postId.length > 0 ? '编辑帖子' : '发帖'" :show-back="true" />
+    <view class="content">
+      <button v-if="!ready && !busy" class="secondary" @click="initialize">重新加载</button>
+      <view v-if="ready" class="card">
+        <text class="muted">{{ postId.length > 0 ? '修改需重新审核，审核期间继续展示已通过版本。' : '帖子及图片审核通过后公开。' }}</text>
+        <input class="title-input" v-model="title" :disabled="busy" :maxlength="80" placeholder="标题（选填）" />
+        <textarea v-model="body" :disabled="busy" :maxlength="2000" placeholder="想和旅伴分享什么？（选填）" />
+        <view class="row spread"><text class="heading">照片</text><text class="muted">{{ photos.length }}/9</text></view>
+        <view v-if="photos.length > 0" class="photo-grid">
+          <view v-for="photo in photos" :key="photo.slot" class="photo-tile">
+            <image v-if="photo.path.length > 0" class="photo" :src="photo.path" mode="aspectFill" @click="previewPhoto(photo.path)" />
+            <button v-else class="photo photo-fallback" :disabled="busy" @click="loadOriginal(photo)">查看原图 {{ photo.keepIndex + 1 }}</button>
+            <button class="remove-photo" :disabled="busy" @click="removePhoto(photo.slot)" aria-label="移除这张照片">×</button>
+          </view>
+        </view>
+        <view class="row choices">
+          <button class="secondary" :disabled="busy || photos.length >= 9" @click="choosePhoto">从相册选图</button>
+          <button class="secondary" :disabled="busy || photos.length >= 9" @click="chooseDiary">从私密日记选图</button>
+        </view>
+        <view v-if="showDiary" class="stack">
+          <text class="muted">所选照片会单独复制一份用于社区。原日记继续私密。</text>
+          <text v-if="records.length === 0" class="muted">暂无可选日记图片。</text>
+          <button v-for="item in records" :key="item._id" class="secondary" :disabled="busy || hasDiary(item._id)" @click="selectDiary(item)">{{ item.title }} · {{ new Date(item.createdAt).toLocaleString() }}</button>
+        </view>
+        <text v-if="message.length > 0" class="body">{{ message }}</text>
+        <text v-if="phase.length > 0" class="body">{{ phase }}</text>
+        <button class="primary" :disabled="busy" :loading="submitting" @click="submit">{{ submitting ? '提交中…' : '提交审核' }}</button>
+      </view>
+      <text v-else-if="message.length > 0" class="body">{{ message }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import { login, secured, session, requestId } from '@/features/api.uts'
+import { communityError, postPath, savePreview, removePreview, imageCount } from '@/features/community/community.uts'
+import type { Post, DiaryPhoto } from '@/features/community/community.uts'
+type Photo = { slot: string, path: string, source: string, diaryId: string, keepIndex: number, uploadId: string }
+const maxPhotos = 9
+const postId = ref(''), revisionId = ref(''), title = ref(''), body = ref('')
+const photos = ref<Photo[]>([]), showDiary = ref(false), records = ref<DiaryPhoto[]>([])
+const busy = ref(false), submitting = ref(false), ready = ref(false), message = ref(''), phase = ref('')
+let pendingDiaryId = '', submitId = requestId(), submittedDraft = '', disposed = false
+onUnload(() => { disposed = true; photos.value.forEach(photo => removePreview(photo.path)) })
+onLoad(query => {
+  postId.value = query['postId'] ?? ''; revisionId.value = query['revisionId'] ?? ''; pendingDiaryId = query['diaryId'] ?? ''
+  initialize()
+})
+async function initialize(): Promise<void> {
+  busy.value = true; message.value = ''
+  try {
+    if (postId.value.length > 0) {
+      const post = await secured<Post>('communityPost', { postId: postId.value, revisionId: revisionId.value, preview: true })
+      if (!post.owner || post.revisionId !== post.latestRevision || post.status === 'removed' || post.status === 'deleted') throw new Error('STALE_VERSION')
+      title.value = post.title; body.value = post.body ?? ''
+      const originals: Photo[] = []
+      for (let index = 0; index < imageCount(post); index++) {
+        originals.push({ slot: requestId(), source: 'keep', path: '', diaryId: '', keepIndex: index, uploadId: '' })
+      }
+      photos.value = originals
+    }
+    ready.value = true
+    if (pendingDiaryId.length > 0) {
+      const items = await secured<DiaryPhoto[]>('diary')
+      const item = items.find(row => row._id === pendingDiaryId)
+      if (item == null) throw new Error('NOT_FOUND')
+      await addDiaryPhoto(item)
+    }
+  } catch (error) { message.value = communityError(error) }
+  finally { busy.value = false }
+}
+function removePhoto(slot: string): void {
+  const photo = photos.value.find(item => item.slot === slot)
+  if (photo != null) removePreview(photo.path)
+  photos.value = photos.value.filter(item => item.slot !== slot)
+}
+function choosePhoto(): void {
+  const remaining = maxPhotos - photos.value.length
+  if (remaining <= 0 || busy.value) return
+  uni.chooseImage({ count: remaining, sourceType: ['album'], sizeType: ['compressed'], success: result => {
+    if (disposed) return
+    const additions = result.tempFilePaths.slice(0, remaining).map((path): Photo =>
+      ({ slot: requestId(), source: 'upload', path, diaryId: '', keepIndex: -1, uploadId: '' }))
+    photos.value = [...photos.value, ...additions]
+    showDiary.value = false; message.value = ''
+  }, fail: error => {
+    if (!error.errMsg.toLowerCase().includes('cancel')) message.value = '打开相册失败，请检查微信的照片权限后重试。'
+  } })
+}
+function previewPhoto(path: string): void {
+  uni.previewImage({ current: path, urls: photos.value.filter(photo => photo.path.length > 0).map(photo => photo.path) })
+}
+async function chooseDiary(): Promise<void> {
+  busy.value = true; message.value = ''; phase.value = '正在读取日记…'
+  try { records.value = (await secured<DiaryPhoto[]>('diary')).filter(item => item.mediaId.length > 0); showDiary.value = true }
+  catch (error) { message.value = communityError(error) }
+  finally { busy.value = false; phase.value = '' }
+}
+function hasDiary(id: string): boolean { return photos.value.some(photo => photo.diaryId === id) }
+async function addDiaryPhoto(item: DiaryPhoto): Promise<void> {
+  if (hasDiary(item._id) || photos.value.length >= maxPhotos) return
+  const result = await secured<{ src: string }>('readMedia', { id: item.mediaId })
+  if (disposed) return
+  const path = await savePreview(result.src)
+  if (disposed) { removePreview(path); return }
+  photos.value = [...photos.value, { slot: requestId(), source: 'diary', path, diaryId: item._id, keepIndex: -1, uploadId: '' }]
+}
+async function selectDiary(item: DiaryPhoto): Promise<void> {
+  busy.value = true; message.value = ''; phase.value = '正在读取日记照片…'
+  try { await addDiaryPhoto(item) }
+  catch (error) { message.value = communityError(error) }
+  finally { busy.value = false; phase.value = '' }
+}
+async function loadOriginal(photo: Photo): Promise<void> {
+  busy.value = true; message.value = ''
+  try {
+    const result = await secured<{ src: string }>('communityImage', {
+      postId: postId.value, revisionId: revisionId.value, preview: true, index: photo.keepIndex
+    }, 25000)
+    if (disposed) return
+    const path = await savePreview(result.src)
+    if (disposed) removePreview(path)
+    else photo.path = path
+  } catch (error) { message.value = communityError(error) }
+  finally { busy.value = false }
+}
+function readPhoto(path: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    uni.getFileSystemManager().readFile({ filePath: path, encoding: 'base64', success: result => {
+      resolve(result.data as string)
+    }, fail: () => reject(new Error('PHOTO_UNAVAILABLE')) })
+  })
+}
+async function fileBase64(path: string): Promise<string> {
+  const limit = 1398104
+  const original = await readPhoto(path)
+  if (original.length <= limit) return original
+  const compressed = await new Promise<string>((resolve, reject) => {
+    uni.compressImage({ src: path, quality: 72, compressedWidth: 1440, success: result => resolve(result.tempFilePath),
+      fail: () => reject(new Error('INVALID_IMAGE')) })
+  })
+  const data = await readPhoto(compressed)
+  if (data.length > limit) throw new Error('INVALID_IMAGE')
+  return data
+}
+function resetUploads(): void {
+  submitId = requestId()
+  photos.value.forEach(photo => { photo.uploadId = '' })
+}
+async function stagePhoto(photo: Photo): Promise<string> {
+  if (photo.uploadId.length > 0) return photo.uploadId
+  const payload: UTSJSONObject = {
+    requestId: submitId, postId: postId.value, baseRevision: revisionId.value, slot: photo.slot,
+    imageSource: photo.source, diaryId: photo.diaryId
+  }
+  if (photo.source === 'upload') payload['base64'] = await fileBase64(photo.path)
+  const result = await secured<{ uploadId: string }>('communityStageImage', payload, 25000)
+  photo.uploadId = result.uploadId
+  return result.uploadId
+}
+async function submit(): Promise<void> {
+  if (busy.value) return
+  message.value = ''
+  if (title.value.trim().length === 0 && body.value.trim().length === 0 && photos.value.length === 0) {
+    message.value = '写个标题、正文或选张照片，就可以提交。'
+    return
+  }
+  busy.value = true; submitting.value = true
+  const draft = JSON.stringify([title.value.trim(), body.value.trim(), photos.value.map(photo => photo.slot)])
+  if (submittedDraft.length > 0 && submittedDraft !== draft) { resetUploads(); submittedDraft = '' }
+  let photoNumber = 0
+  try {
+    if (session.value == null || session.value!.expiresAt <= Date.now()) {
+      phase.value = '正在连接微信登录…'
+      await login()
+    }
+    const images: UTSJSONObject[] = []
+    for (let i = 0; i < photos.value.length; i++) {
+      if (disposed) return
+      const photo = photos.value[i]
+      if (photo.source === 'keep') {
+        images.push({ keepIndex: photo.keepIndex })
+      } else {
+        photoNumber = i + 1
+        phase.value = '正在上传照片 ' + photoNumber + '/' + photos.value.length + '…'
+        images.push({ uploadId: await stagePhoto(photo) })
+      }
+    }
+    if (disposed) return
+    photoNumber = 0
+    phase.value = '正在提交审核…'
+    submittedDraft = draft
+    const value = await secured<{ postId: string, revisionId: string }>('communitySubmitGallery', {
+      postId: postId.value, baseRevision: revisionId.value, requestId: submitId,
+      title: title.value, body: body.value, images
+    }, 25000)
+    if (disposed) return
+    message.value = '已提交审核。'
+    uni.redirectTo({ url: postPath + '?postId=' + encodeURIComponent(value.postId) + '&revisionId=' + encodeURIComponent(value.revisionId),
+      fail: () => { message.value = '已提交审核，可返回「我的帖子」查看。' } })
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'UPLOAD_NOT_AVAILABLE') resetUploads()
+    const prefix = photoNumber > 0 ? '第 ' + photoNumber + ' 张照片：' : ''
+    message.value = prefix + communityError(error, true)
+  } finally {
+    busy.value = false; submitting.value = false; phase.value = ''
+  }
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.title-input, textarea { box-sizing: border-box; width: 100%; padding: 10px; background: #faf5ec; border-radius: 10px; }
+.title-input { height: 46px; padding: 0 12px; font-size: 17px; font-weight: 700; }
+textarea { min-height: 140px; }
+.choices, .photo-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.choices button { width: auto; margin: 0; }
+.photo-tile { position: relative; width: calc((100% - 16px) / 3); height: 170rpx; border-radius: 10px; overflow: hidden; background: #f4ead8; }
+.photo { width: 100%; height: 100%; }
+.photo-fallback { padding: 0; font-size: 12px; color: #604323; background: #f4ead8; }
+.remove-photo { position: absolute; right: 3px; top: 3px; margin: 0; padding: 0; width: 25px; height: 25px; line-height: 25px; color: white; background: #332b24b3; border-radius: 13px; }
+.remove-photo::after, .photo-fallback::after { border: 0; }
+</style>

@@ -1,0 +1,146 @@
+<template>
+  <view class="ops">
+    <view class="tools">
+      <input v-model="code" placeholder="按公开旅伴 ID 查找" :maxlength="8" @confirm="search" />
+      <button :disabled="busy" @click="search">查找</button>
+      <button :disabled="busy" @click="filter('')">全部</button>
+      <button :disabled="busy" @click="filter('active')">正常</button>
+      <button :disabled="busy" @click="filter('disabled')">已停用</button>
+    </view>
+    <text v-if="message.length > 0" class="muted">{{ message }}</text>
+    <view class="columns">
+      <view class="panel account-list">
+        <text class="heading">{{ listTitle() }}</text>
+        <text v-if="!busy && users.length === 0" class="muted">没有匹配的账户。</text>
+        <view v-for="user in users" :key="user.id" class="account-row">
+          <view class="ops"><text>{{ user.nickname }}</text><text class="muted">{{ user.code.length > 0 ? 'ID ' + user.code : '尚无公开 ID' }} · {{ statusLabel(user.status) }}</text></view>
+          <button :disabled="busy" @click="select(user.id)">详情</button>
+        </view>
+        <button v-if="next.length > 0" :disabled="busy" @click="more">加载更多</button>
+      </view>
+      <view v-if="selected != null" class="panel inspector">
+        <text class="heading">{{ selected?.nickname }} · {{ statusLabel(selected?.status ?? -1) }}</text>
+        <text class="muted">{{ selected?.code ? 'ID ' + selected?.code : '尚无公开 ID' }} · {{ created() }}</text>
+        <text v-if="(selected?.muteUntil ?? 0) > 0" class="muted">最近禁言到期时间 {{ new Date(selected?.muteUntil ?? 0).toLocaleString() }}</text>
+        <view class="tools">
+          <text>好友 {{ selected?.friendCount }}</text>
+          <button @click="review('published')">查看帖子（{{ selected?.postCount }}）</button>
+          <button @click="review('publicComments')">查看评论（{{ selected?.commentCount }}）</button>
+          <button @click="review('reports')">查看举报（{{ selected?.reportCount }}）</button>
+        </view>
+        <text class="muted">停用会撤销会话并暂停微信登录。已公开内容可在社区审核中处理。</text>
+        <textarea v-model="reason" :maxlength="300" placeholder="输入停用、恢复或禁言原因" />
+        <view class="tools">
+          <button v-if="selected?.status === 0" :disabled="busy" @click="setStatus(true)">停用账户</button>
+          <button v-if="selected?.suspendedByOps && selected?.status === 1" :disabled="busy" @click="setStatus(false)">恢复账户</button>
+        </view>
+        <view class="tools">
+          <input v-model="minutes" type="number" placeholder="禁言分钟数" />
+          <button :disabled="busy" @click="mute(false)">禁言</button>
+          <button :disabled="busy" @click="mute(true)">解除禁言</button>
+        </view>
+      </view>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import { ref } from 'vue'
+import { api } from '@/features/api.uts'
+type Account = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number }
+type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number }
+type AccountPage = { items: Account[], next: string }
+const emit = defineEmits<{ (event: 'review', group: string, uid: string, label: string): void }>()
+const users = ref<Account[]>([]), selected = ref<AccountDetail | null>(null)
+const code = ref(''), searchCode = ref(''), status = ref(''), next = ref('')
+const reason = ref(''), minutes = ref('60'), busy = ref(false), message = ref('')
+onMounted(() => { filter('') })
+
+function statusLabel(value: number): string {
+  switch (value) {
+    case 0: return '正常'
+    case 1: return '已停用'
+    case 2: return '审核中'
+    case 3: return '审核拒绝'
+    case 4: return '已注销'
+    default: return '状态未知'
+  }
+}
+function listTitle(): string {
+  if (searchCode.value.length > 0) return '查找结果'
+  return status.value === 'active' ? '正常账户' : status.value === 'disabled' ? '已停用账户' : '全部账户'
+}
+function created(): string {
+  const at = selected.value?.createdAt ?? 0
+  return at > 0 ? '注册于 ' + new Date(at).toLocaleDateString() : '注册时间未知'
+}
+async function work(operation: () => Promise<void>): Promise<void> {
+  if (busy.value) return
+  busy.value = true; message.value = '加载中…'
+  try { await operation(); if (message.value === '加载中…') message.value = '' }
+  catch (error) {
+    switch ((error as Error).message) {
+      case 'INVALID_CODE': message.value = '请输入 8 位公开旅伴 ID。'; break
+      case 'INVALID_CONTENT': message.value = '请填写操作原因。'; break
+      case 'INVALID_DURATION': message.value = '禁言时长须为 1 至 43200 分钟。'; break
+      case 'INVALID_ACCOUNT_STATE': message.value = '该账户当前状态不支持此操作。'; break
+      case 'FORBIDDEN': message.value = '当前账号没有用户管理权限。'; break
+      default: message.value = '操作未完成，请检查接口和网络后重试。'
+    }
+  } finally { busy.value = false }
+}
+async function load(append: boolean): Promise<void> {
+  const result = await api<AccountPage>('communityUsers', { code: searchCode.value, status: status.value, cursor: append ? next.value : '' })
+  users.value = append ? [...users.value, ...result.items] : result.items; next.value = result.next
+}
+function search(): void {
+  work(async () => { searchCode.value = code.value.trim(); status.value = ''; selected.value = null; await load(false) })
+}
+function filter(value: string): void {
+  work(async () => { status.value = value; code.value = ''; searchCode.value = ''; selected.value = null; await load(false) })
+}
+function more(): void { work(async () => { await load(true) }) }
+async function loadDetail(id: string): Promise<void> {
+  selected.value = await api<AccountDetail>('communityUserDetail', { targetUid: id })
+}
+function select(id: string): void { work(async () => { reason.value = ''; minutes.value = '60'; await loadDetail(id) }) }
+function review(group: string): void {
+  const user = selected.value
+  if (user != null) emit('review', group, user.id, user.nickname)
+}
+function setStatus(suspend: boolean): void {
+  const user = selected.value
+  if (user == null) return
+  if (!reason.value.trim()) { message.value = '请填写操作原因。'; return }
+  uni.showModal({ title: suspend ? '停用此账户' : '恢复此账户', content: user.nickname,
+    success: result => {
+      if (result.confirm) work(async () => {
+        await api<UTSJSONObject>('communityAccountStatus', { targetUid: user.id, suspend, reason: reason.value })
+        await loadDetail(user.id); await load(false); reason.value = ''
+        message.value = suspend ? '账户已停用，会话已撤销。' : '账户已恢复。'
+      })
+    }
+  })
+}
+function mute(release: boolean): void {
+  const user = selected.value
+  if (user == null) return
+  work(async () => {
+    if (!release && Number(minutes.value) <= 0) throw new Error('INVALID_DURATION')
+    await api<UTSJSONObject>('communityMute', { targetUid: user.id, reason: reason.value, minutes: release ? 0 : Number(minutes.value) })
+    await loadDetail(user.id); await load(false); reason.value = ''
+    message.value = release ? '已解除禁言。' : '已设置禁言。'
+  })
+}
+</script>
+<style scoped>
+.ops, .panel { display: flex; flex-direction: column; gap: 10px; }
+.tools, .columns, .account-row { display: flex; flex-direction: row; gap: 10px; align-items: center; flex-wrap: wrap; }
+.columns { align-items: flex-start; }
+.account-row { justify-content: space-between; border-bottom: 1px solid #ece7dc; padding: 8px 0; }
+.panel { background: #fffef7; border-radius: 12px; padding: 16px; }
+.account-list { width: 280px; }
+.inspector { flex: 1; min-width: 330px; }
+button { margin: 0; }
+.tools input { width: 180px; }
+.muted { font-size: 13px; color: #675d50; }
+</style>

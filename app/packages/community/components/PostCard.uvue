@@ -1,23 +1,38 @@
 <template>
-  <view class="card" @click="emit('open')">
+  <view class="card post-card" @click="emit('open')">
     <view class="row">
-      <image class="post-avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
-      <view class="stack"><text class="heading">{{ post.author }}</text><text class="muted">示例帖子</text></view>
+      <image v-if="avatar.length > 0 && !avatarFailed" class="post-avatar" :src="avatar" mode="aspectFill" @error="avatarFailed = true" />
+      <image v-else class="post-avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+      <view class="stack author">
+        <text class="author-name">{{ post.author }}</text>
+        <text v-if="post.authorCode" class="muted">ID {{ post.authorCode }}</text>
+      </view>
+      <text v-if="!post.publicView" class="tag">{{ statusLabel(post.status) }}</text>
     </view>
-    <text class="heading">{{ post.title }}</text>
-    <text class="body">{{ post.body }}</text>
-    <image v-if="post.image != null" class="cover" :src="post.image" mode="aspectFill" aria-label="路线主题示意图" />
-    <view class="row spread">
-      <text class="tag">{{ post.place }}</text><text class="muted">{{ post.comments.length }} 条评论 {{ detail ? '' : '›' }}</text>
+    <text class="post-title">{{ postTitle(post) }}</text>
+    <text v-if="detail && post.body" class="body post-body">{{ post.body }}</text>
+    <PostGallery :post="post" :detail="detail" :preview="preview" :visible="visible" />
+    <view v-if="post.publicView" class="row spread divider">
+      <text class="muted">{{ post.likeCount }} 个赞</text><text class="muted">{{ post.commentCount }} 条评论 {{ detail ? '' : '›' }}</text>
     </view>
   </view>
 </template>
 <script setup lang="uts">
-import type { Post } from '../catalog.uts'
-defineProps<{ post: Post, detail: boolean }>()
+import { computed, ref, watch } from 'vue'
+import { postTitle, statusLabel } from '@/features/community/community.uts'
+import type { Post } from '@/features/community/community.uts'
+import PostGallery from './PostGallery.uvue'
+const props = defineProps<{ post: Post, detail: boolean, preview: boolean, visible: boolean }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
+const avatar = computed(() => props.post.authorAvatar ?? '')
+const avatarFailed = ref(false)
+watch(avatar, () => { avatarFailed.value = false })
 </script>
 <style scoped>
 @import '@/styles/page.css';
-.post-avatar { width: 38px; height: 38px; border-radius: 19px; background: #f6ecd8; }
+.post-card { gap: 12px; border-color: #efe4d3; box-shadow: 0 3px 10px #664e2c14; }
+.post-avatar { width: 38px; height: 38px; border-radius: 19px; background: #f6ecd8; flex-shrink: 0; }
+.author { gap: 2px; }
+.author-name, .post-title { font-size: 16px; line-height: 22px; color: #332c23; font-weight: 700; }
+.post-body { white-space: pre-wrap; }
 </style>

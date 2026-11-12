@@ -7,8 +7,8 @@ if (saved != null && saved.length > 0) {
   try { session.value = JSON.parse<Session>(saved) } catch (_) { uni.removeStorageSync('fy-session') }
 }
 export function clearSession(): void { session.value = null; uni.removeStorageSync('fy-session') }
-export async function api<T>(action: string, payload: UTSJSONObject = {}): Promise<T> {
-  const result = await uniCloud.callFunction<Reply<T>>({ name: 'fy-api', data: { action, payload, token: session.value?.token ?? '' } })
+export async function api<T>(action: string, payload: UTSJSONObject = {}, timeout = 60000): Promise<T> {
+  const result = await uniCloud.callFunction<Reply<T>>({ name: 'fy-api', timeout, data: { action, payload, token: session.value?.token ?? '' } })
   if (result.result.code !== 'OK') {
     if (result.result.code === 'AUTH_REQUIRED') clearSession()
     throw new Error(result.result.code)
@@ -20,21 +20,22 @@ export async function login(): Promise<void> {
   if (loginTask != null) return loginTask!
   const task = async (): Promise<void> => {
     const code = await new Promise<string>((resolve, reject) => {
-      uni.login({ provider: 'weixin', success: res => resolve(res.code!), fail: () => reject(new Error('LOGIN_FAILED')) })
+      const timer = setTimeout(() => reject(new Error('LOGIN_TIMEOUT')), 15000)
+      uni.login({ provider: 'weixin', success: res => { clearTimeout(timer); resolve(res.code!) }, fail: () => { clearTimeout(timer); reject(new Error('LOGIN_FAILED')) } })
     })
-    const value = await api<Session>('wxLogin', { code })
+    const value = await api<Session>('wxLogin', { code }, 20000)
     session.value = value
     uni.setStorageSync('fy-session', JSON.stringify(value))
   }
   loginTask = task()
   try { await loginTask } finally { loginTask = null }
 }
-export async function secured<T>(action: string, payload: UTSJSONObject = {}): Promise<T> {
+export async function secured<T>(action: string, payload: UTSJSONObject = {}, timeout = 60000): Promise<T> {
   if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
-  try { return await api<T>(action, payload) } catch (e) {
-    if (session.value != null) throw e
+  try { return await api<T>(action, payload, timeout) } catch (e) {
+    if ((e as Error).message !== 'AUTH_REQUIRED') throw e
     await login()
-    return await api<T>(action, payload)
+    return await api<T>(action, payload, timeout)
   }
 }
 export function showError(): void { uni.showToast({ title: '操作未完成，请检查网络或配置后重试，草稿已保留', icon: 'none' }) }

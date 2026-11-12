@@ -1,0 +1,40 @@
+<template>
+  <view class="ops">
+    <view class="tools"><text class="heading">运营工作台</text><button :disabled="busy" @click="load">刷新</button></view>
+    <text v-if="message.length > 0" class="muted">{{ message }}</text>
+    <view v-if="overview != null" class="metrics">
+      <button class="metric" @click="emit('review', 'pending')"><text>待审帖子</text><text class="value">{{ overview?.pendingPosts }}</text></button>
+      <button class="metric" @click="emit('review', 'comments')"><text>待审评论</text><text class="value">{{ overview?.pendingComments }}</text></button>
+      <button class="metric" @click="emit('review', 'reports')"><text>待处理举报</text><text class="value">{{ overview?.openReports }}</text></button>
+      <button class="metric" @click="emit('review', 'published')"><text>公开帖子</text><text class="value">{{ overview?.publishedPosts }}</text></button>
+      <template v-if="overview?.activeAccounts != null">
+        <view class="metric"><text>正常账户</text><text class="value">{{ overview?.activeAccounts }}</text></view>
+        <view class="metric"><text>启用路线</text><text class="value">{{ overview?.activeRoutes }}</text></view>
+        <view class="metric"><text>进行中合作</text><text class="value">{{ overview?.activeCoops }}</text></view>
+        <view class="metric"><text>准备中或进行中的 PK</text><text class="value">{{ overview?.activePk }}</text></view>
+      </template>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import { ref } from 'vue'
+import { api } from '@/features/api.uts'
+type Overview = { pendingPosts: number, pendingComments: number, openReports: number, publishedPosts: number, activeAccounts?: number, activeRoutes?: number, activeCoops?: number, activePk?: number }
+const emit = defineEmits<{ (event: 'review', group: string): void }>()
+const overview = ref<Overview | null>(null), busy = ref(false), message = ref('')
+onMounted(() => { load() })
+async function load(): Promise<void> {
+  if (busy.value) return
+  busy.value = true; message.value = '加载中…'
+  try { overview.value = await api<Overview>('communityOverview'); message.value = '' }
+  catch (_) { message.value = '暂时无法读取工作台，请刷新。' }
+  finally { busy.value = false }
+}
+</script>
+<style scoped>
+.ops { display: flex; flex-direction: column; gap: 14px; }
+.tools, .metrics { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
+.metric { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; background: #fffef7; padding: 16px; border-radius: 12px; min-width: 145px; margin: 0; border: 1px solid #e1e7d7; }
+.value { font-size: 24px; font-weight: 700; color: #304c37; }
+.muted { color: #675d50; }
+</style>
