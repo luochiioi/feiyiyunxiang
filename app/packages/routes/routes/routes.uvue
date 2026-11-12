@@ -9,7 +9,7 @@
       <view v-for="item in routes" :key="item.id" class="card" @click="showRoute(item.id)">
         <image class="cover" src="/packages/routes/static/silk-cover.jpg" mode="aspectFill" />
         <view class="row spread"><text class="heading">{{ item.name }}</text><text class="tag">{{ item.region }}</text></view>
-        <text class="body">{{ item.description }}</text>
+        <text class="body">{{ item.description.split('\n\n')[0] }}</text>
         <text class="muted">{{ item.id === mapState.routeId ? '当前路线 · ' : '' }}{{ item.total }} 项探索任务</text>
         <button class="secondary" @click.stop="showRoute(item.id)">查看路线</button>
       </view>

@@ -14,7 +14,12 @@ export const activeRun = shallowRef<RunProgress | null>(null)
 export const catalogError = shallowRef(false)
 export async function refreshCatalog(): Promise<void> {
   if (demoEnabled) return
-  try { published.value = await api<PublishedRoute[]>('catalog'); catalogError.value = false } catch (_) { catalogError.value = true }
+  try {
+    const routes = await api<PublishedRoute[]>('catalog')
+    const official = routes.filter(route => !route.testOnly)
+    published.value = process.env.NODE_ENV === 'development' && official.length === 0 ? routes : official
+    catalogError.value = false
+  } catch (_) { catalogError.value = true }
   if (session.value != null) {
     const uid = session.value!.uid
     const key = 'fy-run-' + uid

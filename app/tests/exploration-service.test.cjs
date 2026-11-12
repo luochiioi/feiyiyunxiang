@@ -401,15 +401,22 @@ test('scripted chapter draft previews the five published acts without altering t
 
 test('museum visit presets unlock their culture after a valid outdoor clue check-in', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../../admin/features/stage-three-content.uts'), 'utf8')
-  const { macauMuseumVisit, hunanMuseumVisit } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64'))
-  const { s, admin, a } = setup()
-  for (const [visit, activityId, radius, acts] of [
-    [macauMuseumVisit(), 'tile', 100, [2, 3, 4]],
-    [hunanMuseumVisit(), 'quiz', 80, [5, 6]]
+  const { museumRouteDraft } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64'))
+  const { repo, admin, a } = setup()
+  const s = createService({ repo, allowTestContent: false })
+  for (const [route, episode, museum, activityId, radius, acts] of [
+    [museumRouteDraft(true), '上集', '澳门博物馆', 'tile', 100, [2, 3, 4]],
+    [museumRouteDraft(false), '下集', '湖南湘绣博物馆', 'quiz', 80, [5, 6]]
   ]) {
-    const node = visit.node
-    const route = { ...draft, id: node.id, name: visit.name, museum: visit, nodes: [node], culture: visit.culture }
+    const [node] = route.nodes
     const preview = await s.previewDraft(admin, route)
+    assert.equal(preview.name, '海丝瓷绣·一念归期（' + episode + '）')
+    assert.equal(preview.museum.name, museum)
+    assert.equal(preview.testOnly, false)
+    const sections = preview.description.split('\n\n')
+    assert.ok(sections.length >= 5)
+    assert.match(sections[1], episode === '上集' ? /澳门博物馆前地112号/ : /车站北路39号/)
+    assert.match(sections[2], episode === '上集' ? /国际通商口岸/ : /针尖之源/)
     assert.equal(preview.nodes[0].radius, radius)
     assert.deepEqual(preview.culture.chapters.map(chapter => chapter.act), acts)
     for (const chapter of preview.culture.chapters) {
@@ -417,7 +424,13 @@ test('museum visit presets unlock their culture after a valid outdoor clue check
       if (asset != null) assert.ok(fs.existsSync(path.join(__dirname, '../packages/story/static', asset + '.jpg')))
     }
     await s.saveDraft(admin, route)
+    await assert.rejects(s.publish(admin, { id: route.id, revision: 1 }), /CONTENT_REVIEW_REQUIRED/)
+    const saved = await repo.get('fy-drafts', route.id)
+    await repo.put('fy-drafts', route.id, { ...saved, contentVerified: true })
     await s.publish(admin, { id: route.id, revision: 1 })
+    const published = (await s.catalog()).find(item => item.id === route.id)
+    assert.equal(published.name, route.name)
+    assert.equal(published.nodes[0].clue.answer, undefined)
     const { id: runId } = await s.start(a, { routeId: route.id, requestId: 'start-' + route.id })
     assert.equal((await s.activityStatus(a, { runId, activityId })).unlocked, false)
     const payload = { runId, nodeId: node.id, requestId: 'visit-' + node.id, latitude: node.latitude, longitude: node.longitude, clueAnswer: node.clue.answer }

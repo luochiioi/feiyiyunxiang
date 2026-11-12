@@ -60,13 +60,29 @@ export function scriptedContent(nodeIds: string[]): CultureContent {
 
 export type MuseumVisit = { name: string, description: string, node: DraftNode, culture: CultureContent }
 
+export function museumRouteDraft(macau: boolean) {
+  const visit = macau ? macauMuseumVisit() : hunanMuseumVisit()
+  return {
+    id: macau ? 'yinian-guiqi-macau' : 'yinian-guiqi-hunan',
+    name: macau ? '海丝瓷绣·一念归期（上集）' : '海丝瓷绣·一念归期（下集）',
+    region: macau ? '澳门' : '湖南',
+    description: visit.description,
+    revision: 0,
+    testOnly: false,
+    museum: { name: visit.name, description: visit.description },
+    viewport: { latitude: visit.node.latitude, longitude: visit.node.longitude, scale: 16 },
+    nodes: [visit.node],
+    culture: visit.culture
+  }
+}
+
 export function macauMuseumVisit(): MuseumVisit {
   const node: DraftNode = {
     id: 'macau-museum-entrance', title: '澳门博物馆 · 大炮台入口一带',
-    description: '澳门博物馆前地112号。请在馆外允许停留和取景的位置拍摄到访照，避开他人正脸并遵守现场指示。完成线索打卡后可进入瓷砖任务。',
+    description: '到澳门博物馆前地112号，在大炮台馆外开放区域停稳后获取定位。拍一张能看出到访地点的照片，例如入口标识与周边环境，避开他人正脸。读完线索并填写密码后一起提交。',
     latitude: 22.194192, longitude: 113.547292, radius: 100,
     clue: {
-      story: '葡萄牙的釉面装饰砖常称 azulejo。在一些葡萄牙作品中，钴带来蓝色，蓝纹与白底形成对比。装饰砖也可以排列成一整面墙的画面。',
+      story: '澳门博物馆的一楼常设展介绍澳门作为通商口岸的历史，丝绸、瓷器、茶叶和漆器曾由澳门运往外地。上集借这段交流历史认识葡萄牙建筑装饰：釉面装饰砖称 azulejo，部分蓝白作品用钴着色，多块砖可拼成整幅图案。小程序题图是纹样示意。',
       question: '这种釉面装饰砖的葡语名称是什么？请用大写字母输入。',
       answer: 'AZULEJO'
     }
@@ -81,16 +97,24 @@ export function macauMuseumVisit(): MuseumVisit {
     },
     chapters: (script.chapters ?? []).filter(chapter => chapter.act <= 4)
   }
-  return { name: '澳门博物馆', description: '在大炮台认识澳门的历史与中西文化交流，再从蓝白装饰砖的图案和配色进入海丝故事。', node, culture }
+  const description = [
+    '从大炮台走进澳门博物馆，沿三层常设展了解澳门从通商口岸到今日城市的变化，再完成蓝白瓷砖纹样任务。',
+    '到馆｜澳门博物馆前地112号。抵达大炮台后按现场标识前往博物馆入口，在馆外开放区域完成定位、到访照片和线索密码。参观开放与购票安排以馆方当天公告为准。',
+    '一楼｜先看澳门早期历史，重点找「国际通商口岸」展区。对照外运的丝绸、瓷器与传入的钟表、毛织品，想一想货物如何随商船在不同地区流通。',
+    '二楼｜看传统行业、民间艺术与日常生活。选一个你熟悉的生活场景，例如饼铺或凉茶铺，留意它如何连接澳门的地方生活。',
+    '三楼｜看当代澳门的城市面貌、文学与艺术。离馆前选一件有印象的作品，和一楼的通商故事对照，想想交流怎样改变城市。',
+    '小程序任务｜入口打卡后，可完成蓝白瓷砖配色及纹样辨认，阅读第二至四幕。船帆、海浪与作坊是剧情与学习插图。馆内拍摄须遵守现场指示，避免使用闪光灯、脚架或自拍器。'
+  ].join('\n\n')
+  return { name: '澳门博物馆', description, node, culture }
 }
 
 export function hunanMuseumVisit(): MuseumVisit {
   const node: DraftNode = {
     id: 'hunan-museum-entrance', title: '湖南湘绣博物馆 · 馆外入口一带',
-    description: '长沙市芙蓉区车站北路39号。请在馆外允许停留和取景的位置拍摄到访照，避免拍到观众正脸。完成线索打卡后可进入湘绣任务。',
+    description: '到长沙市芙蓉区车站北路39号，在湖南湘绣博物馆馆外开放区域停稳后获取定位。拍摄入口标识与周边环境作为到访照片，避开行人正脸。读完线索并填写密码后一起提交。',
     latitude: 28.198609, longitude: 113.009827, radius: 80,
     clue: {
-      story: '湘绣于2006年列入第一批国家级非物质文化遗产名录。湘绣常借助劈丝和掺针表现细节与深浅变化。仔细看，绣线也有走向和层次。',
+      story: '湖南湘绣博物馆的基本陈列以「针尖上的湖湘之美」为主题，呈现湘绣工艺的发展。湘绣于2006年列入第一批国家级非物质文化遗产代表性项目名录。劈丝让线更细，掺针可表现浓淡与色阶。观察一段针脚，找出方向改变或颜色接续的位置。',
       question: '湘绣在哪一年列入第一批国家级非物质文化遗产名录？请输入四位年份。',
       answer: '2006'
     }
@@ -109,7 +133,14 @@ export function hunanMuseumVisit(): MuseumVisit {
     ] },
     chapters: (script.chapters ?? []).filter(chapter => chapter.act >= 5)
   }
-  return { name: '湖南湘绣博物馆', description: '从长沙的湘绣传统出发，观察针脚和色阶，完成辨认题及四张观察卡。', node, culture }
+  const description = [
+    '到长沙湖南湘绣博物馆，沿「针尖上的湖湘之美」四个主题展厅追溯湘绣，再用辨认题和观察卡比较针脚、色阶与层次。',
+    '到馆｜长沙市芙蓉区车站北路39号。先查看馆方参观公告与预约安排。抵达后在馆外开放区域完成定位、到访照片和线索密码，再按场馆指引入内。',
+    '针尖之源、针尖之兴｜先从展签了解湘绣的源流和发展。挑一件有图案的绣品，先辨认题材，再从一个细节观察丝线如何沿着花瓣或叶片的轮廓转向。',
+    '针尖之盛、针尖之梦｜再看艺人作品与当代创新。比较一件作品的深浅过渡，观察细线和不同方向的针脚怎样塑造层次。如遇双面绣展品，可在允许的观察位置比较正反两面。',
+    '小程序任务｜入口打卡后，完成湘绣辨认题，依次阅读走向、长短与劈丝、色阶与掺针、层次四张观察卡，再读第五、六幕。馆内实际陈列和拍摄要求以现场为准。'
+  ].join('\n\n')
+  return { name: '湖南湘绣博物馆', description, node, culture }
 }
 
 export function macauContent(nodeIds: string[]): CultureContent {

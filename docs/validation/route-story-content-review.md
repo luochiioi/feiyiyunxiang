@@ -11,6 +11,11 @@
 
 高德开放平台在中国大陆和澳门使用高德坐标系。两馆各配置一个馆外实体站，后续阶段在小程序内完成。表中半径是应用的距离判定参数；允许停留和取景的范围以现场标识及馆方要求为准。双机联调需复测入口位置与半径边界。[高德坐标系说明](https://lbs.amap.com/faq/advisory/others/39840/)
 
+## 上、下集参观说明
+
+- 澳门上集按常设展三层编排观察任务，涵盖一楼通商、二楼传统行业与民间生活、三楼当代城市和艺术。定位照片在馆外入口区域完成，蓝白瓷砖活动在小程序内进行。[常设展览](https://www.macaumuseum.gov.mo/zh-hans/exhibitions/75001) · [参观资讯](https://www.macaumuseum.gov.mo/zh-hans/visit/access) · [拍摄须知](https://www.macaumuseum.gov.mo/visit/photographmustknow)
+- 湖南下集按馆方四个主题展厅编排，结合展签和作品观察湘绣历史、纹样、线条、色阶与双面绣。定位照片在馆外完成，辨认及学习卡使用原创示意图。[湖南湘绣博物馆馆情](https://hnembmusuem.com/aboutUs.html) · [参观指南](https://www.hnembmusuem.com/visitReservation.html) · [国家级非遗名录](https://www.ihchina.cn/project_details/13982.html)
+
 ## 图片及科普资料
 
 | 用途 | 可用来源或待核项目 |

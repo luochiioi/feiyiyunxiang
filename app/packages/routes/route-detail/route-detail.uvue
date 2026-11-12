@@ -9,7 +9,7 @@
           <image class="cover" src="/packages/routes/static/silk-cover.jpg" mode="aspectFill" />
           <text class="tag">{{ route.region }} · 海丝瓷绣</text>
           <text class="title">{{ route.name }}</text>
-          <text class="body">{{ route.description }}</text>
+          <text class="body">{{ routeSections[0] }}</text>
           <text class="muted">探索进度 {{ route.done }} / {{ route.total }}</text>
           <ProgressBar :value="route.done / route.total * 100" color="#52704a" :height="12" :show-label="false" />
         </view>
@@ -28,6 +28,10 @@
         </view>
         <button v-if="runId == null" class="secondary" @click="openStory">查看剧情章节</button>
         <button v-if="runId == null" class="secondary" @click="showOnMap">在地图查看路线</button>
+        <view v-if="routeSections.length > 1" class="card">
+          <text class="heading">实地参观</text>
+          <text v-for="section in routeSections.slice(1)" :key="section" class="body">{{ section }}</text>
+        </view>
       </template>
       <view v-else-if="runId != null" class="card">
         <text class="body">{{ loading ? '正在读取探索进度…' : '暂时无法读取这次探索。' }}</text>
@@ -63,6 +67,7 @@ const route = computed(() => {
   if (content.value != null) return summarizeRoute(content.value!, progress.value)
   return runId.value == null ? findRoute(id.value) : null
 })
+const routeSections = computed(() => (route.value?.description ?? '').split('\n\n'))
 const activities = computed(() => content.value?.activities ?? [])
 const nodes = computed(() => {
   const snapshot = content.value
