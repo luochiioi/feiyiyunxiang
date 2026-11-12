@@ -4,11 +4,11 @@
     <view class="content">
       <view class="card green">
         <text class="title">可选玩法</text>
-        <text class="body">双方各自完成同一路线的全部节点。完成全部打卡后，率先提交结算的一方获胜。失败方收到一项失败任务，完成或拒绝后才能参加下一场。</text>
+        <text class="body">双方各自完成同一路线的全部节点。完成全部打卡后，率先提交结算的一方获胜。胜者从路线彩蛋中挑一项交给败者，败者确认完成后才能参加下一场。</text>
       </view>
       <view class="card">
         <text class="heading">规则</text>
-        <text class="body">邀请 24 小时内有效。双方都点就绪后开始计时，超过 24 小时未完成则本场作废，不产生失败任务。</text>
+        <text class="body">邀请 24 小时内有效。双方都点就绪后开始计时，超过 24 小时未完成则本场作废，不产生失败任务。结算后未选彩蛋前，败者不受影响。</text>
         <text class="muted">用时以服务端记录为准，不看本地计时。</text>
       </view>
       <view v-if="loading" class="card"><text class="body">正在读取 PK…</text></view>
@@ -29,6 +29,17 @@
           <button v-if="match.myRunId != null" class="primary" :disabled="busy" @click="explore">开始探索</button>
           <button class="secondary" :disabled="busy" @click="settle">结算 PK</button>
         </template>
+        <view v-if="match.eggPending" class="card">
+          <text class="heading">挑选彩蛋</text>
+          <text class="body">你赢下了本场。选一项彩蛋交给旅伴，选定后才生成对方的失败任务。</text>
+          <text v-if="eggs.length === 0" class="muted">正在读取彩蛋…</text>
+          <view v-for="egg in eggs" :key="egg.id" class="egg">
+            <text class="heading">{{ egg.title }}</text>
+            <text class="body">{{ egg.description }}</text>
+            <text class="muted">点位 · {{ egg.nodeTitle }}</text>
+            <button class="secondary" :disabled="busy" @click="pickEgg(egg.id)">选这个</button>
+          </view>
+        </view>
         <button class="secondary" :disabled="busy" @click="load">刷新对局</button>
       </template>
       <PartnerInviteForm v-else :coop="false" :friends="friends" :busy="busy" :enabled="pkEnabled" @invite="invite" />
@@ -42,17 +53,18 @@ import PartnerInviteForm from '../components/PartnerInviteForm.uvue'
 import { computed, ref } from 'vue'
 import { openRouteDetail } from '@/features/navigation.uts'
 import { session, showError } from '@/features/api.uts'
-import { answerPk, loadAssignment, loadInviteFriends, loadMyPk, markReady, partnerView, settlePk, startPk } from '@/features/partner/partner.uts'
-import type { PartnerFriend, PkView } from '@/features/partner/partner.uts'
+import { answerPk, choosePkEgg, loadAssignment, loadInviteFriends, loadMyPk, loadPkEggs, markReady, partnerView, settlePk, startPk } from '@/features/partner/partner.uts'
+import type { PartnerFriend, PkEgg, PkView } from '@/features/partner/partner.uts'
 
 const match = ref<PkView | null>(null)
+const eggs = ref<PkEgg[]>([])
 const friends = ref<PartnerFriend[]>([])
 const busy = ref(false)
 const loading = ref(false)
 const loadFailed = ref(false)
 const pkEnabled = ref(false)
 const status = computed(() => match.value?.status ?? '')
-const statusText = computed(() => status.value === 'running' ? '进行中' : status.value === 'preparing' ? '等待双方就绪' : '待接受')
+const statusText = computed(() => status.value === 'running' ? '进行中' : status.value === 'preparing' ? '等待双方就绪' : status.value === 'settled' ? '已结束' : '待接受')
 const canAnswer = computed(() => status.value === 'invited' && match.value?.invitedBy !== session.value?.uid)
 const alreadyReady = computed(() => match.value?.ready.includes(session.value?.uid ?? '') === true)
 const startedAt = computed(() => {
@@ -68,6 +80,8 @@ async function load(): Promise<void> {
   loadFailed.value = false
   try {
     match.value = await loadMyPk()
+    eggs.value = []
+    if (match.value != null && match.value.eggPending) eggs.value = await loadPkEggs(match.value.id)
     if (match.value == null) {
       const assignment = await loadAssignment()
       pkEnabled.value = partnerView({
@@ -82,7 +96,7 @@ async function load(): Promise<void> {
   finally { loading.value = false }
 }
 
-async function invite(code: string, routeId: string, _seat: string): Promise<void> {
+async function invite(code: string, routeId: string, _seat: string, _activities: string[]): Promise<void> {
   if (busy.value || !pkEnabled.value) return
   busy.value = true
   try {
@@ -135,6 +149,18 @@ async function settle(): Promise<void> {
   finally { busy.value = false }
 }
 
+async function pickEgg(eggId: string): Promise<void> {
+  const id = match.value?.id
+  if (busy.value || id == null) return
+  busy.value = true
+  try {
+    await choosePkEgg(id, eggId)
+    await load()
+    uni.showToast({ title: '彩蛋已交给旅伴', icon: 'none' })
+  } catch (error) { showPkError(error as Error) }
+  finally { busy.value = false }
+}
+
 function showPkError(error: Error): void {
   if (error.message === 'ASSIGNMENT_PENDING') {
     pkEnabled.value = false
@@ -149,4 +175,5 @@ function showPkError(error: Error): void {
 
 <style scoped>
 @import '@/styles/page.css';
+.egg { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid #d7dfce; }
 </style>

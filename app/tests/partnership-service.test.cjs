@@ -86,7 +86,11 @@ const coopDraft = {
   culture: {
     tile: { title: '蓝白瓷砖配色', after: ['n1'] },
     quiz: { title: '湘绣辨认', after: ['n2'], prompt: '哪一幅是湘绣？', explanation: '针脚细密的是湘绣。',
-      options: [{ id: 'a', label: '甲', illustration: 'threads' }, { id: 'b', label: '乙', illustration: 'tile' }], answer: 'a' }
+      options: [{ id: 'a', label: '甲', illustration: 'threads' }, { id: 'b', label: '乙', illustration: 'tile' }], answer: 'a' },
+    eggs: [
+      { id: 'e1', title: '找回一块蓝白瓷砖', description: '在第一站附近找到蓝白瓷砖纹样。', nodeId: 'n1' },
+      { id: 'e2', title: '找一段转向的针脚', description: '在第二站附近找到改变方向的线条。', nodeId: 'n2' }
+    ]
   }
 }
 
@@ -207,11 +211,76 @@ test('coop invite only reaches friends and expires after 24 hours', async () => 
   assert.equal((await f.repo.list('fy-runs', { purpose: 'coop' })).length, 0)
 })
 
-async function pkStarted(start = true) {
+test('coop lets each side pick their own culture task while nodes stay fixed', async () => {
+  const cards = ['line', 'color', 'layer', 'direction'].map(id => ({ id, title: id, hotspot: '观察', body: '针法示意' }))
+  const draft = { ...coopDraft, culture: {
+    ...coopDraft.culture,
+    tileQuiz: { title: '瓷砖辨认', after: ['n1'], prompt: '哪一张是船帆？', explanation: '三角形的是船帆。',
+      options: [{ id: 'a', label: '甲', illustration: 'tile-sail' }, { id: 'b', label: '乙', illustration: 'tile' }], answer: 'a' },
+    learning: { title: '针法学习', after: ['n2'], cards }
+  } }
+  const f = await coopReady(false, draft)
+  await f.p.respondCoop(f.b, { teamId: f.team.id, accept: false })
+  const team = await f.p.inviteCoop(f.a, { code: f.codes.b, routeId: f.routeId, requestId: 'co-2', activities: ['tile'] })
+  const view = await f.p.coopStatus(f.b, { teamId: team.id })
+  assert.deepEqual(view.myTaskOptions.map(task => task.id), ['quiz', 'learning'])
+  assert.deepEqual(view.partnerTasks.map(task => task.id), ['tile'])
+  await f.p.respondCoop(f.b, { teamId: team.id, accept: true, activities: ['learning'] })
+  const accepted = await f.p.coopStatus(f.b, { teamId: team.id })
+  assert.deepEqual(accepted.myTasks.map(task => task.id), ['learning'])
+  assert.deepEqual(accepted.partnerTasks.map(task => task.id), ['tile'])
+  assert.deepEqual(accepted.myProgress, { done: 0, total: 2 })
+  const stored = await f.repo.get('fy-teams', team.id)
+  const macauRunId = stored.runs[f.a.uid]
+  for (const nodeId of stored.seats.macauNodes) {
+    await f.repo.put('fy-checkins', key(macauRunId, nodeId), { uid: f.a.uid, runId: macauRunId, nodeId, createdAt: f.now() })
+  }
+  const macauRun = await f.repo.get('fy-runs', macauRunId)
+  await f.repo.put('fy-runs', macauRunId, { ...macauRun, culture: { tile: { pattern: 'sail', palette: 'cobalt' } } })
+  const runId = stored.runs[f.b.uid]
+  for (const nodeId of stored.seats.hunanNodes) {
+    await f.repo.put('fy-checkins', key(runId, nodeId), { uid: f.b.uid, runId, nodeId, createdAt: f.now() })
+  }
+  const run = await f.repo.get('fy-runs', runId)
+  // 只完成所选的学习卡，未选的辨认题留空也能结算。
+  await f.repo.put('fy-runs', runId, { ...run, culture: { learning: true } })
+  assert.equal((await f.p.settleCoop(f.a, { teamId: team.id })).alreadySettled, false)
+})
+
+test('coop rejects tasks outside the seat or an empty selection', async () => {
+  const f = await coopReady(false)
+  await f.p.respondCoop(f.b, { teamId: f.team.id, accept: false })
+  await assert.rejects(f.p.inviteCoop(f.a, { code: f.codes.b, routeId: f.routeId, requestId: 'co-bad', activities: ['quiz'] }), /INVALID_TASKS/)
+  await assert.rejects(f.p.inviteCoop(f.a, { code: f.codes.b, routeId: f.routeId, requestId: 'co-empty', activities: [] }), /INVALID_TASKS/)
+  const team = await f.p.inviteCoop(f.a, { code: f.codes.b, routeId: f.routeId, requestId: 'co-ok', activities: ['tile'] })
+  await assert.rejects(f.p.respondCoop(f.b, { teamId: team.id, accept: true, activities: ['tile'] }), /INVALID_TASKS/)
+  await assert.rejects(f.p.respondCoop(f.b, { teamId: team.id, accept: true, activities: [] }), /INVALID_TASKS/)
+  assert.equal((await f.p.respondCoop(f.b, { teamId: team.id, accept: true, activities: ['quiz'] })).status, 'active')
+})
+
+test('teams saved before task selection still need every seat task', async () => {
+  const cards = ['line', 'color', 'layer', 'direction'].map(id => ({ id, title: id, hotspot: '观察', body: '针法示意' }))
+  const draft = { ...coopDraft, culture: { ...coopDraft.culture, learning: { title: '针法学习', after: ['n2'], cards } } }
+  const f = await coopReady(true, draft)
+  const stored = await f.repo.get('fy-teams', f.team.id)
+  const legacy = { ...stored }
+  delete legacy.tasks
+  await f.repo.put('fy-teams', f.team.id, legacy)
+  assert.deepEqual((await f.p.coopStatus(f.b, { teamId: f.team.id })).myTasks.map(task => task.id), ['quiz', 'learning'])
+  await finishSeat(f, f.a, 'macau')
+  await finishSeat(f, f.b, 'hunan')
+  await assert.rejects(f.p.settleCoop(f.b, { teamId: f.team.id }), /NOT_READY/)
+  const runId = stored.runs[f.b.uid]
+  const run = await f.repo.get('fy-runs', runId)
+  await f.repo.put('fy-runs', runId, { ...run, culture: { quiz: true, learning: true } })
+  assert.equal((await f.p.settleCoop(f.b, { teamId: f.team.id })).alreadySettled, false)
+})
+
+async function pkStarted(start = true, draft = coopDraft) {
   const f = await ready()
   f.service = createService({ repo: f.repo, now: () => f.now(), allowTestContent: true })
   const admin = { uid: 'admin', admin: true }
-  await f.service.saveDraft(admin, coopDraft)
+  await f.service.saveDraft(admin, draft)
   await f.service.publish(admin, { id: 'combined', revision: 1 })
   await f.p.requestFriend(f.a, { code: f.codes.b, requestId: 'fr-pk' })
   await f.p.respondFriend(f.b, { requestId: 'fr-pk', accept: true })
@@ -276,8 +345,46 @@ test('concurrent first submissions settle the match exactly once', async () => {
   const winners = results.map(r => r.winner).filter(Boolean)
   assert.equal(new Set(winners).size, 1)
   const loser = winners[0] === f.a.uid ? f.b : f.a
-  assert.equal((await f.p.assignment(loser)).status, 'pending')
+  const winner = winners[0] === f.a.uid ? f.a : f.b
+  // 结算只决定胜负，败者在胜者挑彩蛋前不受影响。
+  assert.equal(await f.p.assignment(loser), null)
+  assert.equal((await f.repo.list('fy-assignments', {})).length, 0)
+  const pending = await f.p.myPk(winner)
+  assert.equal(pending.status, 'settled')
+  assert.equal(pending.eggPending, true)
+  assert.equal(await f.p.myPk(loser), null)
+  const eggs = await f.p.pkEggs(winner, { matchId: f.match.id })
+  assert.deepEqual(eggs.map(egg => egg.id), ['e1', 'e2'])
+  assert.deepEqual(await f.p.pkEggs(loser, { matchId: f.match.id }), [])
+  await assert.rejects(f.p.chooseEgg(loser, { matchId: f.match.id, eggId: 'e1' }), /FORBIDDEN/)
+  assert.equal(await f.p.assignment(loser), null)
+  await f.p.chooseEgg(winner, { matchId: f.match.id, eggId: 'e2' })
+  const task = await f.p.assignment(loser)
+  assert.equal(task.status, 'pending')
+  assert.equal(task.title, '找一段转向的针脚')
+  assert.equal(task.description, '在第二站附近找到改变方向的线条。')
+  assert.equal(task.nodeId, 'n2')
+  assert.equal(task.nodeTitle, '湖南节点')
   assert.equal((await f.repo.list('fy-assignments', {})).length, 1)
+  // 重复提交同一彩蛋幂等，换成别的彩蛋冲突。
+  await f.p.chooseEgg(winner, { matchId: f.match.id, eggId: 'e2' })
+  await assert.rejects(f.p.chooseEgg(winner, { matchId: f.match.id, eggId: 'e1' }), /CONFLICT/)
+  assert.deepEqual(await f.p.pkEggs(winner, { matchId: f.match.id }), [])
+  assert.equal(await f.p.myPk(winner), null)
+})
+
+test('a route without eggs falls back to its first node', async () => {
+  const draft = { ...coopDraft, culture: { tile: coopDraft.culture.tile, quiz: coopDraft.culture.quiz } }
+  const f = await pkStarted(true, draft)
+  await completeAllNodes(f, f.a)
+  await completeAllNodes(f, f.b)
+  const { winner } = await f.p.settlePk(f.a, { matchId: f.match.id })
+  const winnerUser = winner === f.a.uid ? f.a : f.b
+  const loser = winner === f.a.uid ? f.b : f.a
+  const eggs = await f.p.pkEggs(winnerUser, { matchId: f.match.id })
+  assert.deepEqual(eggs.map(egg => egg.id), ['fallback'])
+  await f.p.chooseEgg(winnerUser, { matchId: f.match.id, eggId: 'fallback' })
+  assert.equal((await f.p.assignment(loser)).nodeId, 'n1')
 })
 
 test('an unfinished match expires after 24 hours without an assignment', async () => {

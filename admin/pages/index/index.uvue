@@ -208,7 +208,7 @@ function fillHunan(): void {
   if (nodes.length === 0) { message.value = '湖南模板需要至少一个打卡节点。'; return }
   draft.value.region = '湖南'
   draft.value.cultureUpgrade = null
-  cultureSource.value = JSON.stringify(hunanContent(), null, 2)
+  cultureSource.value = JSON.stringify(hunanContent(nodes.map(node => node.id)), null, 2)
   preview.value = null
   message.value = '已载入湖南开发模板，请核对打卡坐标后校验。'
 }

@@ -129,6 +129,15 @@ test('renaming an administrator preserves their account ID and rejects an occupi
   assert.equal(result.data.username, 'new-operator')
 })
 
+test('PK egg actions are routed and admin cancellation needs an admin session', async () => {
+  const g = gateway()
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: [] })
+  const call = (action, token, payload) => g.main({ action, token, payload })
+  assert.equal((await call('chooseEgg', 'fixture-token', { matchId: 'unknown' })).code, 'INVALID_REQUEST')
+  assert.equal((await call('pkEggs', 'fixture-token', { matchId: 'unknown' })).code, 'NOT_FOUND')
+  assert.equal((await call('cancelPk', 'fixture-token', { matchId: 'unknown' })).code, 'AUTH_REQUIRED')
+})
+
 test('community gateway separates guest reads, author previews and reviewer privileges', async () => {
   const g = gateway()
   const { hashPassword } = nativeRequire('./security')
