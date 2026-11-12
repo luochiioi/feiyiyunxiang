@@ -9,10 +9,11 @@
         </view>
         <view class="card">
           <text class="heading">处理方式</text>
-          <text class="body">可以立即完成。分配满 72 小时后，也可以主动拒绝。</text>
+          <text class="body">可以立即完成，也可以答对好友发来的非遗猜图免除一次。分配满 72 小时后可主动拒绝。</text>
           <text class="muted">{{ rejectHint }}</text>
         </view>
         <button class="primary" :disabled="busy" @click="finish">完成任务</button>
+        <button class="secondary" @click="openPage('/packages/story/guess/guess')">查看好友猜图</button>
         <button v-if="rejectEnabled" class="secondary" :disabled="busy" @click="decline">拒绝任务</button>
       </template>
       <view v-else class="card">
@@ -26,7 +27,7 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 
 import { computed, ref } from 'vue'
-import { decodePageId } from '@/features/navigation.uts'
+import { openPage, decodePageId } from '@/features/navigation.uts'
 import { showError } from '@/features/api.uts'
 import { loadAssignment, finishAssignment, declineAssignment, partnerView } from '@/features/partner/partner.uts'
 

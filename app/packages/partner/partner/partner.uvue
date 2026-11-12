@@ -44,6 +44,12 @@
         <button class="secondary" :disabled="!pkEnabled" @click="openPage('/packages/partner/pk/pk')">进入 PK</button>
       </view>
 
+      <view class="card">
+        <text class="heading">AI 非遗猜图</text>
+        <text class="body">出题给好友，或打开收件箱回答好友发来的题。</text>
+        <button class="secondary" @click="openPage('/packages/story/guess/guess')">进入猜图</button>
+      </view>
+
       <view v-if="assignment != null" class="card">
         <text class="heading">失败任务</text>
         <text class="body">{{ assignmentTitle }}</text>

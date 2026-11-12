@@ -8,7 +8,8 @@ if (saved != null && saved.length > 0) {
 }
 export function clearSession(): void { session.value = null; uni.removeStorageSync('fy-session') }
 export async function api<T>(action: string, payload: UTSJSONObject = {}, timeout = 60000): Promise<T> {
-  const result = await uniCloud.callFunction<Reply<T>>({ name: 'fy-api', timeout, data: { action, payload, token: session.value?.token ?? '' } })
+  const name = action.startsWith('guess') ? 'fy-guess' : 'fy-api'
+  const result = await uniCloud.callFunction<Reply<T>>({ name, timeout, data: { action, payload, token: session.value?.token ?? '' } })
   if (result.result.code !== 'OK') {
     if (result.result.code === 'AUTH_REQUIRED') clearSession()
     throw new Error(result.result.code)
