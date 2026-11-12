@@ -48,3 +48,23 @@ test('directory reads the existing exploration when the device has no active run
   session.value = null
   assert.equal(await readLegacyStorm('', 'run1'), null)
 })
+
+test('scripted opening keeps existing guest checkpoints and restores the new branch', () => {
+  const source = readFileSync(join(__dirname, '../packages/story/story-content.uts'), 'utf8')
+  const script = stripTypeScriptTypes(source.replace(/^export /gm, ''))
+  const data = new Map()
+  const uni = { getStorageSync: key => data.get(key), removeStorageSync: key => data.delete(key) }
+  const { openingReadingKey, savedOpeningPath, openingStorageKey, scriptedOpeningStorageKey, scriptedOpening } =
+    new Function('uni', script + '\nreturn { openingReadingKey, savedOpeningPath, openingStorageKey, scriptedOpeningStorageKey, scriptedOpening }')(uni)
+  assert.equal(openingReadingKey(), scriptedOpeningStorageKey)
+  assert.deepEqual(scriptedOpening.scenes.find(scene => scene.id === 'gallery-choice').choices.map(choice => choice.nextSceneId), ['glass', 'stroll'])
+  data.set(openingStorageKey, JSON.stringify(['map', 'choose', 'tile']))
+  assert.equal(openingReadingKey(), openingStorageKey)
+  assert.deepEqual(savedOpeningPath(), ['map', 'choose', 'tile'])
+  data.set(openingStorageKey, JSON.stringify(['map']))
+  assert.equal(openingReadingKey(), openingStorageKey)
+  assert.deepEqual(savedOpeningPath(), ['map'])
+  data.set(scriptedOpeningStorageKey, JSON.stringify(['gallery', 'gallery-choice', 'stroll', 'glass']))
+  assert.equal(openingReadingKey(), scriptedOpeningStorageKey)
+  assert.deepEqual(savedOpeningPath(), ['gallery', 'gallery-choice', 'stroll', 'glass'])
+})

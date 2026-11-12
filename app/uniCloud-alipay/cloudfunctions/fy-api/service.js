@@ -20,10 +20,22 @@ function validateDraft(p) {
   if (!p.viewport||!coord(p.viewport.latitude,p.viewport.longitude)||!Number.isFinite(p.viewport.scale)||p.viewport.scale<5||p.viewport.scale>20) fail('INVALID_VIEWPORT')
   if (!Array.isArray(p.nodes)||p.nodes.length<1||p.nodes.length>30) fail('INVALID_NODES')
   const ids=new Set()
+  const clueNodes = new Set()
   const nodes=p.nodes.map(n=>{
     if (!id(n.id)||ids.has(n.id)||!text(n.title)||!text(n.description,2000)||!coord(n.latitude,n.longitude)||!Number.isFinite(n.radius)||n.radius<10||n.radius>500) fail('INVALID_NODE')
+    const node = {id:n.id,title:n.title,description:n.description,latitude:n.latitude,longitude:n.longitude,radius:n.radius}
+    if (n.afterClue != null) {
+      if (!clueNodes.has(n.afterClue)) fail('INVALID_CLUE_GATE')
+      node.afterClue = n.afterClue
+    }
+    if (n.clue != null) {
+      const { story, question, answer } = n.clue
+      if (!text(story, 2000) || !text(question, 200) || !text(answer, 80)) fail('INVALID_CLUE')
+      node.clue = { story: story.trim(), question: question.trim(), answer: answer.trim().normalize('NFKC') }
+      clueNodes.add(n.id)
+    }
     ids.add(n.id)
-    return {id:n.id,title:n.title,description:n.description,latitude:n.latitude,longitude:n.longitude,radius:n.radius}
+    return node
   })
   const value = {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:{latitude:p.viewport.latitude,longitude:p.viewport.longitude,scale:p.viewport.scale},nodes}
   if (p.culture != null) value.culture = validateCulture(p.culture, ids)
@@ -39,8 +51,15 @@ function validateDraft(p) {
   }
   return value
 }
-function routeView(v, version) {
-  return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes:v.nodes,version,
+function routeView(v, version, checked = [], includeClues = true) {
+  const nodes = v.nodes.map(({ clue, afterClue, ...node }) => {
+    if (includeClues && clue != null && (afterClue == null || checked.includes(afterClue))) {
+      node.clue = { story: clue.story, question: clue.question }
+    }
+    if (includeClues && afterClue != null) node.afterClue = afterClue
+    return node
+  })
+  return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes,version,
     activities:cultureSummary(v.culture), chapters:(v.culture?.chapters ?? []).map(chapter => chapterGuide(v.culture, chapter)),
     cultureUpgrade:Array.isArray(v.cultureUpgrade), cultureSourceRoutes:v.cultureUpgrade ?? []}
 }
@@ -65,11 +84,16 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     if (match?.status !== 'running' || match.runs?.[run.uid] !== runId) fail('NOT_PENDING')
     if (now() > match.startedAt + 24 * 3600 * 1000) fail('EXPIRED')
   }
+  async function checkClueGate(db, run, runId, node) {
+    if ((run.purpose ?? 'solo') !== 'solo' || node.afterClue == null) return
+    if (!await db.get('fy-checkins', key(runId, node.afterClue))) fail('CLUE_LOCKED')
+  }
   async function runProgress(u, runId, run) {
     run = await attachCulture(run, runId)
     const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
-    const snapshot = routeView(run.snapshot, run.version)
     const purpose = run.purpose ?? 'solo'
+    const checked = checks.map(check => check.nodeId)
+    const snapshot = routeView(run.snapshot, run.version, checked, purpose === 'solo')
     if (purpose === 'coop') {
       const team = await repo.get('fy-teams', run.teamId)
       if (team?.runs?.[u.uid] !== runId) fail('NOT_FOUND')
@@ -80,7 +104,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       snapshot.activities = snapshot.activities.filter(activity => activities.includes(activity.id))
     }
     if (purpose === 'pk') snapshot.activities = []
-    const completed = checks.map(check => check.nodeId).filter(id => snapshot.nodes.some(node => node.id === id))
+    const completed = checked.filter(id => snapshot.nodes.some(node => node.id === id))
     const doneActivities = completedActivities(run)
     const activities = snapshot.activities.filter(activity => doneActivities.includes(activity.id)).map(activity => activity.id)
     return { runId, routeId: run.routeId, version: run.version, purpose, snapshot, completed, activities,
@@ -148,6 +172,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     async mediaBinding(u,p) {
       const bound = await binding(repo,u,p)
       await checkinWindow(repo, bound.run, p.runId)
+      await checkClueGate(repo, bound.run, p.runId, bound.node)
       return bound
     },
     // Only called with server-generated metadata after authenticated byte upload.
@@ -175,6 +200,9 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         const old=await db.get('fy-checkins',cid)
         if (old) return {id:cid,alreadyCompleted:true}
         await checkinWindow(db, run, p.runId)
+        await checkClueGate(db, run, p.runId, node)
+        if ((run.purpose ?? 'solo') === 'solo' && node.clue != null &&
+          (!text(p.clueAnswer, 80) || p.clueAnswer.trim().normalize('NFKC') !== node.clue.answer)) fail('CLUE_INCORRECT')
         if (!coord(p.latitude,p.longitude)) fail('INVALID_LOCATION')
         if (distance(node,p)>node.radius) fail('OUTSIDE_RANGE')
         if(typeof p.note!=='undefined'&&(typeof p.note!=='string'||p.note.length>1000)) fail('INVALID_NOTE')

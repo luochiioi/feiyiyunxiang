@@ -11,7 +11,7 @@
         <text class="title">{{ status.title }}</text>
         <text v-if="!status.unlocked" class="body">{{ status.lockText ?? (activityId === 'learning' ? '完成湘绣辨认及路线指定的打卡后解锁。' : '完成路线指定的定位照片打卡后解锁。') }}</text>
         <template v-else-if="activityId === 'tile'">
-          <text class="muted">图案示意 · 正式瓷砖纹样待校订</text>
+          <text class="muted">原创纹样示意 · 可比较留白、线条与重复排列</text>
           <TilePreview :pattern="selection.pattern" :palette="selection.palette" />
           <text v-if="status.work != null" class="body">作品已保存，可在「我的 → 文化作品」回看。</text>
           <template v-else>
@@ -32,7 +32,7 @@
             <image class="quiz-clue" src="/packages/story/static/macau-shore.jpg" mode="aspectFit" />
             <text class="muted">AI 场景插画</text>
           </template>
-          <text class="muted">辨认图为示意，馆藏图与科普文案待校订。</text>
+          <text class="muted">辨认图为学习示意。</text>
           <view v-for="option in status.options" :key="option.id" class="option">
             <StitchSample v-if="option.illustration.startsWith('threads')" :variant="option.illustration === 'threads-direction' ? 'direction' : 'color'" />
             <TilePreview v-else :pattern="option.illustration === 'tile-sail' ? 'sail' : (option.illustration === 'tile-rose' ? 'rose' : 'geometry')" palette="cobalt" />
@@ -40,14 +40,14 @@
             <template v-if="pickedOptionId === option.id">
               <text v-if="message.length > 0" class="body">{{ message }}</text>
               <text v-if="status.done" class="body">{{ status.explanation }}</text>
-              <button v-if="status.done && scopedRunId == null" class="secondary" @click="showStory">查看已解锁章节</button>
+              <button v-if="status.done && storyLink" class="secondary" @click="showStory">查看已解锁章节</button>
             </template>
           </view>
           <text v-if="status.done && pickedOptionId.length === 0" class="body">{{ status.explanation }}</text>
         </template>
         <template v-else>
           <text class="body">学习进度 {{ status.read?.length ?? 0 }} / {{ status.cards?.length ?? 0 }}</text>
-          <text class="muted">知识卡为开发稿，针法名称、图示与说明待校订。</text>
+          <text class="muted">从走向、长短、色阶和层次观察针脚，图示用于学习。</text>
           <view v-for="card in status.cards" :key="card.id" class="option">
             <text class="heading">{{ card.title }}</text>
             <button class="secondary" :disabled="busy" @click="openCard(card.id)">{{ card.hotspot }} · {{ status.read?.includes(card.id) === true ? '已学习' : '查看' }}</button>
@@ -59,7 +59,7 @@
           </view>
         </template>
         <text v-if="message.length > 0 && (!quizActivity || pickedOptionId.length === 0)" class="muted">{{ message }}</text>
-        <button v-if="scopedRunId == null && activityComplete && (!quizActivity || pickedOptionId.length === 0)" class="secondary" @click="showStory">查看已解锁章节</button>
+        <button v-if="storyLink && activityComplete && (!quizActivity || pickedOptionId.length === 0)" class="secondary" @click="showStory">查看已解锁章节</button>
       </view>
     </view>
   </view>
@@ -92,6 +92,7 @@ const openedCard = ref('')
 const busy = ref(false)
 const message = ref('微信登录后可继续任务并保存进度。')
 const scopedRunId = ref<string | null>(null)
+const storyLink = ref(false)
 let routeId = ''
 let runId = ''
 let draftKey = ''
@@ -127,6 +128,7 @@ async function load(): Promise<void> {
         }
       }
     }
+    storyLink.value = (run.purpose ?? 'solo') === 'solo'
     status.value = result
     message.value = ''
   } catch (error) {

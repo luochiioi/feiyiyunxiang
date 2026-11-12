@@ -16,7 +16,7 @@
         <view class="card">
           <text class="heading">探索任务</text>
           <view v-for="node in nodes" :key="node.id" class="row spread divider menu-row" @click="openPoint(node.id)">
-            <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : '去打卡' }} ›</text>
+            <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : node.locked ? '待解锁' : '去打卡' }} ›</text>
           </view>
         </view>
         <view v-if="activities.length > 0" class="card">
@@ -65,9 +65,13 @@ const route = computed(() => {
 })
 const activities = computed(() => content.value?.activities ?? [])
 const nodes = computed(() => {
-  const snapshot = progress.value?.snapshot
-  if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked }))
-  return snapshot.nodes.map(node => ({ id: snapshot.id + ':' + node.id, title: node.title, checked: progress.value!.completed.includes(node.id) }))
+  const snapshot = content.value
+  if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked, locked: false }))
+  const completed = progress.value?.completed ?? []
+  return snapshot.nodes.map(node => ({
+    id: snapshot.id + ':' + node.id, title: node.title, checked: completed.includes(node.id),
+    locked: node.afterClue != null && !completed.includes(node.afterClue!)
+  }))
 })
 onShow(() => { load() })
 async function load(): Promise<void> {

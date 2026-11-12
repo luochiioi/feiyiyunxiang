@@ -6,6 +6,14 @@
       <template v-else-if="node != null">
         <text class="title">{{ node.title }}</text>
         <text class="body">{{ node.description }}</text>
+        <view v-if="clue != null && !locked" class="card">
+          <text class="heading">展品故事</text>
+          <text class="body">{{ clue?.story }}</text>
+          <template v-if="ready && !completed">
+            <text class="body">{{ clue?.question }}</text>
+            <input v-model="clueAnswer" class="clue-input" :disabled="busy" maxlength="80" placeholder="输入线索密码" />
+          </template>
+        </view>
         <view v-if="completed" class="card green">
           <view class="row spread"><text class="heading">我的打卡</text><text class="tag">仅本人可见</text></view>
           <template v-if="record != null">
@@ -21,6 +29,10 @@
           <text class="body">登录后可以打卡和查看自己的记录。</text>
           <button class="primary" :disabled="busy" @click="signIn">{{ busy ? '正在登录…' : '微信登录' }}</button>
         </view>
+        <view v-else-if="locked" class="card">
+          <text class="body">请先完成上一站的线索打卡，再来探索这一站。</text>
+          <button class="secondary" :disabled="busy" @click="prepare">刷新解锁进度</button>
+        </view>
         <template v-else-if="ready">
           <view class="card green">
             <text class="body">{{ locationStatus }}</text>
@@ -33,7 +45,7 @@
             <button class="secondary" :disabled="busy" @click="choose">拍照 / 选择照片（不超过 1MB）</button>
             <textarea v-model="note" :disabled="busy" maxlength="1000" placeholder="记下这一站（仅自己可见）" @input="saveDraft" />
           </view>
-          <button class="primary" :disabled="busy || photo.length === 0" @click="submit">{{ busy ? '处理中…' : '提交打卡' }}</button>
+          <button class="primary" :disabled="busy || photo.length === 0 || (clue != null && clueAnswer.trim().length === 0)" @click="submit">{{ busy ? '处理中…' : '提交打卡' }}</button>
         </template>
         <text v-else-if="busy" class="body">正在准备打卡…</text>
         <button v-else class="secondary" @click="prepare">重试加载打卡</button>
@@ -52,7 +64,7 @@ import { ref, computed } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { findNode, loadRun, startRoute, refreshCatalog } from '@/features/exploration/catalog.uts'
 import type { PublishedNode, RunProgress } from '@/features/exploration/catalog.uts'
-import type { MapPosition, RouteNode } from '@/features/exploration/types.uts'
+import type { ExhibitClue, MapPosition, RouteNode } from '@/features/exploration/types.uts'
 import { distanceMeters, locationFailureCode, validLocation } from '@/features/exploration/checkin-location.uts'
 import { login, secured, session, requestId } from '@/features/api.uts'
 import { decodePageId } from '@/features/navigation.uts'
@@ -70,6 +82,7 @@ const node = computed<RouteNode | null>(() => {
 })
 const loading = ref(false)
 const ready = ref(false), busy = ref(false), completed = ref(false)
+const clue = ref<ExhibitClue | null>(null), clueAnswer = ref(''), locked = ref(false)
 const record = ref<NodeRecord | null>(null), recordPhoto = ref(''), photoFailed = ref(false)
 const photoUnavailable = ref(false)
 const photo = ref(''), note = ref(''), status = ref('')
@@ -89,6 +102,7 @@ onLoad(async query => {
     await refreshCatalog()
     loading.value = false
   }
+  clue.value = node.value?.clue ?? null
   if (session.value != null) await prepare()
 })
 function saveDraft(): void {
@@ -99,6 +113,8 @@ function saveDraft(): void {
 async function prepare(): Promise<void> {
   if (busy.value || (scopedRunId.value == null && (node.value == null || session.value == null))) return
   busy.value = true
+  ready.value = false
+  locked.value = false
   status.value = ''
   try {
     if (scopedRunId.value != null) {
@@ -108,8 +124,17 @@ async function prepare(): Promise<void> {
     }
     const item = node.value
     if (item == null) throw new Error('NOT_FOUND')
+    if (scopedRun.value != null) exploration = scopedRun.value
+    else if (item.clue != null || item.afterClue != null) {
+      const selected = exploration ?? await startRoute(item.routeId)
+      exploration = await loadRun(item.routeId, selected.runId)
+    }
     if (await loadRecord()) return
-    exploration = scopedRun.value ?? await startRoute(item.routeId)
+    exploration = exploration ?? scopedRun.value ?? await startRoute(item.routeId)
+    const target = currentRunNode()
+    clue.value = target.clue ?? null
+    locked.value = target.afterClue != null && !exploration!.completed.includes(target.afterClue!)
+    if (locked.value) return
     draftKey = 'fy-draft-' + session.value!.uid + '-' + exploration!.runId + '-' + id.value
     const saved = uni.getStorageSync(draftKey) as string
     draft = { requestId: requestId(), base64: '', mime: '', note: '', mediaId: '' }
@@ -137,9 +162,10 @@ async function loadRecord(): Promise<boolean> {
   const owner = session.value?.uid
   if (item == null || owner == null) return false
   const nodeId = item.id.split(':')[1]
-  const payload: UTSJSONObject = scopedRunId.value == null
+  const recordRunId = scopedRunId.value ?? exploration?.runId ?? null
+  const payload: UTSJSONObject = recordRunId == null
     ? { routeId: item.routeId, nodeId }
-    : { routeId: item.routeId, nodeId, runId: scopedRunId.value! }
+    : { routeId: item.routeId, nodeId, runId: recordRunId }
   const saved = await secured<NodeRecord | null>('nodeRecord', payload)
   if (session.value?.uid !== owner) throw new Error('AUTH_REQUIRED')
   if (saved == null) return false
@@ -261,7 +287,7 @@ async function submit(): Promise<void> {
     }
     stage = 'checkin'
     status.value = '正在校验打卡…'
-    await secured<{ id: string }>('checkin', { runId, nodeId, requestId: draft.requestId, mediaId: draft.mediaId, latitude: location.latitude, longitude: location.longitude, note: note.value })
+    await secured<{ id: string }>('checkin', { runId, nodeId, requestId: draft.requestId, mediaId: draft.mediaId, latitude: location.latitude, longitude: location.longitude, note: note.value, clueAnswer: clueAnswer.value })
     completed.value = true
     ready.value = false
     status.value = '打卡已保存，仅本人可见。'
@@ -280,7 +306,9 @@ async function submit(): Promise<void> {
       draft.mediaId = ''
       saveDraft()
       status.value = '照片未保存到云端，请重新提交。草稿已保留。'
-    } else if (code === 'INVALID_IMAGE') status.value = '照片格式不支持，请重新选择 1 MB 以内的 JPG 或 PNG。'
+    } else if (code === 'CLUE_INCORRECT') status.value = '线索密码不正确。请再读一遍展品故事，照片草稿已保留。'
+    else if (code === 'CLUE_LOCKED') status.value = '请先完成上一站的线索打卡。'
+    else if (code === 'INVALID_IMAGE') status.value = '照片格式不支持，请重新选择 1 MB 以内的 JPG 或 PNG。'
     else if (code === 'OUTSIDE_RANGE') status.value = '服务端确认当前位置超出打卡范围。请到达点位后重试，草稿已保留。'
     else if (code === 'AUTH_REQUIRED' || code === 'LOGIN_FAILED') status.value = '登录已失效，请重新登录后重试，草稿已保留。'
     else status.value = (stage === 'photo' ? '照片上传失败' : '打卡提交失败') + '，请检查网络后重试，草稿已保留。'
@@ -289,6 +317,6 @@ async function submit(): Promise<void> {
 </script>
 <style scoped>
 @import '@/styles/page.css';
-textarea { width:100%; box-sizing:border-box; padding:12px; background:#f6f7f0; border-radius:12px; }
+textarea, .clue-input { width:100%; box-sizing:border-box; padding:12px; background:#f6f7f0; border-radius:12px; }
 .saved-photo { width: 100%; height: 220px; }
 </style>
