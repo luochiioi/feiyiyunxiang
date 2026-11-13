@@ -1,6 +1,6 @@
 <template>
-  <view class="tile" :class="palette">
-    <view v-for="(cell, index) in cells" :key="index" class="cell">
+  <view class="tile" :class="palette" :style="{ borderColor: frameColor }">
+    <view v-for="(cell, index) in cells" :key="index" class="cell" :class="{ framed: framePalette != null }">
       <text class="motif">{{ cell }}</text>
     </view>
   </view>
@@ -8,7 +8,8 @@
 
 <script setup lang="uts">
 import { computed } from 'vue'
-const props = defineProps<{ pattern: string, palette: string }>()
+const props = defineProps<{ pattern: string, palette: string, framePalette?: string }>()
+const frameColor = computed(() => props.framePalette === 'mist' ? '#527ea8' : props.framePalette === 'cobalt' ? '#265ba0' : '#2f5282')
 const cells = computed((): string[] => {
   if (props.pattern === 'sail') return ['≈', '▲', '▲', '≈']
   if (props.pattern === 'geometry') return ['◈', '◇', '◇', '◈']
@@ -19,6 +20,7 @@ const cells = computed((): string[] => {
 <style scoped>
 .tile { width: 176px; height: 176px; display: flex; flex-direction: row; flex-wrap: wrap; align-self: center; border: 6px double #2f5282; background: #fffdf6; box-sizing: content-box; }
 .cell { width: 88px; height: 88px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1px solid #c4d5eb; }
+.framed { border: 2px solid #a8bad0; border-radius: 30px; }
 .motif { font-size: 54px; color: #253e70; }
 .cobalt .motif { color: #265ba0; }
 .mist .motif { color: #527ea8; }

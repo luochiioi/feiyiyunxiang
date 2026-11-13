@@ -28,7 +28,7 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 
 import { computed, ref } from 'vue'
-import { decodePageId } from '@/features/navigation.uts'
+import { openPage, decodePageId } from '@/features/navigation.uts'
 import { showError } from '@/features/api.uts'
 import { loadAssignment, finishAssignment, declineAssignment, partnerView } from '@/features/partner/partner.uts'
 

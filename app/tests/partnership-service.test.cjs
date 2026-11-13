@@ -11,6 +11,8 @@ function setup() {
       return [...rows].filter(([k, v]) => k.startsWith(c) && Object.entries(q).every(([a, b]) => v[a] === b)).map(([, v]) => structuredClone(v))
     }
   }
+  db.page = async (collection, filter, { field, after, size }) => (await db.list(collection, filter))
+    .filter(row => row[field] > after).sort((left, right) => right[field] - left[field]).slice(0, size)
   let tail = Promise.resolve()
   const repo = {
     ...db, tx(fn) {
@@ -131,6 +133,20 @@ test('both members can discover a coop invite and see the two seats progress', a
   assert.deepEqual((await f.service.catalog()).find(route => route.id === f.routeId).activities.map(activity => activity.after), [['n1'], ['n2']])
   await f.p.leaveCoop(f.b, { teamId: active.id })
   assert.equal(await f.p.myCoop(f.a), null)
+})
+
+test('an expired coop invite releases both players and cannot create runs', async () => {
+  const f = await coopReady(false)
+  f.advance(24 * 3600 * 1000)
+  assert.equal(await f.p.myCoop(f.a), null)
+  assert.equal(await f.p.myCoop(f.b), null)
+  assert.equal((await f.p.coopStatus(f.a, { teamId: f.team.id })).status, 'expired')
+  await assert.rejects(f.p.respondCoop(f.b, { teamId: f.team.id, accept: true }), /EXPIRED/)
+  assert.equal((await f.repo.get('fy-teams', f.team.id)).status, 'expired')
+  assert.deepEqual(await f.repo.list('fy-runs', {}), [])
+  const fresh = await f.p.inviteCoop(f.b, { code: f.codes.a, routeId: f.routeId, requestId: 'co-fresh' })
+  assert.notEqual(fresh.id, f.team.id)
+  assert.equal((await f.p.myCoop(f.a)).id, fresh.id)
 })
 
 async function finishSeat(f, user, seat) {
@@ -413,4 +429,110 @@ test('an admin cancellation ends the match with no failure task', async () => {
   await f.p.cancelPk({ uid: 'admin', admin: true }, { matchId: f.match.id, reason: '路线关闭' })
   assert.equal(await f.p.assignment(f.a), null)
   assert.equal(await f.p.assignment(f.b), null)
+})
+
+async function bottleReady() {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const { stripTypeScriptTypes } = require('node:module')
+  const source = fs.readFileSync(path.join(__dirname, '../../admin/features/stage-three-content.uts'), 'utf8')
+  const { museumRouteDraft } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64'))
+  const f = await ready()
+  f.service = createService({ repo: f.repo, now: f.now, allowTestContent: false })
+  f.admin = { uid: 'admin', admin: true }
+  f.routes = { macau: museumRouteDraft(true), hunan: museumRouteDraft(false) }
+  f.versions = {}
+  for (const [region, draft] of Object.entries(f.routes)) {
+    await f.service.saveDraft(f.admin, draft)
+    const saved = await f.repo.get('fy-drafts', draft.id)
+    await f.repo.put('fy-drafts', draft.id, { ...saved, contentVerified: true })
+    f.versions[region] = (await f.service.publish(f.admin, { id: draft.id, revision: 1 })).version
+  }
+  return f
+}
+
+test('cross-region bottles require both users and create separate private museum explorations once', async () => {
+  const f = await bottleReady()
+  const a = await f.p.joinBottle(f.a, { region: 'macau', mode: 'cross', requestId: 'bottle-a' })
+  assert.equal(a.status, 'waiting')
+  const b = await f.p.joinBottle(f.b, { region: 'hunan', mode: 'cross', requestId: 'bottle-b' })
+  assert.equal(b.status, 'matched')
+  assert.deepEqual(Object.keys(b.partner).sort(), ['nickname', 'region'])
+  assert.equal(b.partner.region, 'macau')
+  assert.equal(await f.p.bottleStatus(f.c), null)
+  await assert.rejects(f.p.respondBottle(f.c, { matchId: b.matchId, accept: true }), /NOT_FOUND/)
+  await f.p.respondBottle(f.b, { matchId: b.matchId, accept: true })
+  assert.deepEqual(await f.repo.list('fy-runs', {}), [])
+  const payload = { matchId: b.matchId, accept: true }
+  const [accepted, replay] = await Promise.all([f.p.respondBottle(f.a, payload), f.p.respondBottle(f.a, payload)])
+  assert.equal(accepted.status, 'paired')
+  assert.deepEqual(accepted, replay)
+  assert.equal((await f.repo.list('fy-runs', {})).length, 2)
+  assert.equal((await f.p.friends(f.a)).length, 0)
+  await assert.rejects(f.p.coopStatus(f.c, { teamId: accepted.teamId }), /NOT_FOUND/)
+  for (const [user, region] of [[f.a, 'macau'], [f.b, 'hunan']]) {
+    const route = f.routes[region]
+    const team = await f.p.myCoop(user)
+    assert.equal(team.routeId, route.id)
+    assert.equal(team.version, f.versions[region])
+    const progress = await f.service.progress(user, { runId: team.myRunId })
+    const node = progress.snapshot.nodes[0]
+    assert.equal(node.clue.answer, undefined)
+    assert.ok(node.clue.question)
+    assert.equal(await f.service.routeProgress(user, { routeId: route.id }), null)
+    await assert.rejects(f.service.progress(f.c, { runId: team.myRunId }), /NOT_FOUND/)
+    const visit = { runId: team.myRunId, nodeId: node.id, requestId: 'visit-' + region, latitude: node.latitude, longitude: node.longitude }
+    const mediaId = 'photo-' + region
+    await f.service.registerMedia(user, { ...visit, id: mediaId, fileID: 'private' })
+    await assert.rejects(f.service.checkin(user, { ...visit, mediaId, clueAnswer: 'incorrect' }), /CLUE_INCORRECT/)
+    await f.service.checkin(user, { ...visit, mediaId, clueAnswer: route.nodes[0].clue.answer })
+    await assert.rejects(f.service.readMedia(region === 'macau' ? f.b : f.a, { id: mediaId }), /NOT_FOUND/)
+    if (region === 'macau') {
+      await f.service.saveTile(user, { runId: team.myRunId, pattern: 'sail', palette: 'cobalt' })
+      await f.service.answerQuiz(user, { runId: team.myRunId, activityId: 'tileQuiz', option: route.culture.tileQuiz.answer })
+    } else {
+      await f.service.answerQuiz(user, { runId: team.myRunId, option: route.culture.quiz.answer })
+      for (const card of route.culture.learning.cards) await f.service.readCard(user, { runId: team.myRunId, cardId: card.id })
+    }
+  }
+  assert.equal((await f.p.settleCoop(f.a, { teamId: accepted.teamId })).alreadySettled, false)
+  assert.equal((await f.p.settleCoop(f.b, { teamId: accepted.teamId })).alreadySettled, true)
+  assert.equal(await f.p.bottleStatus(f.a), null)
+})
+
+test('same-region bottles keep both seats on the same route and decline releases both users', async () => {
+  const f = await bottleReady()
+  const a = { mode: 'same', region: 'hunan', requestId: 'same-a' }
+  const b = { ...a, requestId: 'same-b' }
+  await f.p.joinBottle(f.a, a)
+  const match = await f.p.joinBottle(f.b, b)
+  assert.equal(match.partner.region, 'hunan')
+  assert.equal(await f.p.respondBottle(f.a, { matchId: match.matchId, accept: false }), null)
+  assert.equal(await f.p.bottleStatus(f.b), null)
+  assert.equal(await f.p.joinBottle(f.b, b), null)
+  await f.p.joinBottle(f.a, { ...a, requestId: 'same-new-a' })
+  const fresh = await f.p.joinBottle(f.b, { ...b, requestId: 'same-new-b' })
+  await Promise.all([f.p.respondBottle(f.a, { matchId: fresh.matchId, accept: true }),
+    f.p.respondBottle(f.b, { matchId: fresh.matchId, accept: true })])
+  const local = await f.p.myCoop(f.a), remote = await f.p.myCoop(f.b)
+  assert.equal(local.partnerSeat, 'hunan')
+  assert.equal(local.routeId, remote.routeId)
+  assert.notEqual(local.myRunId, remote.myRunId)
+  await f.p.leaveCoop(f.a, { teamId: local.id })
+  assert.equal(await f.p.bottleStatus(f.b), null)
+})
+
+test('withdrawn and expired bottles cannot be matched by delayed requests', async () => {
+  const f = await bottleReady()
+  const a = { mode: 'same', region: 'macau', requestId: 'close-a' }
+  await f.p.joinBottle(f.a, a)
+  await f.p.cancelBottle(f.a)
+  assert.equal(await f.p.joinBottle(f.a, a), null)
+  const waiting = await f.p.joinBottle(f.b, { ...a, requestId: 'close-b' })
+  assert.equal(waiting.status, 'waiting')
+  const paired = await f.p.joinBottle(f.a, { ...a, requestId: 'close-a-new' })
+  f.advance(24 * 60 * 60 * 1000)
+  await assert.rejects(f.p.respondBottle(f.a, { matchId: paired.matchId, accept: true }), /EXPIRED/)
+  assert.equal(await f.p.bottleStatus(f.b), null)
+  assert.deepEqual(await f.repo.list('fy-runs', {}), [])
 })

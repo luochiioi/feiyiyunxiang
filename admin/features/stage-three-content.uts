@@ -1,4 +1,6 @@
-export type DraftNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number }
+export type DraftClue = { story: string, question: string, answer: string }
+export type DraftExhibit = { id: string, title: string, description: string, alternate: string, reward: string, afterClue: string, clue: DraftClue & { options: string[] } }
+export type DraftNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number, clue?: DraftClue | null, afterClue?: string | null }
 type Choice = { label: string, nextSceneId: string }
 type Scene = { id: string, kind: string, text: string, asset?: string, speaker?: string, nextSceneId?: string, choices?: Choice[] }
 type Chapter = { act: number, title: string, after: string[], checkinMode?: string, start: string, scenes: Scene[], activity?: string | null }
@@ -18,6 +20,151 @@ export function combinedContent(nodeIds: string[]): CultureContent {
   const result: CultureContent = { ...macau, ...hunan, chapters: [...(macau.chapters ?? []), ...(hunan.chapters ?? [])] }
   if (eggs.length > 0) result.eggs = eggs
   return result
+}
+
+export function scriptedContent(nodeIds: string[]): CultureContent {
+  const content = combinedContent(nodeIds)
+  const chapters: Chapter[] = [
+    // 分镜 7–13
+    { act: 2, title: '海上风暴', after: nodeIds, checkinMode: 'any', start: 'wave', scenes: [
+      { id: 'wave', kind: 'dialogue', speaker: '旁白', text: '你睁开眼，木船正在海风里摇晃。船头方向传来船长的呼喊。', nextSceneId: 'hold' },
+      { id: 'hold', kind: 'dialogue', speaker: '船长', text: '扶住船舷，先让大家站稳！', nextSceneId: 'tile' },
+      { id: 'tile', kind: 'dialogue', speaker: '旁白', text: '颜料罐滚到脚边。你抱起一块蓝白瓷砖，巨浪把你推向舱壁。', nextSceneId: 'sailor' },
+      { id: 'sailor', kind: 'dialogue', speaker: '船员', text: '抓住我！舱门在这边！', nextSceneId: 'dawn' },
+      { id: 'dawn', kind: 'ending', text: '怀里的瓷砖还完好。你想起和女儿描花纹的那天，一道浪遮住视野，黑暗里慢慢浮出作坊的暖光。' }
+    ] },
+    // 分镜 14–23
+    { act: 3, title: '女儿与瓷砖', after: [], start: 'pattern', scenes: [
+      { id: 'pattern', kind: 'dialogue', asset: 'tile-workshop', speaker: '旁白', text: '阳光落在作坊的木桌上，桌上摆着陶土、模具、颜料和画笔。女儿把试稿推到你面前。', nextSceneId: 'color' },
+      { id: 'color', kind: 'dialogue', speaker: '女儿', text: '玫瑰、海浪帆船和几何纹样，你选的蓝白配色就在这张试稿上。', nextSceneId: 'kiln' },
+      { id: 'kiln', kind: 'dialogue', speaker: '旁白', text: '你们在瓷坯上描下选定的纹样。窑门打开后，你们把烧好的瓷砖嵌在房间墙上。', nextSceneId: 'work' },
+      { id: 'work', kind: 'ending', text: '女儿的身影渐渐淡去。你取下瓷砖抱在怀里，耳边的笑声变回了海浪。' }
+    ] },
+    // 分镜 24–26
+    { act: 4, title: '澳门靠岸', after: [], start: 'shore', scenes: [
+      { id: 'shore', kind: 'dialogue', speaker: '旁白', text: '商船停在沙滩边。你抱着瓷砖下船，脚印后面是渔船和一排陶罐。', nextSceneId: 'exchange' },
+      { id: 'exchange', kind: 'dialogue', speaker: '旁白', text: '你穿过叫卖声和人影，走到摆着蓝白绣品的摊位前。', nextSceneId: 'stalls' },
+      { id: 'stalls', kind: 'ending', text: '绣品的颜色让你想起怀里的瓷砖。摊主招手，让你走近一点看。' }
+    ] },
+    // 分镜 27–33
+    { act: 5, title: '湘绣相遇', after: [], start: 'meet', scenes: [
+      { id: 'meet', kind: 'dialogue', asset: 'embroidery-stall', speaker: '旁白', text: '摊中央摆着一幅蓝白玫瑰绣品。你把怀里的瓷砖放低，仔细观察花瓣的针脚。', nextSceneId: 'notice' },
+      { id: 'notice', kind: 'dialogue', speaker: '商贩', text: '这是湖南湘绣，花瓣上的绣线要近看才分得清。后厅有绣娘做活，想去看看吗？', nextSceneId: 'invite' },
+      { id: 'invite', kind: 'ending', text: '你点点头，跟着他走向布帘后的房间。' }
+    ] },
+    // 分镜 34–41与现代收尾
+    { act: 6, title: '针法学习', after: [], start: 'cards', scenes: [
+      { id: 'cards', kind: 'dialogue', asset: 'embroidery-room', speaker: '旁白', text: '四位绣娘围坐在窗边。你想起刚看过的四张卡，沿着针脚的走向辨认线条、长短、色阶和交叠。', nextSceneId: 'return' },
+      { id: 'return', kind: 'dialogue', speaker: '旁白', text: '你把瓷砖和绣品并排放好。蓝白颜色相似，瓷面的光和绣线的层次却各有来处。', nextSceneId: 'today' },
+      { id: 'today', kind: 'ending', asset: 'aomiao', text: '你回到展柜前，再看那条金色航线。你仍记得船帆的弧线，也记得绣线转折的地方。' }
+    ] }
+  ]
+  content.chapters = chapters
+  return content
+}
+
+export type MuseumVisit = { name: string, description: string, node: DraftNode, culture: CultureContent }
+
+export function museumRouteDraft(macau: boolean) {
+  const visit = macau ? macauMuseumVisit() : hunanMuseumVisit()
+  return {
+    id: macau ? 'yinian-guiqi-macau' : 'yinian-guiqi-hunan',
+    name: macau ? '海丝瓷绣·一念归期(上)' : '海丝瓷绣·一念归期(下)',
+    region: macau ? '澳门' : '湖南',
+    description: visit.description,
+    revision: 0,
+    testOnly: false,
+    museum: { name: visit.name, description: visit.description },
+    viewport: { latitude: visit.node.latitude, longitude: visit.node.longitude, scale: 16 },
+    nodes: [visit.node],
+    exhibit: museumExhibit(macau, visit.node.id),
+    culture: visit.culture
+  }
+}
+
+function museumExhibit(macau: boolean, afterClue: string): DraftExhibit {
+  if (macau) return {
+    id: 'macau-kraak-exhibit', title: '展品彩蛋 · 青花克拉克瓷盘', afterClue, reward: 'tile',
+    description: '到一楼国际通商口岸展区。若展出目标瓷盘，从公众通道拍下盘沿和部分纹样。关闭闪光灯，不用脚架或自拍器。',
+    alternate: '未找到目标瓷盘时，可拍同主题外销瓷或展板。',
+    clue: { story: '澳门博物馆藏明代青花克拉克瓷盘 MM5197，盘上有狮子和花卉。观察盘沿，重复的边框让不同纹样各有位置。',
+      question: '用一道道边框把瓷盘纹样分区的装饰叫什么？', options: ['镂空', '开光', '描金'], answer: '开光' }
+  }
+  return {
+    id: 'hunan-yang-exhibit', title: '展品彩蛋 · 双面全异绣《杨玉环》', afterClue, reward: 'learning',
+    description: '按当日导览寻找《杨玉环》。从公众通道拍下一面绣品或展签，可从开放通道观察另一面。请关闭闪光灯。',
+    alternate: '未找到目标绣品时，可拍当天展出的其他双面全异绣或工艺展板。',
+    clue: { story: '湖南湘绣博物馆收藏陈列的《杨玉环》属于双面全异绣。观察正反两面，留意构图和色彩如何各自成形。',
+      question: '双面全异绣的两幅不同画面怎样做出来？',
+      options: ['把两张绣片背对背缝合', '同一面绣两遍', '在同一块底料的正反面绣制'], answer: '在同一块底料的正反面绣制' }
+  }
+}
+
+export function macauMuseumVisit(): MuseumVisit {
+  const node: DraftNode = {
+    id: 'macau-museum-entrance', title: '澳门博物馆 · 大炮台入口一带',
+    description: '到澳门博物馆前地112号，在大炮台馆外开放区域停稳后获取定位。拍一张能看出到访地点的照片，例如入口标识与周边环境，避开他人正脸。读完线索并填写密码后一起提交。',
+    latitude: 22.194192, longitude: 113.547292, radius: 100,
+    clue: {
+      story: '澳门博物馆的一楼常设展介绍澳门作为通商口岸的历史，丝绸、瓷器、茶叶和漆器曾由澳门运往外地。上集借这段交流历史认识葡萄牙建筑装饰：釉面装饰砖称 azulejo，部分蓝白作品用钴着色，多块砖可拼成整幅图案。小程序题图是纹样示意。',
+      question: '这种釉面装饰砖的葡语名称是什么？请用大写字母输入。',
+      answer: 'AZULEJO'
+    }
+  }
+  const script = scriptedContent([node.id])
+  const culture: CultureContent = {
+    tile: { title: '蓝白瓷砖配色', after: [node.id] },
+    tileQuiz: {
+      ...script.tileQuiz!, after: [node.id],
+      prompt: '比较三幅原创瓷砖纹样。哪一幅同时画了三角形船帆和弧形海浪？',
+      explanation: '图 B 同时有三角形船帆和弧形海浪。葡萄牙装饰砖常用于覆盖建筑表面；重复纹样能把多块砖连成整体。'
+    },
+    chapters: (script.chapters ?? []).filter(chapter => chapter.act <= 4)
+  }
+  const description = [
+    '从大炮台走进澳门博物馆，沿三层常设展了解澳门从通商口岸到今日城市的变化，再完成蓝白瓷砖纹样任务。',
+    '到馆｜澳门博物馆前地112号。抵达大炮台后按现场标识前往博物馆入口，在馆外开放区域完成定位、到访照片和线索密码。参观开放与购票安排以馆方当天公告为准。',
+    '一楼｜先看澳门早期历史，重点找「国际通商口岸」展区。对照外运的丝绸、瓷器与传入的钟表、毛织品，想一想货物如何随商船在不同地区流通。',
+    '二楼｜看传统行业、民间艺术与日常生活。选一个你熟悉的生活场景，例如饼铺或凉茶铺，留意它如何连接澳门的地方生活。',
+    '三楼｜看当代澳门的城市面貌、文学与艺术。离馆前选一件有印象的作品，和一楼的通商故事对照，想想交流怎样改变城市。',
+    '小程序任务｜入口打卡后，可完成蓝白瓷砖配色及纹样辨认，阅读第二至四幕。船帆、海浪与作坊是剧情与学习插图。馆内拍摄须遵守现场指示，避免使用闪光灯、脚架或自拍器。'
+  ].join('\n\n')
+  return { name: '澳门博物馆', description, node, culture }
+}
+
+export function hunanMuseumVisit(): MuseumVisit {
+  const node: DraftNode = {
+    id: 'hunan-museum-entrance', title: '湖南湘绣博物馆 · 馆外入口一带',
+    description: '到长沙市芙蓉区车站北路39号，在湖南湘绣博物馆馆外开放区域停稳后获取定位。拍摄入口标识与周边环境作为到访照片，避开行人正脸。读完线索并填写密码后一起提交。',
+    latitude: 28.198609, longitude: 113.009827, radius: 80,
+    clue: {
+      story: '湖南湘绣博物馆的基本陈列以「针尖上的湖湘之美」为主题，呈现湘绣工艺的发展。湘绣于2006年列入第一批国家级非物质文化遗产代表性项目名录。劈丝让线更细，掺针可表现浓淡与色阶。观察一段针脚，找出方向改变或颜色接续的位置。',
+      question: '湘绣在哪一年列入第一批国家级非物质文化遗产名录？请输入四位年份。',
+      answer: '2006'
+    }
+  }
+  const script = scriptedContent([node.id])
+  const culture: CultureContent = {
+    quiz: {
+      ...script.quiz!, after: [node.id],
+      explanation: '图 B 的上下两组针脚朝不同方向倾斜。观察走向能帮助我们理解线条怎样随物象转折。湘绣常以针线表现花瓣、毛发等细节。'
+    },
+    learning: { title: '湘绣观察卡', after: [node.id], cards: [
+      { id: 'direction', title: '第一张 · 走向', hotspot: '沿着线条看', illustration: 'direction', body: '沿图中绣线走一遍，找出转向的位置。比较同向与转向的线条，看看花瓣的轮廓如何变化。' },
+      { id: 'length', title: '第二张 · 长短与劈丝', hotspot: '比较长短和粗细', illustration: 'length', body: '长短是每一针的跨度；劈丝是把绣线分得更细。先辨认线段长短，再观察细线怎样表现较小的细节。' },
+      { id: 'color', title: '第三张 · 色阶与掺针', hotspot: '找颜色过渡', illustration: 'color', body: '湘绣的掺针绣法可用来表现浓淡和色阶过渡。顺着示意图从浅色看到深色，找出过渡最明显的一段。' },
+      { id: 'layers', title: '第四张 · 层次', hotspot: '观察交叠处', illustration: 'layers', body: '比较线条在交叠处的疏密和方向，试着指出哪一层看起来更靠前。这个图用于观察层次。' }
+    ] },
+    chapters: (script.chapters ?? []).filter(chapter => chapter.act >= 5)
+  }
+  const description = [
+    '到长沙湖南湘绣博物馆，沿「针尖上的湖湘之美」四个主题展厅追溯湘绣，再用辨认题和观察卡比较针脚、色阶与层次。',
+    '到馆｜长沙市芙蓉区车站北路39号。先查看馆方参观公告与预约安排。抵达后在馆外开放区域完成定位、到访照片和线索密码，再按场馆指引入内。',
+    '针尖之源、针尖之兴｜先从展签了解湘绣的源流和发展。挑一件有图案的绣品，先辨认题材，再从一个细节观察丝线如何沿着花瓣或叶片的轮廓转向。',
+    '针尖之盛、针尖之梦｜再看艺人作品与当代创新。比较一件作品的深浅过渡，观察细线和不同方向的针脚怎样塑造层次。如遇双面绣展品，可在允许的观察位置比较正反两面。',
+    '小程序任务｜入口打卡后，完成湘绣辨认题，依次阅读走向、长短与劈丝、色阶与掺针、层次四张观察卡，再读第五、六幕。馆内实际陈列和拍摄要求以现场为准。'
+  ].join('\n\n')
+  return { name: '湖南湘绣博物馆', description, node, culture }
 }
 
 export function macauContent(nodeIds: string[]): CultureContent {

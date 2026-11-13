@@ -1,0 +1,26 @@
+[
+  {
+    "IndexName": "mode_region_status_expiry",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "mode",
+          "Direction": "1"
+        },
+        {
+          "Name": "region",
+          "Direction": "1"
+        },
+        {
+          "Name": "status",
+          "Direction": "1"
+        },
+        {
+          "Name": "expiresAt",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

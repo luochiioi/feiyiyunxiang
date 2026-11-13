@@ -50,7 +50,7 @@ import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { secured } from '@/features/api.uts'
 import { decodePageId, openPage } from '@/features/navigation.uts'
-import { legacyStorm, localStoryPath, opening, openingStorageKey } from '../story-content.uts'
+import { legacyStorm, localStoryPath, opening, openingReadingKey, openingStorageKey, scriptedOpening } from '../story-content.uts'
 import { readLegacyStorm } from '../legacy-story.uts'
 import type { Chapter, ChapterRead, Checkpoint } from '../story-content.uts'
 
@@ -69,6 +69,10 @@ const art = computed((): string => {
   if (act.value === 1) return '/packages/story/static/opening-map.jpg'
   if (act.value === 2) return '/packages/story/static/storm-at-sea.jpg'
   if (act.value === 4) return '/packages/story/static/macau-shore.jpg'
+  const chapterArt = chapter.value?.scenes[0]?.asset
+  if (chapterArt === 'tile-workshop') return '/packages/story/static/tile-workshop.jpg'
+  if (chapterArt === 'embroidery-stall') return '/packages/story/static/embroidery-stall.jpg'
+  if (chapterArt === 'embroidery-room') return '/packages/story/static/embroidery-room.jpg'
   return ''
 })
 let legacy = false
@@ -89,7 +93,8 @@ function loadLocal(content: Chapter, key: string): void {
 async function load(): Promise<void> {
   if (busy.value) return
   if (act.value === 1) {
-    loadLocal(opening, openingStorageKey)
+    const key = openingReadingKey()
+    loadLocal(key === openingStorageKey ? opening : scriptedOpening, key)
     return
   }
   if (runId.value.length === 0 || act.value < 2 || act.value > 6) {

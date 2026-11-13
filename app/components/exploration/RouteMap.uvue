@@ -1,24 +1,25 @@
 <template>
   <map id="exploration-map" class="map-surface" :latitude="viewport.latitude" :longitude="viewport.longitude"
-    :scale="viewport.scale" :markers="markers" :enable-rotate="false"
-    @markertap="markerTap" @regionchange="regionChange" />
+    :scale="viewport.scale" :markers="markers" :polyline="polyline" :enable-rotate="false"
+    @markertap="markerTap" @callouttap="markerTap" @regionchange="regionChange" />
 </template>
 
 <script setup lang="uts">
 import { computed } from 'vue'
-import { buildMapMarkers, resolveNodeId } from '@/features/exploration/map-markers.uts'
+import { buildMapMarkers, buildRoutePolyline, resolveNodeId } from '@/features/exploration/map-markers.uts'
 import type { MarkerEvent } from '@/features/exploration/map-markers.uts'
 import type { MapPosition, MapViewport, RouteNode } from '@/features/exploration/types.uts'
 
 const props = defineProps<{
-  nodes: RouteNode[], selectedNodeId: string | null, viewport: MapViewport, currentLocation: MapPosition | null
+  nodes: RouteNode[], routeId: string | null, selectedNodeId: string | null, viewport: MapViewport, currentLocation: MapPosition | null
 }>()
 const emit = defineEmits<{
   (event: 'node-select', id: string): void
   (event: 'viewport-change', viewport: MapViewport): void
 }>()
 
-const markers = computed(() => buildMapMarkers(props.nodes, props.selectedNodeId, props.currentLocation))
+const markers = computed(() => buildMapMarkers(props.nodes, props.selectedNodeId, props.currentLocation, props.routeId))
+const polyline = computed(() => buildRoutePolyline(props.nodes, props.routeId))
 
 type RegionEvent = {
   type: string

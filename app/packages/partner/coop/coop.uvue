@@ -9,7 +9,7 @@
       </view>
       <template v-else-if="team != null">
         <view class="card green">
-          <text class="title">两地合作</text>
+          <text class="title">旅伴合作</text>
           <text class="body">各自完成所在地的节点与文化任务，双方完成后共同解锁成果。</text>
           <text class="muted">状态 {{ statusText }}</text>
         </view>
@@ -31,7 +31,7 @@
         <view v-if="status === 'active'" class="card">
           <text class="heading">双方进度</text>
           <text class="body">我的{{ team.mySeat === 'macau' ? '澳门' : '湖南' }}席位 {{ team.myProgress?.done ?? 0 }} / {{ team.myProgress?.total ?? 0 }}</text>
-          <text class="body">旅伴的{{ team.mySeat === 'macau' ? '湖南' : '澳门' }}席位 {{ team.partnerProgress?.done ?? 0 }} / {{ team.partnerProgress?.total ?? 0 }}</text>
+          <text class="body">旅伴的{{ (team.partnerSeat ?? (team.mySeat === 'macau' ? 'hunan' : 'macau')) === 'macau' ? '澳门' : '湖南' }}席位 {{ team.partnerProgress?.done ?? 0 }} / {{ team.partnerProgress?.total ?? 0 }}</text>
         </view>
         <button v-if="status === 'active' && team.myRunId != null" class="primary" :disabled="busy" @click="explore">开始探索</button>
         <button v-if="canSettle" class="primary" :disabled="busy" @click="settle">结算成果</button>
@@ -131,7 +131,13 @@ async function answer(accept: boolean): Promise<void> {
     const tasks = !accept ? [] : (chosen.value.length === 0 ? options.map(task => task.id) : chosen.value)
     await answerCoop(id, accept, tasks)
     await load()
-  } catch (_) { showError() }
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'EXPIRED' || code === 'NOT_PENDING') {
+      uni.showToast({ title: '合作邀请已结束，请重新发起', icon: 'none' })
+      await load()
+    } else showError()
+  }
   finally { busy.value = false }
 }
 </script>

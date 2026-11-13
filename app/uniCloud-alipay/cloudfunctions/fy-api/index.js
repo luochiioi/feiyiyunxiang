@@ -17,6 +17,7 @@ const communityActions = new Set([...guestActions, ...reviewActions, 'communityS
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
   'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
   'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends',
+  'bottleStatus', 'joinBottle', 'respondBottle', 'cancelBottle',
   'inviteCoop', 'respondCoop', 'withdrawCoop', 'leaveCoop', 'coopStatus', 'myCoop', 'settleCoop',
   'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'pkEggs', 'chooseEgg', 'cancelPk', 'assignment', 'completeAssignment', 'rejectAssignment'])
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])

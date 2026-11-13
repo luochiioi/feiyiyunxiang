@@ -76,7 +76,7 @@ function validateEggs(eggs, nodeIds) {
 }
 
 const chapterActivities = { 2: null, 3: 'tile', 4: null, 5: 'quiz', 6: 'learning' }
-const sceneAssets = ['aomiao']
+const sceneAssets = ['aomiao', 'tile-workshop', 'embroidery-stall', 'embroidery-room']
 
 function validateChapters(chapters, nodeIds, activities) {
   requireValue(Array.isArray(chapters) && chapters.length > 0 && chapters.length <= 5, 'INVALID_CHAPTERS')

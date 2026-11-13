@@ -1,0 +1,12 @@
+<xr-scene ar-system="{{useAr ? 'modes:Plane;' : ''}}" bind:ready="handleReady" bind:touchstart="handleTouchStart" bind:touchmove="handleTouchMove">
+  <xr-assets>
+    <xr-asset-load type="gltf" asset-id="gltf-item" src="{{modelUrl}}" />
+  </xr-assets>
+  <xr-node node-id="setitem" position="0 -0.5 -2" rotation="0 -90 0">
+    <xr-gltf model="gltf-item" anim-autoplay />
+  </xr-node>
+  <xr-camera wx:if="{{useAr}}" clear-color="0.925 0.925 0.925 1" background="ar" is-ar-camera />
+  <xr-camera wx:else clear-color="0.925 0.925 0.925 1" position="0 0 0" />
+  <xr-light type="ambient" color="1 1 1" intensity="1.5" />
+  <xr-light type="directional" rotation="45 45 0" color="1 1 1" intensity="3" />
+</xr-scene>

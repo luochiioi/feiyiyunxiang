@@ -21,6 +21,23 @@ export const opening: Chapter = {
   ]
 }
 
+export const scriptedOpeningStorageKey = 'fy-story-opening-v2'
+export const scriptedOpening: Chapter = {
+  act: 1,
+  title: '触碰海丝地图',
+  start: 'gallery',
+  scenes: [
+    { id: 'gallery', kind: 'dialogue', speaker: '旁白', text: '你沿展廊慢慢走过。玻璃映着暖光，船模和旧瓷器旁传来低低的海浪声。', nextSceneId: 'gallery-choice' },
+    { id: 'gallery-choice', kind: 'choice', text: '长廊尽头是一面弧形展柜。深蓝地图上的金线连起远方的港口。', choices: [
+      { label: '前往地图', nextSceneId: 'glass' },
+      { label: '继续闲逛', nextSceneId: 'stroll' }
+    ] },
+    { id: 'stroll', kind: 'dialogue', speaker: '旁白', text: '你又在展柜之间走了一圈，最后回到地图前。', nextSceneId: 'glass' },
+    { id: 'glass', kind: 'dialogue', speaker: '旁白', text: '你俯身辨认地图上的港口。金色航线就在玻璃下，指尖轻轻碰了上去。', nextSceneId: 'light' },
+    { id: 'light', kind: 'ending', text: '暖光从指尖铺开，四周的脚步声渐渐消失。只剩越来越近的海浪。' }
+  ]
+}
+
 // Fixed companion scene for the Macau test route from before story releases existed.
 export const legacyStorm: Chapter = {
   act: 2,
@@ -49,4 +66,14 @@ export function localStoryPath(key: string, chapter: Chapter): string[] {
   return [chapter.start]
 }
 
-export function savedOpeningPath(): string[] { return localStoryPath(openingStorageKey, opening) }
+export function openingReadingKey(): string {
+  const scripted = uni.getStorageSync(scriptedOpeningStorageKey) as string
+  if (scripted != null && scripted.length > 0) return scriptedOpeningStorageKey
+  const legacy = uni.getStorageSync(openingStorageKey) as string
+  return legacy != null && legacy.length > 0 ? openingStorageKey : scriptedOpeningStorageKey
+}
+
+export function savedOpeningPath(): string[] {
+  const key = openingReadingKey()
+  return localStoryPath(key, key === openingStorageKey ? opening : scriptedOpening)
+}

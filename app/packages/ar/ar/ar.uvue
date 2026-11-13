@@ -1,0 +1,16 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="奥喵 AR" :show-back="true" />
+    <view class="content">
+      <ar-view />
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+</style>

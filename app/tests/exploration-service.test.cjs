@@ -297,3 +297,211 @@ test('combined test revision attaches four tasks to old explorations and carries
   assert.equal(visible[0].chapters.length, 5)
   assert.deepEqual((await s.routeProgress(a, { routeId: macauSource.id })).activities, ['tile', 'tileQuiz'])
 })
+
+test('exhibit clues gate the next solo check-in, keep answers private, and pin the release', async () => {
+  const { s, repo, a, b, admin } = setup()
+  const first = { ...draft.nodes[0], clue: { story: '蓝白图案有船帆和海浪。', question: '输入提示航行的两个字。', answer: '船帆' } }
+  const next = { ...draft.nodes[0], id: 'n2', afterClue: first.id, clue: { story: '下一站故事。', question: '下一站问题？', answer: '答案' } }
+  const route = { ...draft, nodes: [first, next] }
+  for (const nodes of [[next, first], [draft.nodes[0], next]]) {
+    await assert.rejects(s.previewDraft(admin, { ...route, nodes }), /INVALID_CLUE_GATE/)
+  }
+  await s.saveDraft(admin, route)
+  await s.publish(admin, { id: route.id, revision: 1 })
+  const { id: runId } = await s.start(a, { routeId: route.id, requestId: 'clue-start-a' })
+  const { id: otherRun } = await s.start(b, { routeId: route.id, requestId: 'clue-start-b' })
+  const [published] = await s.catalog()
+  assert.deepEqual(published.nodes[0].clue, { story: first.clue.story, question: first.clue.question })
+  assert.equal(published.nodes[1].clue, undefined)
+  const initial = await s.progress(a, { runId })
+  assert.equal(initial.snapshot.nodes[0].clue.answer, undefined)
+  assert.equal(initial.snapshot.nodes[1].clue, undefined)
+
+  const station = { runId, nodeId: first.id, requestId: 'clue-check-a' }
+  const later = { runId, nodeId: next.id, requestId: 'clue-check-next' }
+  await assert.rejects(s.mediaBinding(a, later), /CLUE_LOCKED/)
+  await assert.rejects(s.checkin(a, later), /CLUE_LOCKED/)
+  await s.registerMedia(a, { ...station, id: 'clue-media', fileID: 'private' })
+  const checkin = { ...station, latitude: 22, longitude: 113, mediaId: 'clue-media' }
+  await assert.rejects(s.checkin(a, { ...checkin, clueAnswer: '海浪' }), /CLUE_INCORRECT/)
+  await assert.rejects(s.checkin(a, { ...checkin, clueAnswer: '船帆', latitude: 23 }), /OUTSIDE_RANGE/)
+  assert.equal((await repo.get('fy-media', 'clue-media')).used, false)
+  assert.deepEqual((await s.progress(a, { runId })).completed, [])
+  await s.saveDraft(admin, { ...route, revision: 1, nodes: [{ ...first, clue: { ...first.clue, answer: '海浪' } }, next] })
+  await s.publish(admin, { id: route.id, revision: 2 })
+  const { id: freshRun } = await s.start(b, { routeId: route.id, requestId: 'clue-fresh' })
+  await assert.rejects(s.checkin(b, { ...checkin, runId: freshRun, clueAnswer: '船帆' }), /CLUE_INCORRECT/)
+  await s.checkin(a, { ...checkin, clueAnswer: ' 船帆 ' })
+  assert.equal((await s.checkin(a, checkin)).alreadyCompleted, true)
+  const reopened = await s.progress(a, { runId })
+  assert.deepEqual(reopened.completed, [first.id])
+  assert.deepEqual(reopened.snapshot.nodes[1].clue, { story: next.clue.story, question: next.clue.question })
+  await s.mediaBinding(a, later)
+  await assert.rejects(s.mediaBinding(b, { ...later, runId: otherRun }), /CLUE_LOCKED/)
+  await assert.rejects(s.readMedia(b, { id: 'clue-media' }), /NOT_FOUND/)
+})
+
+test('legacy routes, cooperation and PK snapshots do not require solo exhibit clues', async () => {
+  const { s, repo, a, admin } = setup()
+  await s.saveDraft(admin, draft)
+  await s.publish(admin, { id: draft.id, revision: 1 })
+  const { id: legacy } = await s.start(a, { routeId: draft.id, requestId: 'legacy-start' })
+  const first = { ...draft.nodes[0], clue: { story: '绣线转向。', question: '线索是什么？', answer: '走向' } }
+  await s.saveDraft(admin, { ...draft, revision: 1, nodes: [first, { ...first, id: 'n2', afterClue: first.id }] })
+  const { version } = await s.publish(admin, { id: draft.id, revision: 2 })
+  await repo.put('fy-runs', 'pk-clue', { uid: a.uid, routeId: draft.id, version, snapshot: await repo.get('fy-versions', version), purpose: 'pk', matchId: 'clue-match', revision: 0 })
+  await repo.put('fy-matches', 'clue-match', { status: 'running', startedAt: 1000000, runs: { [a.uid]: 'pk-clue' } })
+  const snapshot = await repo.get('fy-versions', version)
+  const cooperation = { ...snapshot, culture: { tile: { after: ['n1'] }, quiz: { after: ['n2'] } } }
+  await repo.put('fy-runs', 'coop-clue', { uid: a.uid, routeId: draft.id, version, snapshot: cooperation, purpose: 'coop', teamId: 'clue-team', revision: 0 })
+  await repo.put('fy-teams', 'clue-team', { seats: { macau: 'partner', hunan: a.uid }, runs: { [a.uid]: 'coop-clue' } })
+
+  for (const [runId, nodeId] of [[legacy, first.id], ['pk-clue', 'n2'], ['coop-clue', 'n2']]) {
+    const check = { runId, nodeId, requestId: 'check-' + runId }
+    await s.mediaBinding(a, check)
+    await s.registerMedia(a, { ...check, id: 'media-' + runId, fileID: 'private' })
+    await s.checkin(a, { ...check, latitude: 22, longitude: 113, mediaId: 'media-' + runId })
+    const progress = await s.progress(a, { runId })
+    assert.deepEqual(progress.completed, [nodeId])
+    assert.equal(progress.snapshot.nodes[0].clue, undefined)
+    assert.equal(progress.snapshot.nodes.at(-1).afterClue, undefined)
+  }
+
+  const { id: hunanRun } = await s.start(a, { routeId: draft.id, requestId: 'hunan-exhibit' })
+  const check = { runId: hunanRun, nodeId: first.id, requestId: 'hunan-clue' }
+  await s.registerMedia(a, { ...check, id: 'hunan-media', fileID: 'private' })
+  await s.checkin(a, { ...check, latitude: 22, longitude: 113, mediaId: 'hunan-media', clueAnswer: '走向' })
+  await s.mediaBinding(a, { runId: hunanRun, nodeId: 'n2', requestId: 'hunan-next' })
+})
+
+test('scripted chapter draft previews the five published acts without altering the active exploration', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../admin/features/stage-three-content.uts'), 'utf8')
+  const { combinedContent, scriptedContent } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64'))
+  const { s, repo, admin, a, b } = setup()
+  const old = { ...draft, culture: combinedContent(['n1']) }
+  await s.saveDraft(admin, old)
+  const first = await s.publish(admin, { id: draft.id, revision: 1 })
+  const { id: existing } = await s.start(a, { routeId: draft.id, requestId: 'before-script' })
+  await checkPoint(s, a, existing)
+  const oldCheckpoint = await s.saveReading(a, { runId: existing, act: 2, revision: 0, path: ['wave', 'hold', 'rope'] })
+  const revised = { ...old, revision: 1, culture: scriptedContent(['n1']) }
+  const preview = await s.previewDraft(admin, revised)
+  assert.deepEqual(preview.culture.chapters.map(chapter => chapter.act), [2, 3, 4, 5, 6])
+  assert.equal(preview.culture.chapters[0].checkinMode, 'any')
+  assert.equal((await repo.get('fy-drafts', draft.id)).revision, 1)
+  await s.saveDraft(admin, revised)
+  const second = await s.publish(admin, { id: draft.id, revision: 2 })
+  assert.notEqual(second.version, first.version)
+  assert.equal((await s.progress(a, { runId: existing })).version, first.version)
+  assert.deepEqual((await s.storyChapter(a, { runId: existing, act: 2 })).checkpoint, oldCheckpoint)
+  const { id: fresh } = await s.start(b, { routeId: draft.id, requestId: 'after-script' })
+  assert.equal((await s.progress(b, { runId: fresh })).version, second.version)
+  await assert.rejects(s.storyChapter(b, { runId: fresh, act: 2 }), /ACTIVITY_LOCKED/)
+})
+
+test('both formal museum routes preserve task gates, private work and reading checkpoints', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../admin/features/stage-three-content.uts'), 'utf8')
+  const { museumRouteDraft } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64'))
+  const { repo, admin, a, b } = setup()
+  const s = createService({ repo, allowTestContent: false })
+  for (const [route, episode, museum, activityId, radius, acts] of [
+    [museumRouteDraft(true), '上集', '澳门博物馆', 'tile', 100, [2, 3, 4]],
+    [museumRouteDraft(false), '下集', '湖南湘绣博物馆', 'quiz', 80, [5, 6]]
+  ]) {
+    const [node] = route.nodes
+    const preview = await s.previewDraft(admin, route)
+    assert.equal(preview.name, '海丝瓷绣·一念归期(' + episode[0] + ')')
+    assert.equal(preview.museum.name, museum)
+    assert.equal(preview.testOnly, false)
+    const sections = preview.description.split('\n\n')
+    assert.ok(sections.length >= 5)
+    assert.match(sections[1], episode === '上集' ? /澳门博物馆前地112号/ : /车站北路39号/)
+    assert.match(sections[2], episode === '上集' ? /国际通商口岸/ : /针尖之源/)
+    assert.equal(preview.nodes[0].radius, radius)
+    assert.deepEqual(preview.culture.chapters.map(chapter => chapter.act), acts)
+    for (const chapter of preview.culture.chapters) {
+      const asset = chapter.scenes[0].asset
+      if (asset != null) assert.ok(fs.existsSync(path.join(__dirname, '../packages/story/static', asset + '.jpg')))
+    }
+    await s.saveDraft(admin, route)
+    await assert.rejects(s.publish(admin, { id: route.id, revision: 1 }), /CONTENT_REVIEW_REQUIRED/)
+    const saved = await repo.get('fy-drafts', route.id)
+    await repo.put('fy-drafts', route.id, { ...saved, contentVerified: true })
+    await s.publish(admin, { id: route.id, revision: 1 })
+    const published = (await s.catalog()).find(item => item.id === route.id)
+    assert.equal(published.name, route.name)
+    assert.equal(published.nodes[0].clue.answer, undefined)
+    assert.equal(published.exhibit, undefined)
+    const { id: runId } = await s.start(a, { routeId: route.id, requestId: 'start-' + route.id })
+    assert.equal((await s.activityStatus(a, { runId, activityId })).unlocked, false)
+    const exhibit = route.exhibit
+    const exhibitPhoto = 'photo-' + exhibit.id
+    const exhibitPayload = { runId, nodeId: exhibit.id, requestId: 'visit-' + exhibit.id }
+    await assert.rejects(s.mediaBinding(a, exhibitPayload), /CLUE_LOCKED/)
+    assert.equal((await s.progress(a, { runId })).snapshot.exhibit, undefined)
+    for (const act of acts) await assert.rejects(s.storyChapter(a, { runId, act }), /ACTIVITY_LOCKED/)
+    const payload = { runId, nodeId: node.id, requestId: 'visit-' + node.id, latitude: node.latitude, longitude: node.longitude, clueAnswer: node.clue.answer }
+    const mediaId = 'media-' + node.id
+    await s.registerMedia(a, { ...payload, id: mediaId, fileID: 'private' })
+    await assert.rejects(s.checkin(a, { ...payload, mediaId, latitude: node.latitude + 0.002 }), /OUTSIDE_RANGE/)
+    await assert.rejects(s.checkin(a, { ...payload, mediaId, clueAnswer: 'wrong' }), /CLUE_INCORRECT/)
+    await s.checkin(a, { ...payload, mediaId })
+    assert.equal((await s.activityStatus(a, { runId, activityId })).unlocked, true)
+    await assert.rejects(s.readMedia(b, { id: mediaId }), /NOT_FOUND/)
+    assert.equal((await s.progress(a, { runId })).snapshot.exhibit.clue.answer, undefined)
+    assert.deepEqual((await s.progress(a, { runId })).snapshot.exhibit.clue.options, exhibit.clue.options)
+    assert.equal((await s.activityStatus(a, { runId, activityId: exhibit.reward })).exhibitBonus, undefined)
+    await s.registerMedia(a, { ...exhibitPayload, id: exhibitPhoto, fileID: 'private' })
+    await assert.rejects(s.checkin(a, { ...exhibitPayload, mediaId: exhibitPhoto, clueAnswer: 'incorrect' }), /CLUE_INCORRECT/)
+    const submission = { ...exhibitPayload, mediaId: exhibitPhoto, clueAnswer: exhibit.clue.answer, note: '展品观察' }
+    const receipt = await s.checkin(a, submission)
+    assert.equal((await s.checkin(a, submission)).id, receipt.id)
+    assert.equal((await s.progress(a, { runId })).exhibitCompleted, true)
+    await assert.rejects(s.readMedia(b, { id: exhibitPhoto }), /NOT_FOUND/)
+
+    if (episode === '上集') {
+      assert.equal((await s.storyChapter(a, { runId, act: 2 })).chapter.act, 2)
+      await assert.rejects(s.storyChapter(a, { runId, act: 3 }), /ACTIVITY_LOCKED/)
+      await s.saveTile(a, { runId, pattern: 'sail', palette: 'cobalt' })
+      assert.equal((await s.storyChapter(a, { runId, act: 3 })).chapter.act, 3)
+      const { answer } = route.culture.tileQuiz
+      const wrong = route.culture.tileQuiz.options.find(option => option.id !== answer).id
+      assert.equal((await s.answerQuiz(a, { runId, activityId: 'tileQuiz', option: wrong })).done, false)
+      await assert.rejects(s.storyChapter(a, { runId, act: 4 }), /ACTIVITY_LOCKED/)
+      assert.equal((await s.answerQuiz(a, { runId, activityId: 'tileQuiz', option: answer })).done, true)
+      assert.equal((await s.works(a)).some(work => work.runId === runId), true)
+      assert.deepEqual(await s.works(b), [])
+      const framed = await s.saveTile(a, { runId, pattern: 'rose', palette: 'mist', framePalette: 'cobalt' })
+      assert.equal(framed.framePalette, 'cobalt')
+      assert.equal((await s.works(a)).filter(work => work.runId === runId).length, 2)
+    } else {
+      const bonus = await s.activityStatus(a, { runId, activityId: 'learning' })
+      assert.equal(bonus.exhibitBonus, true)
+      assert.equal(bonus.unlocked, false)
+      const { answer } = route.culture.quiz
+      await assert.rejects(s.storyChapter(a, { runId, act: 5 }), /ACTIVITY_LOCKED/)
+      assert.equal((await s.answerQuiz(a, { runId, option: answer })).done, true)
+      assert.equal((await s.storyChapter(a, { runId, act: 5 })).chapter.act, 5)
+      const cards = route.culture.learning.cards
+      for (const card of cards.slice(0, -1)) await s.readCard(a, { runId, cardId: card.id })
+      await assert.rejects(s.storyChapter(a, { runId, act: 6 }), /ACTIVITY_LOCKED/)
+      await s.readCard(a, { runId, cardId: cards.at(-1).id })
+      const learning = await s.activityStatus(a, { runId, activityId: 'learning' })
+      assert.equal(learning.exhibitBonus, true)
+      assert.equal(learning.cards.length, 4)
+    }
+
+    const act = acts.at(-1)
+    const { chapter } = await s.storyChapter(a, { runId, act })
+    const first = chapter.scenes.find(scene => scene.id === chapter.start)
+    const checkpoint = await s.saveReading(a, { runId, act, revision: 0, path: [first.id, first.nextSceneId] })
+    const reopened = createService({ repo, allowTestContent: false })
+    const progress = await reopened.routeProgress(a, { routeId: route.id })
+    assert.equal(progress.runId, runId)
+    assert.equal(progress.version, published.version)
+    assert.equal(progress.done, progress.total)
+    assert.deepEqual((await reopened.storyChapter(a, { runId, act })).checkpoint, checkpoint)
+    await assert.rejects(reopened.storyChapter(b, { runId, act }), /NOT_FOUND/)
+    assert.equal(await reopened.routeProgress(b, { routeId: route.id }), null)
+  }
+})

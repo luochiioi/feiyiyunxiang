@@ -1,0 +1,6 @@
+{
+  "identity": { "tokenSecret": "", "tokenExpiresIn": 7200, "tokenExpiresThreshold": 0 },
+  "mediaEncryptionKey": "",
+  "privateStorageVerified": false,
+  "imageGuess": { "model": "Kwai-Kolors/Kolors", "allowSelfTrial": false }
+}

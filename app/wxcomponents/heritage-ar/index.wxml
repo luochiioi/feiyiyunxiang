@@ -1,0 +1,6 @@
+<view wx:if="{{!modelUrl}}" class="mode">奥喵 3D 模型暂未开放。</view>
+<view wx:elif="{{ready}}">
+  <view class="mode">{{useAr ? '移动镜头观察奥喵，左右拖动可旋转。' : '3D 预览 · 左右拖动可旋转，手机微信可打开 AR。'}}</view>
+  <ar-scene width="{{renderWidth}}" height="{{renderHeight}}" use-ar="{{useAr}}" model-url="{{modelUrl}}" style="width:{{width}}px;height:{{height}}px" />
+</view>
+<view wx:else class="mode">当前微信版本无法打开 XR，请更新微信后重试。</view>

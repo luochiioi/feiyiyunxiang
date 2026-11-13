@@ -1,0 +1,167 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="漂流瓶" :show-back="true" />
+    <view class="content">
+      <view class="card green">
+        <text class="title">找一位同行旅伴</text>
+        <text class="body">双方确认后各自打卡和完成文化任务。对方只能看到你的昵称、地区和任务进度。</text>
+      </view>
+      <view v-if="loading" class="card"><text class="body">正在读取漂流瓶…</text></view>
+      <view v-else-if="state == null && !loadFailed" class="card">
+        <text class="heading">投一个漂流瓶</text>
+        <text class="body">我的路线</text>
+        <view class="row">
+          <button class="choice" :class="region === 'macau' ? 'primary' : 'secondary'" :disabled="busy" @click="region = 'macau'">澳门 · 上集</button>
+          <button class="choice" :class="region === 'hunan' ? 'primary' : 'secondary'" :disabled="busy" @click="region = 'hunan'">湖南 · 下集</button>
+        </view>
+        <text class="body">匹配方式</text>
+        <view class="row">
+          <button class="choice" :class="mode === 'same' ? 'primary' : 'secondary'" :disabled="busy" @click="mode = 'same'">同地区</button>
+          <button class="choice" :class="mode === 'cross' ? 'primary' : 'secondary'" :disabled="busy" @click="mode = 'cross'">跨地区</button>
+        </view>
+        <button class="primary" :disabled="busy" @click="join">投瓶找旅伴</button>
+      </view>
+      <view v-else-if="state?.status === 'waiting'" class="card">
+        <text class="heading">等待旅伴</text>
+        <text class="body">{{ regionName(state.region) }} · {{ state.mode === 'same' ? '同地区' : '跨地区' }}</text>
+        <button class="primary" :disabled="busy" @click="join">查找旅伴</button>
+        <button class="secondary" :disabled="busy" @click="cancel">收回漂流瓶</button>
+      </view>
+      <view v-else-if="state?.status === 'matched'" class="card">
+        <text class="heading">找到一位旅伴</text>
+        <text class="body">{{ state.partner?.nickname ?? '旅伴' }} · {{ regionName(state.partner?.region ?? '') }}</text>
+        <text class="muted">{{ state.partnerAccepted === true ? '对方已同意组队' : '对方尚未确认' }}</text>
+        <button v-if="state.accepted !== true" class="primary" :disabled="busy" @click="respond(true)">同意组队</button>
+        <button v-else class="primary" :disabled="busy" @click="load">已同意 · 刷新结果</button>
+        <button class="secondary" :disabled="busy" @click="respond(false)">拒绝邀请</button>
+      </view>
+      <view v-else-if="state?.status === 'paired'" class="card">
+        <text class="heading">组队成功</text>
+        <text class="body">我的路线 · {{ regionName(state.region) }}</text>
+        <button class="primary" @click="openPage('/packages/partner/coop/coop')">进入合作打卡</button>
+        <button class="secondary" :disabled="busy" @click="leave">退出合作</button>
+      </view>
+      <view v-else class="card">
+        <button class="secondary" :disabled="busy" @click="load">重新读取</button>
+      </view>
+      <text v-if="message.length > 0" class="body feedback">{{ message }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import { requestId, secured } from '@/features/api.uts'
+import { openPage } from '@/features/navigation.uts'
+
+type Bottle = {
+  status: string, region: string, mode: string, matchId?: string, teamId?: string,
+  accepted?: boolean, partnerAccepted?: boolean, partner?: { nickname: string, region: string }
+}
+
+const state = ref<Bottle | null>(null)
+const mode = ref('cross')
+const region = ref('macau')
+const loading = ref(false)
+const loadFailed = ref(false)
+const busy = ref(false)
+const message = ref('')
+let draftId = ''
+let draftSelection = ''
+
+function regionName(value: string): string {
+  if (value === 'macau') return '澳门'
+  if (value === 'hunan') return '湖南'
+  return ''
+}
+
+onShow(() => { load() })
+
+async function load(): Promise<void> {
+  if (busy.value || loading.value) return
+  loading.value = true
+  loadFailed.value = false
+  message.value = ''
+  try { state.value = await secured<Bottle | null>('bottleStatus') }
+  catch (_) { loadFailed.value = true; message.value = '暂时无法读取漂流瓶，请稍后重试。' }
+  finally { loading.value = false }
+}
+
+async function join(): Promise<void> {
+  if (busy.value) return
+  const chosenMode = state.value?.mode ?? mode.value
+  const chosenRegion = state.value?.region ?? region.value
+  const selection = chosenMode + ':' + chosenRegion
+  if (draftSelection !== selection || draftId.length === 0) {
+    draftSelection = selection
+    draftId = requestId()
+  }
+  busy.value = true
+  message.value = ''
+  try {
+    state.value = await secured<Bottle | null>('joinBottle', { mode: chosenMode, region: chosenRegion, requestId: draftId })
+    if (state.value == null) { draftId = ''; message.value = '漂流瓶已结束，请重新投放。' }
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'CONFLICT') message.value = '你已有待处理或进行中的合作，请先处理。'
+    else if (code === 'INVALID_ROUTE') message.value = '所选地区的正式路线暂不可用。'
+    else message.value = '暂时无法匹配，请重试。'
+  } finally { busy.value = false }
+}
+
+async function respond(accept: boolean): Promise<void> {
+  const matchId = state.value?.matchId
+  if (busy.value || matchId == null) return
+  busy.value = true
+  message.value = ''
+  try {
+    state.value = await secured<Bottle | null>('respondBottle', { matchId, accept })
+    if (!accept && state.value == null) { draftId = ''; message.value = '已拒绝邀请。' }
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'EXPIRED' || code === 'NOT_PENDING' || code === 'NOT_FOUND') {
+      state.value = await secured<Bottle | null>('bottleStatus').catch(() => null)
+      draftId = ''
+      message.value = '邀请已结束，可以重新投瓶。'
+    } else if (code === 'CONFLICT') message.value = '有一方正在处理另一项合作，暂时无法组队。'
+    else message.value = '未能确认邀请，请重试。'
+  } finally { busy.value = false }
+}
+
+async function cancel(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  message.value = ''
+  try {
+    await secured<UTSJSONObject | null>('cancelBottle')
+    state.value = null
+    draftId = ''
+    message.value = '已收回漂流瓶。'
+  } catch (_) {
+    state.value = await secured<Bottle | null>('bottleStatus').catch(() => state.value)
+    message.value = '未能收回漂流瓶，请检查当前状态。'
+  } finally { busy.value = false }
+}
+
+async function leave(): Promise<void> {
+  const teamId = state.value?.teamId
+  if (busy.value || teamId == null) return
+  const result = await uni.showModal({ title: '退出合作？', content: '退出后，本次组队将结束。' })
+  if (!result.confirm || busy.value) return
+  busy.value = true
+  try {
+    await secured<UTSJSONObject>('leaveCoop', { teamId })
+    state.value = null
+    draftId = ''
+    message.value = '已退出合作。'
+  } catch (_) { message.value = '暂时无法退出合作，请重试。' }
+  finally { busy.value = false }
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.choice { flex: 1; width: auto; min-width: 0; }
+.feedback { padding: 8px 12px; border-radius: 12px; background: #f4ead8; }
+</style>

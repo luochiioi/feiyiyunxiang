@@ -129,3 +129,14 @@ test('resolves both WeChat marker event forms and ignores the location dot', asy
   assert.equal(resolveNodeId(nodes, { detail: { markerId: locationMarkerId } }), null)
   assert.equal(resolveNodeId(nodes, {}), null)
 })
+
+test('the selected route numbers stations in publication order and never connects separate routes', async () => {
+  const { buildMapMarkers, buildRoutePolyline } = await markerSource()
+  const second = { ...macauNode, id: 'macau-second', markerId: 101, latitude: 22.199 }
+  const mixed = [macauNode, hunanNode, second]
+  assert.deepEqual(buildRoutePolyline(mixed, null), [])
+  assert.deepEqual(buildRoutePolyline(mixed, 'hunan'), [])
+  assert.equal(buildMapMarkers(mixed, null, null, 'hunan')[0].callout, undefined)
+  assert.deepEqual(buildMapMarkers(mixed, null, null, 'macau').map(pin => [pin.id, pin.callout.content]), [[102, '1'], [101, '2']])
+  assert.deepEqual(buildRoutePolyline(mixed, 'macau')[0].points, [macauNode, second].map(({latitude, longitude}) => ({latitude, longitude})))
+})

@@ -24,7 +24,6 @@
         <view class="row spread menu-row" @click="openPage('/packages/story/works/works')"><text class="body">文化作品</text><text class="muted">›</text></view>
         <view class="row spread menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
         <view class="row spread divider menu-row" @click="openPage('/packages/community/community/community')"><text class="body">社区</text><text class="muted">›</text></view>
-        <view class="row spread divider menu-row" @click="showAi"><text class="body">AI 猜图</text><text class="muted">敬请期待 ›</text></view>
         <!-- #ifdef MP-WEIXIN -->
         <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="muted">›</text></view>
         <!-- #endif -->
@@ -58,9 +57,6 @@ function showPrivacy(): void {
   // #endif
 }
 async function signOut(): Promise<void> { busy.value = true; try { await api<UTSJSONObject>('logout'); clearSession(); activeRun.value = null } catch (_) { showError() } finally { busy.value = false } }
-function showAi(): void {
-  uni.showToast({ title: 'AI 猜图 · 敬请期待', icon: 'none' })
-}
 </script>
 
 <style scoped>
