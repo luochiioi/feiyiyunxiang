@@ -9,13 +9,17 @@ export type Quiz = { title: string, after: string[], prompt: string, hint?: stri
 type QuizOption = { id: string, label: string, illustration: string }
 type Learning = { title: string, after: string[], cards: LearningCard[] }
 type LearningCard = { id: string, title: string, hotspot: string, body: string, illustration?: string }
-export type CultureContent = { tile?: Activity, tileQuiz?: Quiz, quiz?: Quiz, learning?: Learning, chapters?: Chapter[] }
+export type Egg = { id: string, title: string, description: string, nodeId: string }
+export type CultureContent = { tile?: Activity, tileQuiz?: Quiz, quiz?: Quiz, learning?: Learning, chapters?: Chapter[], eggs?: Egg[] }
 export type DraftPreview = { name: string, region: string, testOnly: boolean, releaseAllowed: boolean, nodes: DraftNode[], culture?: CultureContent }
 
 export function combinedContent(nodeIds: string[]): CultureContent {
   const macau = macauContent(nodeIds)
-  const hunan = hunanContent()
-  return { ...macau, ...hunan, chapters: [...(macau.chapters ?? []), ...(hunan.chapters ?? [])] }
+  const hunan = hunanContent(nodeIds)
+  const eggs = [...(macau.eggs ?? []), ...(hunan.eggs ?? [])].filter((egg, index, all) => all.findIndex(item => item.id === egg.id) === index)
+  const result: CultureContent = { ...macau, ...hunan, chapters: [...(macau.chapters ?? []), ...(hunan.chapters ?? [])] }
+  if (eggs.length > 0) result.eggs = eggs
+  return result
 }
 
 export function scriptedContent(nodeIds: string[]): CultureContent {
@@ -164,7 +168,7 @@ export function hunanMuseumVisit(): MuseumVisit {
 }
 
 export function macauContent(nodeIds: string[]): CultureContent {
-  return {
+  const result: CultureContent = {
     tile: { title: '蓝白瓷砖配色', after: [] },
     tileQuiz: {
       title: '瓷砖纹样辨认', after: [], prompt: '观察码头插画里的瓷砖。哪张示意图同时画了船帆和波浪？',
@@ -199,10 +203,17 @@ export function macauContent(nodeIds: string[]): CultureContent {
       ] }
     ]
   }
+  if (nodeIds.length > 0) {
+    result.eggs = [
+      { id: 'egg-tile-corner', title: '找回一块蓝白瓷砖', description: '在第一个点位附近找到一块蓝白瓷砖纹样，拍下你最喜欢的一角。', nodeId: nodeIds[0] },
+      { id: 'egg-harbor-wave', title: '替船帆数浪', description: '站在码头边看清一片水面，用一句话描述今天的浪是什么形状。', nodeId: nodeIds[0] }
+    ]
+  }
+  return result
 }
 
-export function hunanContent(): CultureContent {
-  return {
+export function hunanContent(nodeIds: string[] = []): CultureContent {
+  const result: CultureContent = {
     quiz: {
       title: '湘绣辨认', after: [], prompt: '比较两幅针脚示意图。哪一幅里，上下两组针脚朝不同方向倾斜？',
       options: [{ id: 'a', label: '选择图 A', illustration: 'threads' }, { id: 'b', label: '选择图 B', illustration: 'threads-direction' }],
@@ -236,4 +247,10 @@ export function hunanContent(): CultureContent {
       ] }
     ]
   }
+  if (nodeIds.length > 0) {
+    result.eggs = [
+      { id: 'egg-stitch-line', title: '找一段转向的针脚', description: '在第一个点位附近找到一段改变方向的线条，说明它转向的位置。', nodeId: nodeIds[0] }
+    ]
+  }
+  return result
 }

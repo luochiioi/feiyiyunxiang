@@ -11,11 +11,10 @@
         <view class="card">
           <text class="heading">处理方式</text>
           <text class="body">这是 PK 胜者为你挑选的彩蛋任务，确认完成后即可参加下一场。</text>
-          <text class="body">答对好友发来的非遗猜图可免除一次。分配满 72 小时后也可主动拒绝。</text>
+          <text class="body">分配满 72 小时后，也可以主动拒绝。</text>
           <text class="muted">{{ rejectHint }}</text>
         </view>
         <button class="primary" :disabled="busy" @click="finish">确认完成</button>
-        <button class="secondary" @click="openPage('/packages/story/guess/guess')">查看好友猜图</button>
         <button v-if="rejectEnabled" class="secondary" :disabled="busy" @click="decline">拒绝任务</button>
       </template>
       <view v-else class="card">

@@ -32,6 +32,15 @@
         <text>{{ card.body }}</text>
       </view>
     </view>
+    <view v-if="eggs.length > 0" class="section">
+      <text class="heading">PK 彩蛋</text>
+      <text>胜者从下列彩蛋中挑一项交给败者，败者确认完成后才能参加下一场。</text>
+      <view v-for="egg in eggs" :key="egg.id" class="section">
+        <text class="heading">{{ egg.title }}</text>
+        <text>{{ egg.description }}</text>
+        <text>点位 · {{ nodeLabel(egg.nodeId) }}</text>
+      </view>
+    </view>
     <view v-if="chapters.length > 0" class="section">
       <text class="heading">章节试读</text>
       <view class="actions">
@@ -62,6 +71,7 @@ import type { DraftPreview, Quiz } from '@/features/stage-three-content.uts'
 const props = defineProps<{ value: DraftPreview }>()
 const clueNodes = computed(() => props.value.nodes.filter(node => node.clue != null || node.afterClue != null))
 const chapters = computed(() => props.value.culture?.chapters ?? [])
+const eggs = computed(() => props.value.culture?.eggs ?? [])
 const quizzes = computed((): Quiz[] => {
   const result: Quiz[] = []
   const culture = props.value.culture
@@ -87,8 +97,11 @@ const unlockLabel = computed(() => {
 })
 function gateLabel(ids: string[], any: boolean = false): string {
   if (ids.length === 0) return '可直接开始'
-  const names = ids.map(id => props.value.nodes.find(node => node.id === id)?.title ?? id).join('、')
+  const names = ids.map(id => nodeLabel(id)).join('、')
   return (any ? '任一地点完成打卡 · ' : '完成打卡 · ') + names
+}
+function nodeLabel(id: string): string {
+  return props.value.nodes.find(node => node.id === id)?.title ?? id
 }
 function illustrationLabel(illustration: string): string {
   if (illustration === 'threads') return '同向针脚'
