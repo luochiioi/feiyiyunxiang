@@ -8,7 +8,7 @@ export type PartnerFriend = { code: string, nickname: string }
 type SeatProgress = { done: number, total: number }
 export type CoopTask = { id: string, title: string }
 export type CoopView = {
-  id: string, status: string, routeId: string, mySeat: string, myRunId: string | null, invitedByMe: boolean,
+  id: string, status: string, routeId: string, mySeat: string, partnerSeat?: string, myRunId: string | null, invitedByMe: boolean,
   partner: PartnerFriend | null, myProgress?: SeatProgress, partnerProgress?: SeatProgress,
   myTasks: CoopTask[], partnerTasks: CoopTask[], myTaskOptions: CoopTask[]
 }

@@ -41,15 +41,18 @@ function createPartnershipService({ repo, now = Date.now }) {
 
   async function coopView(team, uid) {
     const mine = seatOf(team, uid)
-    const otherSeat = mine === 'macau' ? 'hunan' : 'macau'
     const other = team.members.find(id => id !== uid)
     const otherSeat = seatOf(team, other)
     const partnerProfile = (await repo.list('fy-profiles', { uid: other }))[0]
-    const snapshot = await repo.get('fy-versions', team.version)
-    const view = { id: team._id, status: team.status, mySeat: mine, routeId: team.routeId, version: team.version,
-      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: partnerProfile ? card(partnerProfile) : null,
+    const status = expiredInvite(team, now()) ? 'expired' : team.status
+    const local = team.memberRoutes?.[uid]
+    const remote = team.memberRoutes?.[other]
+    const snapshot = await repo.get('fy-versions', local?.version ?? team.version)
+    const partnerSnapshot = remote == null ? snapshot : await repo.get('fy-versions', remote.version)
+    const view = { id: team._id, status, mySeat: mine, partnerSeat: otherSeat, routeId: local?.routeId ?? team.routeId, version: local?.version ?? team.version,
+      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: partnerProfile ? (local == null ? card(partnerProfile) : { nickname: partnerProfile.nickname }) : null,
       myTasks: taskLabels(snapshot, taskSelection(snapshot, mine, team.tasks?.[uid])),
-      partnerTasks: taskLabels(snapshot, taskSelection(snapshot, otherSeat, team.tasks?.[other])),
+      partnerTasks: taskLabels(partnerSnapshot, taskSelection(partnerSnapshot, otherSeat, team.tasks?.[other])),
       myTaskOptions: taskLabels(snapshot, seatActivitiesOf(snapshot, mine)) }
     if (team.status === 'active') {
       const [myProgress, partnerProgress] = await Promise.all([seatProgress(team, uid), seatProgress(team, other)])
@@ -337,7 +340,7 @@ function seatNodes(run, seat) {
 }
 
 function seatOf(team, uid) {
-  return team.seats.macau === uid ? 'macau' : 'hunan'
+  return team.memberRoutes?.[uid]?.region ?? (team.seats.macau === uid ? 'macau' : 'hunan')
 }
 
 // 每个席位可选的文化任务来自路线快照，旧队伍没有记录时默认全部完成。
