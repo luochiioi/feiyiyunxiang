@@ -93,10 +93,10 @@ import CommunityGovernance from './CommunityGovernance.uvue'
 import CommunityOverview from './CommunityOverview.uvue'
 import CommunityUsers from './CommunityUsers.uvue'
 import { combinedContent, macauContent, hunanContent, scriptedContent, museumRouteDraft } from '@/features/stage-three-content.uts'
-import type { DraftNode, DraftPreview } from '@/features/stage-three-content.uts'
+import type { DraftExhibit, DraftNode, DraftPreview } from '@/features/stage-three-content.uts'
 type Museum = { name: string, description: string }
 type Viewport = { latitude: number, longitude: number, scale: number }
-type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: DraftNode[], cultureUpgrade?: string[] | null }
+type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: DraftNode[], exhibit?: DraftExhibit, cultureUpgrade?: string[] | null }
 const username = ref(''), password = ref(''), busy = ref(false), message = ref('')
 const editingAccount = ref(false), newUsername = ref('')
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
@@ -246,7 +246,7 @@ function openMuseumDraft(macau: boolean): void {
   if (existing != null) { edit(existing); return }
 
   draft.value = { id: preset.id, name: preset.name, region: preset.region, description: preset.description,
-    revision: preset.revision, testOnly: preset.testOnly, museum: preset.museum, viewport: preset.viewport, nodes: preset.nodes }
+    revision: preset.revision, testOnly: preset.testOnly, museum: preset.museum, viewport: preset.viewport, nodes: preset.nodes, exhibit: preset.exhibit }
   cultureSource.value = JSON.stringify(preset.culture, null, 2)
   cultureSourceRoutes.value = ''
   savedPayload = ''

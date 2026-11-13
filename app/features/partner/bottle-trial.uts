@@ -1,0 +1,31 @@
+export type BottleTrial = {
+  phase: string, role: string, mode: string, region: string,
+  hostAccepted: boolean, guestAccepted: boolean, outcome: string
+}
+
+export function newBottleTrial(): BottleTrial {
+  return { phase: 'idle', role: 'host', mode: 'cross', region: 'macau', hostAccepted: false, guestAccepted: false, outcome: '' }
+}
+
+export function bottleTrialRegion(trial: BottleTrial): string {
+  if (trial.role === 'host' || trial.mode === 'nearby') return trial.region
+  return trial.region === 'macau' ? 'hunan' : 'macau'
+}
+
+export function stepBottleTrial(trial: BottleTrial, action: string): BottleTrial {
+  if (action === 'restart' && trial.phase === 'closed') return newBottleTrial()
+  if (action === 'switch' && trial.phase !== 'idle' && trial.phase !== 'closed') {
+    return { ...trial, role: trial.role === 'host' ? 'guest' : 'host' }
+  }
+  if (action === 'throw' && trial.phase === 'idle') return { ...trial, phase: 'floating' }
+  if (action === 'pick' && trial.phase === 'floating' && trial.role === 'guest') return { ...trial, phase: 'offer' }
+  if (action === 'accept' && trial.phase === 'offer') {
+    const hostAccepted = trial.hostAccepted || trial.role === 'host'
+    const guestAccepted = trial.guestAccepted || trial.role === 'guest'
+    return { ...trial, hostAccepted, guestAccepted, phase: hostAccepted && guestAccepted ? 'paired' : 'offer' }
+  }
+  if (action === 'decline' && trial.phase === 'offer') return { ...trial, phase: 'closed', outcome: '已拒绝组队邀请。' }
+  if (action === 'withdraw' && trial.phase === 'floating' && trial.role === 'host') return { ...trial, phase: 'closed', outcome: '已收回漂流瓶。' }
+  if (action === 'leave' && trial.phase === 'paired') return { ...trial, phase: 'closed', outcome: '已退出试用合作。' }
+  return trial
+}

@@ -2,14 +2,20 @@ const { createHash } = require('node:crypto')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const fail = code => { throw new Error(code) }
 const { pkMethods } = require('./pk-service')
+const { bottleMethods } = require('./bottle-service')
 const { completedActivities } = require('./culture')
 const HOUR = 3600 * 1000
+const expiredInvite = (team, at) => team.status === 'invited' && team.expiresAt <= at
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 function createPartnershipService({ repo, now = Date.now }) {
   const member = u => { if (!u?.uid) fail('AUTH_REQUIRED') }
   const codeOf = value => typeof value === 'string' && /^[A-Z2-9]{8}$/.test(value)
   const requestOf = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)
+
+  async function lockCoopSlots(db, members, at) {
+    for (const uid of members) await db.put('fy-requests', key('coop-slot', uid), { updatedAt: at })
+  }
 
   function card(profile) {
     return { code: profile.code, nickname: profile.nickname, avatar: profile.avatar }
@@ -22,9 +28,9 @@ function createPartnershipService({ repo, now = Date.now }) {
       repo.list('fy-checkins', { runId, uid })
     ])
     if (!run) fail('NOT_FOUND')
-    const seat = team.seats.macau === uid ? 'macau' : 'hunan'
+    const seat = seatOf(team, uid)
     const nodes = seatNodes(run, seat)
-    const activities = seatActivities(run, seat)
+    const activities = taskSelection(run.snapshot, seat, team.tasks?.[uid])
     const completed = completedActivities(run)
     return {
       done: nodes.filter(id => checks.some(check => check.nodeId === id)).length +
@@ -34,18 +40,27 @@ function createPartnershipService({ repo, now = Date.now }) {
   }
 
   async function coopView(team, uid) {
-    const mine = team.seats.macau === uid ? 'macau' : 'hunan'
+    const mine = seatOf(team, uid)
     const other = team.members.find(id => id !== uid)
+    const otherSeat = seatOf(team, other)
     const partnerProfile = (await repo.list('fy-profiles', { uid: other }))[0]
-    const view = { id: team._id, status: team.status, mySeat: mine, routeId: team.routeId, version: team.version,
-      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: partnerProfile ? card(partnerProfile) : null }
+    const status = expiredInvite(team, now()) ? 'expired' : team.status
+    const local = team.memberRoutes?.[uid]
+    const remote = team.memberRoutes?.[other]
+    const snapshot = await repo.get('fy-versions', local?.version ?? team.version)
+    const partnerSnapshot = remote == null ? snapshot : await repo.get('fy-versions', remote.version)
+    const view = { id: team._id, status, mySeat: mine, partnerSeat: otherSeat, routeId: local?.routeId ?? team.routeId, version: local?.version ?? team.version,
+      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: partnerProfile ? (local == null ? card(partnerProfile) : { nickname: partnerProfile.nickname }) : null,
+      myTasks: taskLabels(snapshot, taskSelection(snapshot, mine, team.tasks?.[uid])),
+      partnerTasks: taskLabels(partnerSnapshot, taskSelection(partnerSnapshot, otherSeat, team.tasks?.[other])),
+      myTaskOptions: taskLabels(snapshot, seatActivitiesOf(snapshot, mine)) }
     if (team.status === 'active') {
       const [myProgress, partnerProgress] = await Promise.all([seatProgress(team, uid), seatProgress(team, other)])
       Object.assign(view, { myProgress, partnerProgress })
     }
     if (team.status === 'done') {
       const result = await repo.get('fy-results', key(team._id, 'result'))
-      view.result = { partnerLabel: mine === 'macau' ? '湖南旅伴' : '澳门旅伴', work: result.work, completedAt: result.completedAt }
+      view.result = { partnerLabel: otherSeat === 'macau' ? '澳门旅伴' : '湖南旅伴', work: result.work, completedAt: result.completedAt }
       view.public = { partnerLabel: view.result.partnerLabel, completedAt: result.completedAt }
     }
     return view
@@ -176,7 +191,8 @@ function createPartnershipService({ repo, now = Date.now }) {
         const pair = [u.uid, target.uid].sort()
         const friendship = await db.get('fy-friends', key('friend', ...pair))
         if (!friendship || friendship.status !== 'accepted') fail('NOT_FRIENDS')
-        if (await activeTeam(db, u.uid) || await activeTeam(db, target.uid)) fail('CONFLICT')
+        const at = now()
+        if (await activeTeam(db, u.uid, at) || await activeTeam(db, target.uid, at)) fail('CONFLICT')
         const route = await db.get('fy-routes', p.routeId)
         if (!route?.enabled) fail('NOT_FOUND')
         const snapshot = await db.get('fy-versions', route.version)
@@ -184,11 +200,14 @@ function createPartnershipService({ repo, now = Date.now }) {
         if (!plan) fail('INVALID_ROUTE')
         const mySeat = p.seat ?? 'macau'
         if (mySeat !== 'macau' && mySeat !== 'hunan') fail('INVALID_REQUEST')
+        const tasks = taskSelection(snapshot, mySeat, p.activities ?? null)
         const seats = { ...plan, macau: mySeat === 'macau' ? u.uid : target.uid, hunan: mySeat === 'hunan' ? u.uid : target.uid }
         const teamId = key('team', u.uid, p.requestId)
+        await lockCoopSlots(db, pair, at)
         await db.put('fy-teams', teamId, {
           members: pair, a: pair[0], b: pair[1], seats, routeId: p.routeId, version: route.version, status: 'invited',
-          invitedBy: u.uid, invitedAt: now(), expiresAt: now() + 24 * HOUR
+          tasks: { [u.uid]: tasks },
+          invitedBy: u.uid, invitedAt: at, expiresAt: at + 24 * HOUR
         })
         await db.put('fy-requests', requestKey, { teamId })
         await db.put('fy-requests', key(target.uid, 'coop', p.requestId), { teamId })
@@ -199,14 +218,20 @@ function createPartnershipService({ repo, now = Date.now }) {
     async respondCoop(u, p) {
       member(u)
       if (!requestOf(p.teamId) || typeof p.accept !== 'boolean') fail('INVALID_REQUEST')
-      return repo.tx(async db => {
+      const result = await repo.tx(async db => {
         const team = await loadTeam(db, p.teamId, u.uid)
         if (team.invitedBy === u.uid) fail('NOT_FOUND')
+        if (team.status === 'expired') return { id: p.teamId, status: 'expired' }
         if (team.status !== 'invited') fail('NOT_PENDING')
-        if (team.expiresAt <= now()) { await db.put('fy-teams', p.teamId, { ...team, status: 'expired' }); fail('EXPIRED') }
+        const at = now()
+        if (expiredInvite(team, at)) {
+          await db.put('fy-teams', p.teamId, { ...team, status: 'expired' })
+          return { id: p.teamId, status: 'expired' }
+        }
         if (!p.accept) { await db.put('fy-teams', p.teamId, { ...team, status: 'declined' }); return { id: p.teamId, status: 'declined' } }
-        if (await activeTeam(db, u.uid, p.teamId)) fail('CONFLICT')
+        if (await activeTeam(db, u.uid, at, p.teamId)) fail('CONFLICT')
         const snapshot = await db.get('fy-versions', team.version)
+        const tasks = taskSelection(snapshot, seatOf(team, u.uid), p.activities ?? null)
         const runs = {}
         for (const uid of team.members) {
           const runId = key(uid, 'coop', p.teamId)
@@ -215,16 +240,20 @@ function createPartnershipService({ repo, now = Date.now }) {
           })
           runs[uid] = runId
         }
-        await db.put('fy-teams', p.teamId, { ...team, status: 'active', runs, startedAt: now() })
+        await db.put('fy-teams', p.teamId, {
+          ...team, tasks: { ...(team.tasks ?? {}), [u.uid]: tasks }, status: 'active', runs, startedAt: now()
+        })
         return { id: p.teamId, status: 'active' }
       })
+      if (result.status === 'expired') fail('EXPIRED')
+      return result
     },
 
     async withdrawCoop(u, p) {
       member(u)
       return repo.tx(async db => {
         const team = await loadTeam(db, p.teamId, u.uid)
-        if (team.invitedBy !== u.uid || team.status !== 'invited') fail('NOT_PENDING')
+        if (team.invitedBy !== u.uid || team.status !== 'invited' || expiredInvite(team, now())) fail('NOT_PENDING')
         await db.put('fy-teams', p.teamId, { ...team, status: 'withdrawn' })
         return { id: p.teamId }
       })
@@ -247,7 +276,7 @@ function createPartnershipService({ repo, now = Date.now }) {
 
     async myCoop(u) {
       member(u)
-      const team = await activeTeam(repo, u.uid)
+      const team = await activeTeam(repo, u.uid, now())
       return team == null ? null : coopView(team, u.uid)
     },
 
@@ -260,30 +289,32 @@ function createPartnershipService({ repo, now = Date.now }) {
         for (const uid of team.members) {
           const run = await db.get('fy-runs', team.runs[uid])
           const checks = await db.list('fy-checkins', { runId: team.runs[uid], uid })
-          const seat = team.seats.macau === uid ? 'macau' : 'hunan'
+          const seat = seatOf(team, uid)
           const nodesDone = seatNodes(run, seat).every(id => checks.some(check => check.nodeId === id))
-          const cultureDone = seatActivities(run, seat).every(id => run.culture?.[id])
+          const cultureDone = taskSelection(run.snapshot, seat, team.tasks?.[uid]).every(id => run.culture?.[id])
           if (!nodesDone || !cultureDone) fail('NOT_READY')
         }
-        const macauRun = await db.get('fy-runs', team.runs[team.seats.macau])
+        const macauUid = team.members.find(uid => seatOf(team, uid) === 'macau')
+        const macauRun = macauUid == null ? null : await db.get('fy-runs', team.runs[macauUid])
         const resultId = key(p.teamId, 'result')
         if (!await db.get('fy-results', resultId)) {
           await db.put('fy-results', resultId, {
             teamId: p.teamId, routeId: team.routeId, version: team.version,
-            work: macauRun.culture?.tile ?? null, theme: 'xiang-embroidery', completedAt: now()
+            work: macauRun?.culture?.tile ?? null, theme: 'xiang-embroidery', completedAt: now()
           })
         }
         await db.put('fy-teams', p.teamId, { ...team, status: 'done', completedAt: now() })
         return { id: p.teamId, alreadySettled: false }
       })
     },
+    ...bottleMethods({ repo, now, key, fail, member, requestOf, activeTeam, lockCoopSlots }),
     ...pkMethods({ repo, now, key, fail, member, codeOf, requestOf })
   }
 }
 
-async function activeTeam(db, uid, except) {
+async function activeTeam(db, uid, at, except) {
   const rows = [...await db.list('fy-teams', { a: uid }), ...await db.list('fy-teams', { b: uid })]
-  return rows.find(row => (row.status === 'invited' || row.status === 'active') && row._id !== except) ?? null
+  return rows.find(row => (row.status === 'active' || (row.status === 'invited' && !expiredInvite(row, at))) && row._id !== except) ?? null
 }
 
 async function loadTeam(db, teamId, uid) {
@@ -303,13 +334,35 @@ function seatPlan(snapshot) {
 }
 
 function seatNodes(run, seat) {
+  if (run.bottle === true) return run.snapshot.nodes.map(node => node.id)
   const plan = seatPlan(run.snapshot)
   return seat === 'macau' ? plan.macauNodes : plan.hunanNodes
 }
 
-function seatActivities(run, seat) {
-  const ids = seat === 'macau' ? ['tile', 'tileQuiz'] : ['quiz', 'learning']
-  return ids.filter(id => run.snapshot.culture?.[id])
+function seatOf(team, uid) {
+  return team.memberRoutes?.[uid]?.region ?? (team.seats.macau === uid ? 'macau' : 'hunan')
 }
 
-module.exports = { createPartnershipService, seatNodes, seatActivities }
+// 每个席位可选的文化任务来自路线快照，旧队伍没有记录时默认全部完成。
+function seatActivitiesOf(snapshot, seat) {
+  const ids = seat === 'macau' ? ['tile', 'tileQuiz'] : ['quiz', 'learning']
+  return ids.filter(id => snapshot?.culture?.[id])
+}
+
+function taskSelection(snapshot, seat, picked) {
+  const options = seatActivitiesOf(snapshot, seat)
+  if (picked == null) return options
+  if (!Array.isArray(picked) || picked.length === 0 || new Set(picked).size !== picked.length ||
+    !picked.every(id => options.includes(id))) fail('INVALID_TASKS')
+  return picked
+}
+
+function taskLabels(snapshot, ids) {
+  return ids.map(id => ({ id, title: snapshot?.culture?.[id]?.title ?? id }))
+}
+
+function seatActivities(run, seat) {
+  return seatActivitiesOf(run.snapshot, seat)
+}
+
+module.exports = { createPartnershipService, seatNodes, seatActivities, seatOf }

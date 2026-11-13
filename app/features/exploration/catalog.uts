@@ -4,11 +4,11 @@ import { demoEnabled } from '../demo-mode.uts'
 import { demoNodes, demoRoutes } from './demo-fixtures.uts'
 import { visibleMapNodes } from './map-markers.uts'
 import type { ExhibitClue, RouteNode, RouteSummary, MapViewport } from './types.uts'
-export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number, clue?: ExhibitClue, afterClue?: string }
+export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number, clue?: ExhibitClue, afterClue?: string, alternate?: string, reward?: string }
 export type ActivitySummary = { id: string, title: string, after?: string[] }
 export type ChapterGuide = { act: number, title: string, activityId?: string | null, gateText: string }
-export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean, cultureSourceRoutes?: string[] }
-export type RunProgress = { runId: string, routeId: string, version: string, purpose?: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, activities?: string[] }
+export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], exhibit?: PublishedNode, activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean, cultureSourceRoutes?: string[] }
+export type RunProgress = { runId: string, routeId: string, version: string, purpose?: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, exhibitCompleted?: boolean, activities?: string[] }
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)
 export const catalogError = shallowRef(false)
@@ -72,7 +72,8 @@ export function summarizeRoute(r: PublishedRoute, run: RunProgress | null): Rout
   const completed = run?.completed ?? []
   const next = r.nodes.find(n => !completed.includes(n.id) && (n.afterClue == null || completed.includes(n.afterClue!)))
   const activities = r.activities ?? []
-  return { id: r.id, name: (r.testOnly ? '开发测试 · ' : '') + r.name, region: r.region, description: r.description,
+  const name = published.value.find(route => route.id === r.id)?.name ?? r.name
+  return { id: r.id, name: (r.testOnly ? '开发测试 · ' : '') + name, region: r.region, description: r.description,
     total: r.nodes.length + activities.length, done: completed.length + (run?.activities?.length ?? 0),
     nextNodeId: next == null ? null : r.id + ':' + next.id, viewport: r.viewport }
 }

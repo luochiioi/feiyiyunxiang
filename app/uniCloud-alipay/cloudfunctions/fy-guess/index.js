@@ -3,7 +3,7 @@ const { createGuessImage } = require('./heritage-guess-image')
 const { security, repository, media } = require('./core')
 
 const actions = new Set(['guessInbox', 'guessSend', 'guessImage', 'guessHint', 'guessAnswer'])
-const errors = new Set(['AUTH_REQUIRED', 'NOT_FOUND', 'NOT_FRIENDS', 'REQUEST_CONFLICT',
+const errors = new Set(['FORBIDDEN', 'AUTH_REQUIRED', 'NOT_FOUND', 'NOT_FRIENDS', 'REQUEST_CONFLICT',
   'GUESS_GENERATING', 'GUESS_CONFIG_REQUIRED', 'GUESS_IMAGE_FAILED', 'GUESS_ANSWERED',
   'NO_GUESS_HINT', 'RATE_LIMITED', 'MEDIA_UPLOAD_FAILED', 'PHOTO_UNAVAILABLE'])
 
@@ -20,7 +20,8 @@ exports.main = async (event, context) => {
     const privateMedia = media.createCommunityMedia({ cloud: uniCloud, cfg, namespace: 'heritage-guess',
       limited: async () => {} }) // guessSend already reserves a per-account generation quota before any upload.
     const generate = createGuessImage({ http: uniCloud.httpclient, cfg })
-    const data = await createHeritageGuess({ repo, media: privateMedia, generate })[event.action]({ uid }, event.payload ?? {})
+    const data = await createHeritageGuess({ repo, media: privateMedia, generate,
+      allowSelfTrial: cfg.imageGuess?.allowSelfTrial === true })[event.action]({ uid }, event.payload ?? {})
     return { code: 'OK', data }
   } catch (error) {
     const code = errors.has(error.message) || /^INVALID_[A-Z_]+$/.test(error.message)

@@ -23,7 +23,7 @@ export type RouteSummary = {
   nextNodeId: string | null
   viewport: MapViewport
 }
-export type ExhibitClue = { story: string, question: string }
+export type ExhibitClue = { story: string, question: string, options?: string[] }
 export type RouteNode = {
   id: string
   markerId: number
@@ -34,5 +34,7 @@ export type RouteNode = {
   longitude: number
   checked: boolean
   clue?: ExhibitClue
+  alternate?: string
+  reward?: string
   afterClue?: string
 }

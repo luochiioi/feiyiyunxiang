@@ -1,0 +1,80 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="漂流瓶 · 单人试用" :show-back="true" />
+    <view class="content">
+      <template v-if="enabled">
+        <view class="card green">
+          <text class="title">漂流瓶</text>
+          <text class="body">切换两个示范角色，试走从投瓶到组队的流程。当前操作只保存在此页。</text>
+          <text class="tag">{{ roleLabel }}</text>
+          <button v-if="canSwitch" class="secondary" @click="step('switch')">
+            {{ state.role === 'host' ? '切换为示范旅伴' : '切换回我' }}
+          </button>
+        </view>
+        <view v-if="state.phase === 'idle'" class="card">
+          <text class="heading">投一个漂流瓶</text>
+          <text class="body">选择匹配方式</text>
+          <view class="row">
+            <button class="choice" :class="state.mode === 'nearby' ? 'primary' : 'secondary'" @click="state.mode = 'nearby'">附近</button>
+            <button class="choice" :class="state.mode === 'cross' ? 'primary' : 'secondary'" @click="state.mode = 'cross'">跨地区</button>
+          </view>
+          <text class="body">选择我的路线</text>
+          <view class="row">
+            <button class="choice" :class="state.region === 'macau' ? 'primary' : 'secondary'" @click="state.region = 'macau'">澳门 · 上集</button>
+            <button class="choice" :class="state.region === 'hunan' ? 'primary' : 'secondary'" @click="state.region = 'hunan'">湖南 · 下集</button>
+          </view>
+          <button class="primary" @click="step('throw')">投出漂流瓶</button>
+        </view>
+        <view v-else-if="state.phase === 'floating'" class="card">
+          <text class="heading">{{ state.role === 'host' ? '瓶子已投出' : '捡到一个漂流瓶' }}</text>
+          <text class="body">{{ modeLabel }} · {{ state.region === 'macau' ? '澳门博物馆' : '湖南湘绣博物馆' }}</text>
+          <button v-if="state.role === 'guest'" class="primary" @click="step('pick')">打开组队邀请</button>
+          <button v-else class="secondary" @click="step('withdraw')">收回漂流瓶</button>
+        </view>
+        <view v-else-if="state.phase === 'offer'" class="card">
+          <text class="heading">确认组队</text>
+          <text class="body">我 {{ state.hostAccepted ? '已同意' : '待确认' }}</text>
+          <text class="body">示范旅伴 {{ state.guestAccepted ? '已同意' : '待确认' }}</text>
+          <button class="primary" :disabled="hasAccepted" @click="step('accept')">{{ hasAccepted ? '等待另一方确认' : '同意组队' }}</button>
+          <button class="secondary" @click="step('decline')">拒绝邀请</button>
+        </view>
+        <view v-else-if="state.phase === 'paired'" class="card">
+          <text class="heading">组队成功</text>
+          <text class="body">{{ routeName }}</text>
+          <text class="muted">{{ routeRegion === 'macau' ? '澳门博物馆 · 大炮台入口' : '湖南湘绣博物馆 · 馆外入口' }} · 试用路线</text>
+          <button class="secondary" @click="step('leave')">退出合作</button>
+        </view>
+        <view v-else class="card">
+          <text class="heading">{{ state.outcome }}</text>
+          <button class="primary" @click="step('restart')">再试一次</button>
+        </view>
+      </template>
+      <view v-else class="card"><text class="body">此页供开发版单人试用。</text></view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import { computed, ref } from 'vue'
+import { bottleTrialRegion, newBottleTrial, stepBottleTrial } from '@/features/partner/bottle-trial.uts'
+
+const enabled = process.env.NODE_ENV === 'development'
+const state = ref(newBottleTrial())
+const canSwitch = computed(() => state.value.phase !== 'idle' && state.value.phase !== 'closed')
+const roleLabel = computed(() => state.value.role === 'host' ? '当前角色 · 我' : '当前角色 · 示范旅伴')
+const modeLabel = computed(() => state.value.mode === 'nearby' ? '附近匹配' : '跨地区匹配')
+const hasAccepted = computed(() => state.value.role === 'host' ? state.value.hostAccepted : state.value.guestAccepted)
+const routeRegion = computed(() => bottleTrialRegion(state.value))
+const routeName = computed(() => routeRegion.value === 'macau'
+  ? '海丝瓷绣·一念归期(上)' : '海丝瓷绣·一念归期(下)')
+
+function step(action: string): void {
+  if (enabled) state.value = stepBottleTrial(state.value, action)
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.choice { flex: 1; width: auto; min-width: 0; }
+</style>

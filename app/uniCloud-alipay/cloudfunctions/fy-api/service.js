@@ -2,7 +2,7 @@ const { createHash } = require('node:crypto')
 const { validateCulture, cultureSummary, chapterGuide, completedActivities, activityIds } = require('./culture')
 const { createCultureService } = require('./culture-service')
 const { createCultureUpgrade } = require('./culture-upgrade')
-const { seatNodes, seatActivities } = require('./partnership-service')
+const { seatNodes, seatActivities, seatOf } = require('./partnership-service')
 const fail = code => { throw new Error(code) }
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const text = (v, max=120) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
@@ -39,6 +39,18 @@ function validateDraft(p) {
   })
   const value = {id:p.id,name:p.name,description:p.description,region:p.region,testOnly:p.testOnly,museum:{name:p.museum.name,description:p.museum.description},viewport:{latitude:p.viewport.latitude,longitude:p.viewport.longitude,scale:p.viewport.scale},nodes}
   if (p.culture != null) value.culture = validateCulture(p.culture, ids)
+  if (p.exhibit != null) {
+    const e = p.exhibit
+    const entrance = nodes.find(n => n.id === e.afterClue)
+    const { story, question, options, answer } = e.clue ?? {}
+    if (!id(e.id) || ids.has(e.id) || !entrance?.clue || !text(e.title) || !text(e.description, 2000) ||
+      !text(e.alternate, 500) || !text(story, 2000) || !text(question, 200) || !Array.isArray(options) ||
+      options.length !== 3 || new Set(options).size !== 3 || !options.every(option => text(option, 80)) ||
+      !options.includes(answer) || !['tile', 'learning'].includes(e.reward) || !value.culture?.[e.reward]) fail('INVALID_EXHIBIT')
+    const {latitude, longitude, radius} = entrance
+    value.exhibit = { id: e.id, title: e.title, description: e.description, alternate: e.alternate, reward: e.reward,
+      afterClue: entrance.id, latitude, longitude, radius, clue: { story, question, options, answer } }
+  }
   if (p.cultureUpgrade != null) {
     const from = p.cultureUpgrade
     const culture = value.culture
@@ -75,17 +87,24 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     if (!id(p.requestId)||!id(p.nodeId)) fail('INVALID_REQUEST')
     const run=await owned(db,u,p.runId)
     const node=run.snapshot.nodes.find(n=>n.id===p.nodeId)
-    if (!node) fail('NOT_FOUND')
-    return {run,node}
+    const exhibit = (run.purpose ?? 'solo') === 'solo' ? run.snapshot.exhibit : null
+    if (node != null) return {run,node}
+    if (exhibit?.id !== p.nodeId) fail('NOT_FOUND')
+    return {run,node:exhibit}
   }
   async function checkinWindow(db, run, runId) {
+    if (run.bottle === true) {
+      const team = await db.get('fy-teams', run.teamId)
+      if (team?.status !== 'active' || team.runs?.[run.uid] !== runId) fail('NOT_PENDING')
+      return
+    }
     if (run.purpose !== 'pk') return
     const match = await db.get('fy-matches', run.matchId)
     if (match?.status !== 'running' || match.runs?.[run.uid] !== runId) fail('NOT_PENDING')
     if (now() > match.startedAt + 24 * 3600 * 1000) fail('EXPIRED')
   }
   async function checkClueGate(db, run, runId, node) {
-    if ((run.purpose ?? 'solo') !== 'solo' || node.afterClue == null) return
+    if (((run.purpose ?? 'solo') !== 'solo' && run.bottle !== true) || node.afterClue == null) return
     if (!await db.get('fy-checkins', key(runId, node.afterClue))) fail('CLUE_LOCKED')
   }
   async function runProgress(u, runId, run) {
@@ -93,11 +112,11 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
     const purpose = run.purpose ?? 'solo'
     const checked = checks.map(check => check.nodeId)
-    const snapshot = routeView(run.snapshot, run.version, checked, purpose === 'solo')
+    const snapshot = routeView(run.snapshot, run.version, checked, purpose === 'solo' || run.bottle === true)
     if (purpose === 'coop') {
       const team = await repo.get('fy-teams', run.teamId)
       if (team?.runs?.[u.uid] !== runId) fail('NOT_FOUND')
-      const seat = team.seats.macau === u.uid ? 'macau' : 'hunan'
+      const seat = seatOf(team, u.uid)
       const nodes = seatNodes(run, seat)
       const activities = seatActivities(run, seat)
       snapshot.nodes = snapshot.nodes.filter(node => nodes.includes(node.id))
@@ -105,13 +124,19 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     }
     if (purpose === 'pk') snapshot.activities = []
     const completed = checked.filter(id => snapshot.nodes.some(node => node.id === id))
+    const exhibit = purpose === 'solo' ? run.snapshot.exhibit : null
+    if (exhibit != null && completed.includes(exhibit.afterClue)) {
+      const { clue, ...details } = exhibit
+      snapshot.exhibit = { ...details, clue: { story: clue.story, question: clue.question, options: clue.options } }
+    }
     const doneActivities = completedActivities(run)
     const activities = snapshot.activities.filter(activity => doneActivities.includes(activity.id)).map(activity => activity.id)
     return { runId, routeId: run.routeId, version: run.version, purpose, snapshot, completed, activities,
+      exhibitCompleted: snapshot.exhibit != null && checked.includes(snapshot.exhibit.id),
       done: completed.length + activities.length, total: snapshot.nodes.length + snapshot.activities.length }
   }
   return {
-    ...createCultureService({ repo, owned, key, now, attachCulture }),
+    ...createCultureService({ repo, owned, key, now, attachCulture, checkinWindow }),
     async drafts(u) { adminOnly(u); return repo.list('fy-drafts',{}) },
     async previewDraft(u, p) {
       adminOnly(u)
@@ -178,8 +203,9 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     // Only called with server-generated metadata after authenticated byte upload.
     async registerMedia(u,p) {
       if (!text(p.fileID, 2048)) fail('MEDIA_UPLOAD_FAILED')
-      const { run } = await binding(repo,u,p)
+      const { run, node } = await binding(repo,u,p)
       await checkinWindow(repo, run, p.runId)
+      if (node === run.snapshot.exhibit) await checkClueGate(repo, run, p.runId, node)
       await repo.put('fy-media',p.id,{uid:u.uid,runId:p.runId,nodeId:p.nodeId,requestId:p.requestId,fileID:p.fileID,mime:p.mime,createdAt:now(),used:false})
       return {id:p.id}
     },
@@ -201,10 +227,13 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         if (old) return {id:cid,alreadyCompleted:true}
         await checkinWindow(db, run, p.runId)
         await checkClueGate(db, run, p.runId, node)
-        if ((run.purpose ?? 'solo') === 'solo' && node.clue != null &&
+        if (((run.purpose ?? 'solo') === 'solo' || run.bottle === true) && node.clue != null &&
           (!text(p.clueAnswer, 80) || p.clueAnswer.trim().normalize('NFKC') !== node.clue.answer)) fail('CLUE_INCORRECT')
-        if (!coord(p.latitude,p.longitude)) fail('INVALID_LOCATION')
-        if (distance(node,p)>node.radius) fail('OUTSIDE_RANGE')
+        const exhibit = node === run.snapshot.exhibit
+        if (!exhibit) {
+          if (!coord(p.latitude,p.longitude)) fail('INVALID_LOCATION')
+          if (distance(node,p)>node.radius) fail('OUTSIDE_RANGE')
+        }
         if(typeof p.note!=='undefined'&&(typeof p.note!=='string'||p.note.length>1000)) fail('INVALID_NOTE')
         const media= id(p.mediaId) ? await db.get('fy-media',p.mediaId) : null
         if (!media||media.uid!==u.uid||media.runId!==p.runId||media.nodeId!==p.nodeId||media.requestId!==p.requestId||media.used) fail('MEDIA_MISMATCH')

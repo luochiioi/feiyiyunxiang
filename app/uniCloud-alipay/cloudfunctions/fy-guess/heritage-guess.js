@@ -30,29 +30,51 @@ const variants = Object.fromEntries(Object.entries(styles).flatMap(([craftId, st
 const legacyOptions = [...Object.entries(styles).map(([id, style]) => ({ id, label: style.name })),
   { id: 'print', label: '木版印花' }]
 const motifOptions = Object.entries(variants).map(([id, style]) => ({ id, label: style.name }))
+const lookalikes = [
+  { id: 'resist-floral', label: '蓝印花布 · 花卉纹样' },
+  { id: 'porcelain-bird', label: '青花瓷 · 鸟纹样' },
+  { id: 'resist-bird', label: '蓝印花布 · 鸟纹样' },
+  { id: 'porcelain-floral', label: '青花瓷 · 花卉纹样' }
+]
 const allStyles = { ...styles, ...variants }
 const leaseMs = 110000
 const dayMs = 86400000
 const fail = code => { throw new Error(code) }
 const requestOf = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)
-const styleOf = value => typeof value === 'string' && Object.hasOwn(allStyles, value)
+const styleOf = value => typeof value === 'string' && (Object.hasOwn(styles, value) || Object.hasOwn(variants, value))
 const walletId = uid => key('heritage-guess-wallet', uid)
-const optionsFor = style => Object.hasOwn(variants, style) ? motifOptions : legacyOptions
+function optionsFor(row) {
+  if (!Object.hasOwn(variants, row.style)) return legacyOptions
+  return row.options?.length === 8 ? row.options : motifOptions
+}
+
+function shuffledOptions() {
+  const options = [...motifOptions, ...lookalikes]
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1)
+    const option = options[i]
+    options[i] = options[j]
+    options[j] = option
+  }
+  return options
+}
 
 function guessView(row, uid) {
-  const mine = row.from === uid
+  const mine = row.from === uid && row.selfTrial !== true
   return {
     id: row._id, createdAt: row.createdAt, mine, otherName: mine ? row.toName : row.fromName,
-    options: optionsFor(row.style), eliminated: mine ? null : row.eliminated ?? null,
+    options: optionsFor(row), eliminated: mine ? null : row.eliminated ?? null,
+    selfTrial: row.selfTrial === true,
     result: row.result == null ? null : mine ? { ...row.result, reward: '' } : row.result
   }
 }
 
-function createHeritageGuess({ repo, media, generate, now = Date.now }) {
+function createHeritageGuess({ repo, media, generate, now = Date.now, allowSelfTrial = false }) {
   async function readyGuess(db, uid, id, recipientOnly = false) {
     if (!requestOf(id)) fail('NOT_FOUND')
     const row = await db.get('fy-heritage-guesses', id)
-    if (row?.status !== 'ready' || (row.to !== uid && (recipientOnly || row.from !== uid))) fail('NOT_FOUND')
+    if (row?.status !== 'ready' || (row.selfTrial === true && !allowSelfTrial) ||
+      (row.to !== uid && (recipientOnly || row.from !== uid))) fail('NOT_FOUND')
     return row
   }
 
@@ -74,35 +96,48 @@ function createHeritageGuess({ repo, media, generate, now = Date.now }) {
         repo.page('fy-heritage-guesses', { ...filter, from: u.uid }, page),
         repo.get('fy-guess-wallets', walletId(u.uid))
       ])
-      return { incoming: inbox.map(row => guessView(row, u.uid)), sent: sent.map(row => guessView(row, u.uid)),
-        hints: wallet?.hints ?? 0, supportsMotifs: true }
+      return {
+        incoming: inbox.filter(row => allowSelfTrial || row.selfTrial !== true).map(row => guessView(row, u.uid)),
+        sent: sent.filter(row => row.selfTrial !== true).map(row => guessView(row, u.uid)),
+        hints: wallet?.hints ?? 0, supportsMotifs: true, supportsSelfTrial: allowSelfTrial
+      }
     },
 
     async guessSend(u, p) {
-      if (!styleOf(p.style) || !requestOf(p.requestId) || typeof p.code !== 'string' || !/^[A-Z2-9]{8}$/.test(p.code)) fail('INVALID_REQUEST')
+      const selfTrial = p.selfTrial === true
+      if (selfTrial && !allowSelfTrial) fail('FORBIDDEN')
+      if (!styleOf(p.style) || !requestOf(p.requestId) ||
+        (!selfTrial && (typeof p.code !== 'string' || !/^[A-Z2-9]{8}$/.test(p.code)))) fail('INVALID_REQUEST')
+      const toCode = selfTrial ? '' : p.code
       const id = key('heritage-guess', u.uid, p.requestId)
       const attempt = randomUUID()
       const result = await repo.tx(async db => {
         const existing = await db.get('fy-heritage-guesses', id)
         if (existing) {
-          if (existing.toCode !== p.code || existing.style !== p.style) fail('REQUEST_CONFLICT')
+          if (existing.toCode !== toCode || existing.style !== p.style || (existing.selfTrial === true) !== selfTrial) fail('REQUEST_CONFLICT')
           if (existing.status === 'ready') return 'sent'
           if (existing.status === 'generating' && existing.leaseUntil > now()) fail('GUESS_GENERATING')
         }
 
-        const target = (await db.list('fy-profiles', { code: p.code }))[0]
-        if (!target || target.uid === u.uid) fail('NOT_FRIENDS')
-        const friend = await db.get('fy-friends', key('friend', ...[u.uid, target.uid].sort()))
-        if (friend?.status !== 'accepted') fail('NOT_FRIENDS')
         const sender = (await db.list('fy-profiles', { uid: u.uid }))[0]
-        if (!sender) fail('NOT_FRIENDS')
+        if (!sender && !selfTrial) fail('NOT_FRIENDS')
+        const target = selfTrial ? { uid: u.uid, nickname: '自己' } : (await db.list('fy-profiles', { code: toCode }))[0]
+        if (!selfTrial) {
+          if (!target || target.uid === u.uid) fail('NOT_FRIENDS')
+          const friend = await db.get('fy-friends', key('friend', ...[u.uid, target.uid].sort()))
+          if (friend?.status !== 'accepted') fail('NOT_FRIENDS')
+        }
         const day = Math.floor(now() / dayMs)
-        const quotaId = key('heritage-guess-quota', u.uid, day)
+        const quotaId = key(selfTrial ? 'heritage-guess-trial-quota' : 'heritage-guess-quota', u.uid, day)
         const quota = await db.get('fy-limits', quotaId)
         if ((quota?.count ?? 0) >= 5) fail('RATE_LIMITED')
         await db.put('fy-limits', quotaId, { count: (quota?.count ?? 0) + 1, expiresAt: (day + 1) * dayMs })
+        const options = existing?.options ??
+          (!existing && Object.hasOwn(variants, p.style) ? shuffledOptions() : null)
         await db.put('fy-heritage-guesses', id, {
-          from: u.uid, to: target.uid, toCode: p.code, fromName: sender.nickname, toName: target.nickname,
+          from: u.uid, to: target.uid, toCode, fromName: selfTrial ? '自己' : sender.nickname, toName: target.nickname,
+          ...(selfTrial ? { selfTrial: true } : {}),
+          ...(options ? { options } : {}),
           style: p.style, status: 'generating', attempt, leaseUntil: now() + leaseMs, createdAt: now()
         })
         return 'generate'
@@ -136,11 +171,12 @@ function createHeritageGuess({ repo, media, generate, now = Date.now }) {
       return repo.tx(async db => {
         const row = await readyGuess(db, u.uid, p.id, true)
         if (row.result) fail('GUESS_ANSWERED')
+        if (row.selfTrial === true) fail('FORBIDDEN')
         const id = walletId(u.uid)
         const wallet = await db.get('fy-guess-wallets', id)
         if (row.eliminated) return { eliminated: row.eliminated, hints: wallet?.hints ?? 0 }
         if (!(wallet?.hints > 0)) fail('NO_GUESS_HINT')
-        const wrong = optionsFor(row.style).filter(option => option.id !== row.style)
+        const wrong = optionsFor(row).filter(option => option.id !== row.style)
         const eliminated = wrong[randomInt(wrong.length)].id
         const hints = wallet.hints - 1
         await db.put('fy-guess-wallets', id, { hints })
@@ -153,10 +189,10 @@ function createHeritageGuess({ repo, media, generate, now = Date.now }) {
       return repo.tx(async db => {
         const row = await readyGuess(db, u.uid, p.id, true)
         if (row.result) return row.result
-        if (!optionsFor(row.style).some(option => option.id === p.choice) || row.eliminated === p.choice) fail('INVALID_GUESS_OPTION')
+        if (!optionsFor(row).some(option => option.id === p.choice) || row.eliminated === p.choice) fail('INVALID_GUESS_OPTION')
         const correct = p.choice === row.style
-        let reward = ''
-        if (correct) {
+        let reward = correct && row.selfTrial === true ? 'trial' : ''
+        if (correct && row.selfTrial !== true) {
           const id = walletId(u.uid)
           const wallet = await db.get('fy-guess-wallets', id)
           const assignments = await db.list('fy-assignments', { uid: u.uid })

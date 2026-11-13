@@ -75,6 +75,12 @@
           "path": "partner/partner"
         },
         {
+          "path": "bottle/bottle"
+        },
+        {
+          "path": "bottle-trial/bottle-trial"
+        },
+        {
           "path": "coop/coop"
         },
         {

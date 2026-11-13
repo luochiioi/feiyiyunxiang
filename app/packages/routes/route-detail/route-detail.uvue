@@ -19,6 +19,10 @@
             <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : node.locked ? '待解锁' : '去打卡' }} ›</text>
           </view>
         </view>
+        <view v-if="progress?.snapshot.exhibit != null" class="card">
+          <text class="heading">展品彩蛋</text>
+          <button class="secondary" @click="openExhibit">{{ progress?.exhibitCompleted === true ? '回看展品观察' : '开始展品观察' }}</button>
+        </view>
         <view v-if="activities.length > 0" class="card">
           <text class="heading">文化任务</text>
           <view v-for="item in activities" :key="item.id" class="row spread divider menu-row" @click="openActivity(item.id)">
@@ -112,6 +116,11 @@ async function openPoint(nodeId: string): Promise<void> {
     return
   }
   if (await selectViewedRun()) openCheckin(nodeId)
+}
+function openExhibit(): void {
+  const run = progress.value
+  const exhibit = run?.snapshot.exhibit
+  if (run != null && exhibit != null) openCheckin(run.routeId + ':' + exhibit.id, run.runId)
 }
 function openActivity(activityId: string): void {
   if (id.value == null) return

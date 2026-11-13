@@ -2,6 +2,9 @@ import type { MapPosition, RouteNode } from './types.uts'
 
 export const locationMarkerId = 90000
 
+type RouteNumber = { content: string, color: string, bgColor: string, borderRadius: number, padding: number, fontSize: number, display: string }
+type RouteLine = { points: MapPosition[], color: string, width: number, arrowLine: boolean }
+
 type MapMarker = {
   id: number
   latitude: number
@@ -11,6 +14,7 @@ type MapMarker = {
   height: number
   anchor: { x: number, y: number }
   zIndex: number
+  callout?: RouteNumber
 }
 
 export type MarkerEvent = { markerId?: number, detail?: { markerId?: number } }
@@ -19,16 +23,29 @@ export function visibleMapNodes(nodes: RouteNode[], routeId: string | null): Rou
   return routeId == null ? nodes : nodes.filter(node => node.routeId === routeId)
 }
 
-export function buildMapMarkers(nodes: RouteNode[], selectedNodeId: string | null, location: MapPosition | null): MapMarker[] {
-  const markers = nodes.map((node): MapMarker => {
+export function buildRoutePolyline(nodes: RouteNode[], routeId: string | null): RouteLine[] {
+  if (routeId == null) return []
+  const points = visibleMapNodes(nodes, routeId).map(node => ({ latitude: node.latitude, longitude: node.longitude }))
+  return points.length < 2 ? [] : [{ points, color: '#f06642', width: 6, arrowLine: true }]
+}
+
+export function buildMapMarkers(nodes: RouteNode[], selectedNodeId: string | null, location: MapPosition | null, routeId: string | null = null): MapMarker[] {
+  const visible = visibleMapNodes(nodes, routeId)
+  const showOrder = routeId != null && visible.length > 1
+  const markers = visible.map((node, index): MapMarker => {
     const selected = selectedNodeId === node.id
     const status = node.checked ? 'checked' : 'default'
-    return {
+    const marker: MapMarker = {
       id: node.markerId, latitude: node.latitude, longitude: node.longitude,
       iconPath: '/static/map/marker_' + status + (selected ? '_selected' : '') + '.png',
       width: selected ? 42 : 36, height: selected ? 46 : 40,
       anchor: { x: 0.5, y: 1 }, zIndex: selected ? 3 : 2
     }
+    if (showOrder) marker.callout = {
+      content: String(index + 1), color: '#fff', bgColor: '#934022',
+      borderRadius: 12, padding: 5, fontSize: 14, display: 'ALWAYS'
+    }
+    return marker
   })
   if (location != null) {
     markers.push({

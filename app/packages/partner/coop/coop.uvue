@@ -9,7 +9,7 @@
       </view>
       <template v-else-if="team != null">
         <view class="card green">
-          <text class="title">两地合作</text>
+          <text class="title">旅伴合作</text>
           <text class="body">各自完成所在地的节点与文化任务，双方完成后共同解锁成果。</text>
           <text class="muted">状态 {{ statusText }}</text>
         </view>
@@ -18,10 +18,20 @@
           <text class="body">{{ partnerText }}</text>
           <text class="muted">对外成果只展示席位标签，不展示对方昵称。</text>
         </view>
+        <view class="card">
+          <text class="heading">文化任务</text>
+          <text class="body">我 · {{ taskText(team.myTasks) }}</text>
+          <text class="body">旅伴 · {{ taskText(team.partnerTasks) }}</text>
+        </view>
+        <view v-if="canAnswer" class="card">
+          <text class="heading">选择我的文化任务</text>
+          <text class="muted">不选则默认完成本席位全部文化任务。点位打卡始终按席位全部完成。</text>
+          <button v-for="task in team.myTaskOptions" :key="task.id" class="secondary" :class="{ selected: isTaskChosen(task.id) }" :disabled="busy" @click="toggleTask(task.id)">{{ task.title }}</button>
+        </view>
         <view v-if="status === 'active'" class="card">
           <text class="heading">双方进度</text>
           <text class="body">我的{{ team.mySeat === 'macau' ? '澳门' : '湖南' }}席位 {{ team.myProgress?.done ?? 0 }} / {{ team.myProgress?.total ?? 0 }}</text>
-          <text class="body">旅伴的{{ team.mySeat === 'macau' ? '湖南' : '澳门' }}席位 {{ team.partnerProgress?.done ?? 0 }} / {{ team.partnerProgress?.total ?? 0 }}</text>
+          <text class="body">旅伴的{{ (team.partnerSeat ?? (team.mySeat === 'macau' ? 'hunan' : 'macau')) === 'macau' ? '澳门' : '湖南' }}席位 {{ team.partnerProgress?.done ?? 0 }} / {{ team.partnerProgress?.total ?? 0 }}</text>
         </view>
         <button v-if="status === 'active' && team.myRunId != null" class="primary" :disabled="busy" @click="explore">开始探索</button>
         <button v-if="canSettle" class="primary" :disabled="busy" @click="settle">结算成果</button>
@@ -42,18 +52,31 @@ import { computed, ref } from 'vue'
 import { openRouteDetail } from '@/features/navigation.uts'
 import { showError, secured } from '@/features/api.uts'
 import { answerCoop, loadCoop, loadInviteFriends, loadMyCoop, startCoop } from '@/features/partner/partner.uts'
-import type { CoopView, PartnerFriend } from '@/features/partner/partner.uts'
+import type { CoopTask, CoopView, PartnerFriend } from '@/features/partner/partner.uts'
 
 const team = ref<CoopView | null>(null)
 const friends = ref<PartnerFriend[]>([])
 const busy = ref(false)
 const loading = ref(false)
 const loadFailed = ref(false)
+const chosen = ref<string[]>([])
 const status = computed(() => team.value?.status ?? '')
 const statusText = computed(() => status.value === 'active' ? '进行中' : status.value === 'done' ? '已完成' : status.value === 'invited' ? '待接受' : '已结束')
 const canSettle = computed(() => status.value === 'active')
 const canAnswer = computed(() => status.value === 'invited' && team.value?.invitedByMe === false)
 const partnerText = computed(() => team.value?.partner?.nickname ?? '旅伴')
+
+function taskText(tasks: CoopTask[]): string {
+  return tasks.length === 0 ? '全部文化任务' : tasks.map(task => task.title).join('、')
+}
+function isTaskChosen(id: string): boolean {
+  return chosen.value.length === 0 || chosen.value.includes(id)
+}
+function toggleTask(id: string): void {
+  const options = team.value?.myTaskOptions ?? []
+  const base = chosen.value.length === 0 ? options.map(task => task.id) : chosen.value
+  chosen.value = base.includes(id) ? base.filter(item => item !== id) : [...base, id]
+}
 
 onShow(() => { if (!busy.value) load() })
 
@@ -63,16 +86,17 @@ async function load(): Promise<void> {
   loadFailed.value = false
   try {
     team.value = await loadMyCoop()
+    chosen.value = []
     if (team.value == null) friends.value = await loadInviteFriends()
   } catch (_) { loadFailed.value = true }
   finally { loading.value = false }
 }
 
-async function invite(code: string, routeId: string, seat: string): Promise<void> {
+async function invite(code: string, routeId: string, seat: string, activities: string[]): Promise<void> {
   if (busy.value) return
   busy.value = true
   try {
-    const result = await startCoop(code, routeId, seat)
+    const result = await startCoop(code, routeId, seat, activities)
     team.value = await loadCoop(result.id)
   } catch (_) {
     team.value = await loadMyCoop().catch(() => null)
@@ -103,13 +127,22 @@ async function answer(accept: boolean): Promise<void> {
   if (busy.value || id == null || !canAnswer.value) return
   busy.value = true
   try {
-    await answerCoop(id, accept)
+    const options = team.value?.myTaskOptions ?? []
+    const tasks = !accept ? [] : (chosen.value.length === 0 ? options.map(task => task.id) : chosen.value)
+    await answerCoop(id, accept, tasks)
     await load()
-  } catch (_) { showError() }
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'EXPIRED' || code === 'NOT_PENDING') {
+      uni.showToast({ title: '合作邀请已结束，请重新发起', icon: 'none' })
+      await load()
+    } else showError()
+  }
   finally { busy.value = false }
 }
 </script>
 
 <style scoped>
 @import '@/styles/page.css';
+.selected { background: #e2eddb; color: #304d2d; box-shadow: inset 0 0 0 2px #52704a; }
 </style>

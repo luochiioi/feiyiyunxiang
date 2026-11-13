@@ -8,9 +8,9 @@
         <button class="primary" :disabled="busy" @click="signIn">微信登录</button>
       </view>
       <template v-else>
-        <view v-if="selected != null" class="card green">
+        <view v-if="selected != null" class="card quiz-card">
           <view class="row spread">
-            <text class="heading">{{ selected.mine ? '发给 ' + selected.otherName : selected.otherName + ' 的谜题' }}</text>
+            <text class="heading">{{ selected.selfTrial === true ? '单人试用' : selected.mine ? '发给 ' + selected.otherName : selected.otherName + ' 的谜题' }}</text>
             <button class="secondary small" :disabled="busy" @click="closeGuess">返回列表</button>
           </view>
           <image v-if="imageSrc.length > 0" class="guess-image" :src="imageSrc" mode="aspectFit" />
@@ -19,23 +19,27 @@
           <template v-if="selected.result != null">
             <text class="heading">{{ selected.result?.correct === true ? '猜中了' : '这次没猜中' }} · {{ selected.result?.answer }}</text>
             <text v-if="selected.result?.note" class="body">{{ selected.result?.note }}</text>
+            <text v-if="selected.result?.reward === 'trial'" class="body">试用奖励已验证，正式提示券与 PK 任务维持原状。</text>
             <text v-if="!selected.mine && selected.result?.reward === 'waived'" class="body">已免除一次待处理的 PK 失败任务。</text>
             <text v-if="!selected.mine && selected.result?.reward === 'hint'" class="body">获得 1 张提示券，可用于下一题。</text>
           </template>
           <text v-else-if="selected.mine" class="body">等待好友答题。</text>
           <template v-else>
-            <text class="heading">{{ selected.options.length === 4 ? '图中是哪种工艺和纹样？' : '图片表现的是哪种工艺？' }}</text>
-            <button v-for="option in selected.options" :key="option.id" class="secondary"
-              :disabled="busy || imageSrc.length === 0 || selected.eliminated === option.id" @click="answer(option.id)">
-              {{ option.label + (selected.eliminated === option.id ? ' · 已排除' : '') }}
-            </button>
-            <button class="secondary" :disabled="busy || imageSrc.length === 0 || hints < 1 || selected.eliminated != null" @click="useHint">
+            <text class="heading">{{ selected.options.length >= 4 ? '图中是哪种工艺和纹样？' : '图片表现的是哪种工艺？' }}</text>
+            <view class="answer-grid">
+              <button v-for="option in selected.options" :key="option.id" class="answer-option"
+                :class="selected.eliminated === option.id ? 'eliminated' : ''" hover-class="answer-pressed"
+                :disabled="busy || imageSrc.length === 0 || selected.eliminated === option.id" @click="answer(option.id)">
+                {{ option.label + (selected.eliminated === option.id ? ' · 已排除' : '') }}
+              </button>
+            </view>
+            <button v-if="selected.selfTrial !== true" class="secondary" :disabled="busy || imageSrc.length === 0 || hints < 1 || selected.eliminated != null" @click="useHint">
               使用提示券（剩余 {{ hints }} 张）
             </button>
           </template>
         </view>
         <template v-else>
-          <view class="card green">
+          <view class="card guess-intro">
             <text class="title">和旅伴猜非遗</text>
             <text class="body">答对可免除一次待处理的 PK 任务，或获得 1 张提示券。</text>
             <text class="tag">提示券 {{ hints }} 张</text>
@@ -44,29 +48,32 @@
             <text class="heading">收到的猜图</text>
             <text v-if="incoming.length === 0" class="muted">暂无好友谜题。</text>
             <button v-for="item in incoming" :key="item.id" class="secondary" :disabled="busy" @click="openGuess(item)">
-              {{ item.otherName + (item.result == null ? ' · 去猜图' : ' · 看结果') }}
+              {{ (item.selfTrial === true ? '单人试用' : item.otherName) + (item.result == null ? ' · 去猜图' : ' · 看结果') }}
             </button>
             <button class="secondary" :disabled="busy" @click="load">{{ busy ? '处理中…' : '刷新收件箱' }}</button>
           </view>
           <view class="card">
-            <text class="heading">生成并发给好友</text>
+            <text class="heading">出一道猜图</text>
             <text class="body">选择一种工艺风格</text>
             <view class="row">
-              <button :class="styleId === 'embroidery' ? 'primary' : 'secondary'" :disabled="busy" @click="styleId = 'embroidery'">湘绣</button>
-              <button :class="styleId === 'tile' ? 'primary' : 'secondary'" :disabled="busy" @click="styleId = 'tile'">葡萄牙瓷砖</button>
+              <button class="choice" hover-class="choice-pressed" :class="styleId === 'embroidery' ? 'primary' : 'secondary'" :disabled="sending" @click="styleId = 'embroidery'">湘绣</button>
+              <button class="choice" hover-class="choice-pressed" :class="styleId === 'tile' ? 'primary' : 'secondary'" :disabled="sending" @click="styleId = 'tile'">葡萄牙瓷砖</button>
             </view>
             <template v-if="supportsMotifs">
-              <text class="body">选择一个纹样</text>
+              <text class="body">选择纹样类别</text>
               <view class="row">
-                <button :class="motifId === 'floral' ? 'primary' : 'secondary'" :disabled="busy" @click="motifId = 'floral'">花卉</button>
-                <button :class="motifId === 'bird' ? 'primary' : 'secondary'" :disabled="busy" @click="motifId = 'bird'">鸟</button>
+                <button class="choice" hover-class="choice-pressed" :class="motifId === 'floral' ? 'primary' : 'secondary'" :disabled="sending" @click="motifId = 'floral'">花卉</button>
+                <button class="choice" hover-class="choice-pressed" :class="motifId === 'bird' ? 'primary' : 'secondary'" :disabled="sending" @click="motifId = 'bird'">鸟</button>
               </view>
             </template>
-            <text v-if="friends.length === 0" class="muted">添加旅伴好友后可发题。</text>
-            <picker v-else :range="friendLabels" :value="friendIndex" :disabled="busy" @change="selectFriend">
+            <button v-if="supportsSelfTrial" class="secondary" :disabled="busy" @click="selfTrial = !selfTrial">
+              {{ selfTrial ? '收件人是自己 · 切换至好友' : '发给自己试用' }}
+            </button>
+            <text v-if="!selfTrial && friends.length === 0" class="muted">添加旅伴好友后可发题。</text>
+            <picker v-if="!selfTrial && friends.length > 0" :range="friendLabels" :value="friendIndex" :disabled="busy" @change="selectFriend">
               <view class="recipient">{{ friends[friendIndex]?.nickname ?? '选择好友' }} ›</view>
             </picker>
-            <button class="primary" :disabled="busy || friends.length === 0" @click="sendGuess">{{ sending ? '正在生成并发送…' : '生成并发送' }}</button>
+            <button class="primary" :disabled="busy || (!selfTrial && friends.length === 0)" @click="sendGuess">{{ sending ? '正在生成并发送…' : '生成并发送' }}</button>
           </view>
           <view v-if="sent.length > 0" class="card">
             <text class="heading">已发出的猜图</text>
@@ -91,9 +98,9 @@ import type { PartnerFriend } from '@/features/partner/partner.uts'
 
 type GuessOption = { id: string, label: string }
 type GuessResult = { correct: boolean, reward: string, answer: string, note: string }
-type Guess = { id: string, mine: boolean, otherName: string, options: GuessOption[], eliminated: string | null, result: GuessResult | null }
-type Inbox = { incoming: Guess[], sent: Guess[], hints: number, supportsMotifs?: boolean }
-type SendDraft = { requestId: string, code: string, style: string }
+type Guess = { id: string, mine: boolean, otherName: string, options: GuessOption[], eliminated: string | null, result: GuessResult | null, selfTrial?: boolean }
+type Inbox = { incoming: Guess[], sent: Guess[], hints: number, supportsMotifs?: boolean, supportsSelfTrial?: boolean }
+type SendDraft = { requestId: string, code: string, style: string, selfTrial: boolean }
 
 const incoming = ref<Guess[]>([])
 const sent = ref<Guess[]>([])
@@ -103,6 +110,8 @@ const friendIndex = ref(0)
 const styleId = ref('embroidery')
 const motifId = ref('floral')
 const supportsMotifs = ref(false)
+const supportsSelfTrial = ref(false)
+const selfTrial = ref(false)
 const hints = ref(0)
 const selected = ref<Guess | null>(null)
 const imageSrc = ref('')
@@ -134,7 +143,9 @@ async function refreshInbox(): Promise<void> {
   const uid = session.value?.uid
   const data = await secured<Inbox>('guessInbox')
   if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
-  incoming.value = data.incoming
+  supportsSelfTrial.value = process.env.NODE_ENV === 'development' && data.supportsSelfTrial === true
+  if (!supportsSelfTrial.value) selfTrial.value = false
+  incoming.value = data.incoming.filter(item => supportsSelfTrial.value || item.selfTrial !== true)
   sent.value = data.sent
   hints.value = data.hints
   supportsMotifs.value = data.supportsMotifs === true
@@ -149,6 +160,8 @@ async function load(): Promise<void> {
     friends.value = []
     hints.value = 0
     supportsMotifs.value = false
+    supportsSelfTrial.value = false
+    selfTrial.value = false
     friendIndex.value = 0
     closeGuess()
   }
@@ -184,10 +197,12 @@ async function signIn(): Promise<void> {
 async function sendGuess(): Promise<void> {
   const friend = friends.value[friendIndex.value]
   const uid = session.value?.uid
-  if (busy.value || friend == null || uid == null || uid !== loadedUid) return
+  const trial = supportsSelfTrial.value && selfTrial.value
+  if (busy.value || (!trial && friend == null) || uid == null || uid !== loadedUid) return
+  const code = trial ? '' : friend!.code
   const key = 'fy-guess-send-' + uid
   const style = supportsMotifs.value ? styleId.value + '-' + motifId.value : styleId.value
-  let draft: SendDraft = { requestId: requestId(), code: friend.code, style }
+  let draft: SendDraft = { requestId: requestId(), code, style, selfTrial: trial }
   busy.value = true
   sending.value = true
   message.value = ''
@@ -196,14 +211,14 @@ async function sendGuess(): Promise<void> {
     if (raw != null && raw.length > 0) {
       try {
         const saved = JSON.parse<SendDraft>(raw)
-        if (saved?.code === friend.code && saved?.style === style && saved!.requestId.length > 0) draft = saved!
+        if (saved?.code === code && saved?.style === style && (saved?.selfTrial === true) === trial && saved!.requestId.length > 0) draft = saved!
       } catch (_) { /* Use the new request ID if the cached draft is invalid. */ }
     }
     uni.setStorageSync(key, JSON.stringify(draft))
-    await secured<{ id: string }>('guessSend', { code: draft.code, style: draft.style, requestId: draft.requestId }, 95000)
+    await secured<{ id: string }>('guessSend', { code: draft.code, style: draft.style, requestId: draft.requestId, selfTrial: draft.selfTrial === true }, 95000)
     uni.removeStorageSync(key)
     if (session.value?.uid !== uid) return
-    message.value = '已发给 ' + friend.nickname + '，对方可在猜图收件箱打开。'
+    message.value = trial ? '已发给自己，请在收到的猜图中打开。' : '已发给 ' + friend!.nickname + '，对方可在猜图收件箱打开。'
     try { await refreshInbox() } catch (_) { /* The send has already succeeded. */ }
   } catch (error) {
     const code = (error as Error).message
@@ -235,7 +250,7 @@ async function openGuess(item: Guess): Promise<void> {
 }
 async function useHint(): Promise<void> {
   const item = selected.value
-  if (busy.value || item == null || item.mine || item.result != null || session.value?.uid !== loadedUid) return
+  if (busy.value || item == null || item.mine || item.selfTrial === true || item.result != null || session.value?.uid !== loadedUid) return
   busy.value = true
   message.value = ''
   try {
@@ -264,8 +279,17 @@ async function answer(choice: string): Promise<void> {
 
 <style scoped>
 @import '@/styles/page.css';
-.guess-image { width: 100%; height: 260px; background: #f4ead8; border-radius: 12px; }
+.guess-intro { gap: 10px; padding: 18px; background: #edf3e3; border-color: #dce8d3; }
+.quiz-card { gap: 12px; border-color: #dce8d3; }
+.guess-image { width: 100%; height: 260px; background: #f3f5ee; border-radius: 14px; }
+.answer-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.answer-option { box-sizing: border-box; width: calc(50% - 4px); min-height: 50px; margin: 0; padding: 8px 6px; border: 1px solid #dbe6d3; border-radius: 12px; background: #f4f7ef; color: #304a32; font-size: 13px; line-height: 1.45; white-space: normal; }
+.answer-option::after { border: 0; }
+.answer-pressed { background: #dae8ce; }
+.eliminated { color: #6e6153; background: #f6f3ee; text-decoration: line-through; }
+.choice-pressed { opacity: .8; }
 .small { width: auto; flex-shrink: 0; }
+.choice { flex: 1; width: auto; min-width: 0; }
 .recipient { padding: 13px; background: #f4ead8; border-radius: 12px; color: #604323; }
 .feedback { padding: 10px 12px; border-radius: 12px; background: #f4ead8; }
 .primary, .secondary { min-height: 44px; }

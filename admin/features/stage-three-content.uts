@@ -1,4 +1,5 @@
 export type DraftClue = { story: string, question: string, answer: string }
+export type DraftExhibit = { id: string, title: string, description: string, alternate: string, reward: string, afterClue: string, clue: DraftClue & { options: string[] } }
 export type DraftNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number, clue?: DraftClue | null, afterClue?: string | null }
 type Choice = { label: string, nextSceneId: string }
 type Scene = { id: string, kind: string, text: string, asset?: string, speaker?: string, nextSceneId?: string, choices?: Choice[] }
@@ -64,7 +65,7 @@ export function museumRouteDraft(macau: boolean) {
   const visit = macau ? macauMuseumVisit() : hunanMuseumVisit()
   return {
     id: macau ? 'yinian-guiqi-macau' : 'yinian-guiqi-hunan',
-    name: macau ? '海丝瓷绣·一念归期（上集）' : '海丝瓷绣·一念归期（下集）',
+    name: macau ? '海丝瓷绣·一念归期(上)' : '海丝瓷绣·一念归期(下)',
     region: macau ? '澳门' : '湖南',
     description: visit.description,
     revision: 0,
@@ -72,7 +73,26 @@ export function museumRouteDraft(macau: boolean) {
     museum: { name: visit.name, description: visit.description },
     viewport: { latitude: visit.node.latitude, longitude: visit.node.longitude, scale: 16 },
     nodes: [visit.node],
+    exhibit: museumExhibit(macau, visit.node.id),
     culture: visit.culture
+  }
+}
+
+function museumExhibit(macau: boolean, afterClue: string): DraftExhibit {
+  if (macau) return {
+    id: 'macau-kraak-exhibit', title: '展品彩蛋 · 青花克拉克瓷盘', afterClue, reward: 'tile',
+    description: '到一楼国际通商口岸展区。若展出目标瓷盘，从公众通道拍下盘沿和部分纹样。关闭闪光灯，不用脚架或自拍器。',
+    alternate: '未找到目标瓷盘时，可拍同主题外销瓷或展板。',
+    clue: { story: '澳门博物馆藏明代青花克拉克瓷盘 MM5197，盘上有狮子和花卉。观察盘沿，重复的边框让不同纹样各有位置。',
+      question: '用一道道边框把瓷盘纹样分区的装饰叫什么？', options: ['镂空', '开光', '描金'], answer: '开光' }
+  }
+  return {
+    id: 'hunan-yang-exhibit', title: '展品彩蛋 · 双面全异绣《杨玉环》', afterClue, reward: 'learning',
+    description: '按当日导览寻找《杨玉环》。从公众通道拍下一面绣品或展签，可从开放通道观察另一面。请关闭闪光灯。',
+    alternate: '未找到目标绣品时，可拍当天展出的其他双面全异绣或工艺展板。',
+    clue: { story: '湖南湘绣博物馆收藏陈列的《杨玉环》属于双面全异绣。观察正反两面，留意构图和色彩如何各自成形。',
+      question: '双面全异绣的两幅不同画面怎样做出来？',
+      options: ['把两张绣片背对背缝合', '同一面绣两遍', '在同一块底料的正反面绣制'], answer: '在同一块底料的正反面绣制' }
   }
 }
 

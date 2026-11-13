@@ -9,7 +9,7 @@ const a = { uid: 'sender' }, b = { uid: 'recipient' }, c = { uid: 'outsider' }
 const code = 'ABCDEFGH'
 const jpeg = Buffer.concat([Buffer.from([255, 216, 255]), Buffer.alloc(20), Buffer.from([255, 217])])
 
-async function setup(generate = async () => ({ bytes: jpeg, mime: 'image/jpeg' })) {
+async function setup(generate = async () => ({ bytes: jpeg, mime: 'image/jpeg' }), allowSelfTrial = false) {
   const collections = new Map()
   const db = {
     async get(collection, id) {
@@ -46,7 +46,7 @@ async function setup(generate = async () => ({ bytes: jpeg, mime: 'image/jpeg' }
     async read(image) { assert.equal(image.fileID, 'private-image'); return { src: 'data:image/jpeg;base64,test' } },
     async discard() {}
   }
-  const service = createHeritageGuess({ repo, media, generate, now: () => 1000000 })
+  const service = createHeritageGuess({ repo, media, generate, now: () => 1000000, allowSelfTrial })
   await repo.put('fy-profiles', 'sender-card', { uid: a.uid, code: 'BCDEFGHJ', nickname: '澳门旅伴' })
   await repo.put('fy-profiles', 'receiver-card', { uid: b.uid, code, nickname: '湖南旅伴' })
   const friendship = key('friend', ...[a.uid, b.uid].sort())
@@ -110,13 +110,18 @@ test('answers waive one pending PK task, then grant and consume one hint exactly
 
 test('new riddles require both craft and motif while legacy options stay usable', async () => {
   const prompts = []
-  const { service } = await setup(async prompt => {
+  const { service, repo } = await setup(async prompt => {
     prompts.push(prompt)
     return { bytes: jpeg, mime: 'image/jpeg' }
   })
   const legacy = await service.guessSend(a, draft('legacy-before-update', 'tile'))
   const flower = await service.guessSend(a, draft('new-flower', 'tile-floral'))
   const bird = await service.guessSend(a, draft('new-bird', 'embroidery-bird'))
+  for (const { id } of [flower, bird]) {
+    const row = await repo.get('fy-heritage-guesses', id)
+    delete row.options
+    await repo.put('fy-heritage-guesses', id, row)
+  }
   const inbox = await service.guessInbox(b)
   assert.equal(inbox.supportsMotifs, true)
   const optionsOf = id => inbox.incoming.find(item => item.id === id).options.map(option => option.id)
@@ -139,6 +144,50 @@ test('new riddles require both craft and motif while legacy options stay usable'
   assert.equal(result.correct, true)
   assert.equal(result.reward, 'hint')
   assert.match(result.note, /劈丝/)
+})
+
+test('extended riddles keep eight choices in the same order and grade lookalikes as incorrect', async () => {
+  const { service } = await setup(undefined, true)
+  const request = { ...draft('extended-flower', 'tile-floral'), selfTrial: true }
+  const guess = await service.guessSend(a, request)
+  const options = async () => (await service.guessInbox(a)).incoming.find(item => item.id === guess.id).options
+  const choices = await options()
+  assert.equal(new Set(choices.map(option => option.id)).size, 8)
+  assert.ok(choices.some(option => option.id === 'tile-floral'))
+  assert.ok(choices.some(option => option.id === 'resist-floral'))
+  assert.ok(choices.some(option => option.id === 'porcelain-floral'))
+  assert.deepEqual(await service.guessSend(a, request), guess)
+  assert.deepEqual(await options(), choices)
+  assert.equal((await service.guessAnswer(a, { ...guess, choice: 'porcelain-floral' })).correct, false)
+})
+
+test('development self-trial is private and can never grant a real reward', async () => {
+  const request = { requestId: 'solo-preview', style: 'embroidery-bird', selfTrial: true, code }
+  const disabled = await setup()
+  await assert.rejects(disabled.service.guessSend(a, request), /FORBIDDEN/)
+
+  const { service, repo } = await setup(undefined, true)
+  await repo.put('fy-assignments', 'solo-task', { uid: a.uid, status: 'pending' })
+  const wallet = key('heritage-guess-wallet', a.uid)
+  await repo.put('fy-guess-wallets', wallet, { hints: 2 })
+  const sent = await service.guessSend(a, request)
+  assert.deepEqual(await service.guessSend(a, request), sent)
+  const own = await service.guessInbox(a)
+  assert.equal(own.supportsSelfTrial, true)
+  assert.equal(own.incoming[0].selfTrial, true)
+  assert.equal(own.incoming[0].mine, false)
+  assert.equal(own.sent.length, 0)
+  assert.equal((await service.guessInbox(b)).incoming.length, 0)
+  await assert.rejects(service.guessImage(b, sent), /NOT_FOUND/)
+  assert.match((await service.guessImage(a, sent)).src, /base64/)
+  await assert.rejects(service.guessHint(a, sent), /FORBIDDEN/)
+
+  const result = await service.guessAnswer(a, { ...sent, choice: 'embroidery-bird' })
+  assert.equal(result.reward, 'trial')
+  assert.match(result.note, /劈丝/)
+  assert.equal((await repo.get('fy-assignments', 'solo-task')).status, 'pending')
+  assert.equal((await repo.get('fy-guess-wallets', wallet)).hints, 2)
+  assert.equal((await repo.list('fy-friends', {})).length, 1)
 })
 
 test('generation failure and in-flight retry produce at most one visible riddle', async () => {

@@ -1,6 +1,6 @@
 <template>
   <view class="home">
-    <RouteMap :nodes="nodes" :selected-node-id="mapState.selectedNodeId" :viewport="commandedViewport"
+    <RouteMap :nodes="nodes" :route-id="route?.id ?? null" :selected-node-id="mapState.selectedNodeId" :viewport="commandedViewport"
       :current-location="currentLocation" @node-select="openNode" @viewport-change="saveViewport" />
     <view class="home-header" :style="{ top: statusBar + 7 + 'px' }">
       <text class="home-title">{{ route == null ? '非遗云享' : route.region + ' · 当前路线' }}</text>
