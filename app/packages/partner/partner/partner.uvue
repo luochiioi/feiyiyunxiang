@@ -39,9 +39,22 @@
 
       <view class="card">
         <text class="heading">好友 PK</text>
-        <text class="body">完成路线全部打卡后，率先提交结算的一方获胜。失败方会收到一项失败任务。</text>
+        <text class="body">完成路线全部打卡后，率先提交结算的一方获胜。胜者从路线彩蛋中挑一项交给败者。</text>
         <text v-if="!pkEnabled" class="muted">有未处理的失败任务，完成或拒绝后才能参加下一场。</text>
         <button class="secondary" :disabled="!pkEnabled" @click="openPage('/packages/partner/pk/pk')">进入 PK</button>
+      </view>
+
+      <view class="card">
+        <text class="heading">AI 非遗猜图</text>
+        <text class="body">出题给好友，或打开收件箱回答好友发来的题。</text>
+        <button class="secondary" @click="openPage('/packages/story/guess/guess')">进入猜图</button>
+      </view>
+
+      <view class="card">
+        <text class="heading">漂流瓶</text>
+        <text class="body">找同地区或跨地区的旅伴，一起完成馆路探索。</text>
+        <button class="primary" @click="openPage('/packages/partner/bottle/bottle')">找旅伴</button>
+        <button v-if="showBottleTrial" class="secondary" @click="openPage('/packages/partner/bottle-trial/bottle-trial')">开始单人试用</button>
       </view>
 
       <view v-if="assignment != null" class="card">
@@ -64,8 +77,9 @@ import { loadFriends, loadAssignment, sendFriendRequest, answerFriendRequest, pa
 
 type FriendCard = { code: string, nickname: string }
 type IncomingRequest = { id: string, code: string, nickname: string }
-type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string }
+type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string, title?: string }
 
+const showBottleTrial = process.env.NODE_ENV === 'development'
 const friends = ref<FriendCard[]>([])
 const incoming = ref<IncomingRequest[]>([])
 const myCode = ref('')
@@ -77,7 +91,7 @@ const assignment = ref<AssignmentCard | null>(null)
 const view = computed(() => partnerView({ assignment: assignment.value, now: Date.now() }))
 const pkEnabled = computed(() => view.value.pkEnabled)
 const assignmentId = computed(() => assignment.value?.id ?? '')
-const assignmentTitle = computed(() => assignment.value?.nodeTitle ?? '失败任务')
+const assignmentTitle = computed(() => assignment.value?.title ?? assignment.value?.nodeTitle ?? '失败任务')
 const rejectHint = computed(() => view.value.rejectEnabled ? '已满 72 小时，可以主动拒绝。' : '分配满 72 小时后可主动拒绝，此前只能完成。')
 
 onShow(async () => {

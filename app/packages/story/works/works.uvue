@@ -6,9 +6,9 @@
         <text class="body">{{ message }}</text>
         <button v-if="canRetry" class="primary" :disabled="busy" @click="load">{{ session == null ? '微信登录' : '重试' }}</button>
       </view>
-      <view v-for="work in works" :key="work.runId" class="card">
+      <view v-for="work in works" :key="work.runId + (work.framePalette == null ? '' : '-framed')" class="card">
         <text class="heading">{{ work.routeName }}</text>
-        <TilePreview :pattern="work.pattern" :palette="work.palette" />
+        <TilePreview :pattern="work.pattern" :palette="work.palette" :frame-palette="work.framePalette" />
         <text class="muted">蓝白瓷砖配色 · 仅自己可见</text>
       </view>
     </view>
@@ -20,7 +20,7 @@ import { ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import TilePreview from '../components/TilePreview.uvue'
 import { secured, session } from '@/features/api.uts'
-type Work = { runId: string, routeName: string, pattern: string, palette: string }
+type Work = { runId: string, routeName: string, pattern: string, palette: string, framePalette?: string }
 const works = ref<Work[]>([])
 const message = ref('登录后查看自己的作品。')
 const busy = ref(false)

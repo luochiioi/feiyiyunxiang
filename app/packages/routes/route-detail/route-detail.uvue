@@ -9,15 +9,19 @@
           <image class="cover" src="/packages/routes/static/silk-cover.jpg" mode="aspectFill" />
           <text class="tag">{{ route.region }} · 海丝瓷绣</text>
           <text class="title">{{ route.name }}</text>
-          <text class="body">{{ route.description }}</text>
+          <text class="body">{{ routeSections[0] }}</text>
           <text class="muted">探索进度 {{ route.done }} / {{ route.total }}</text>
           <ProgressBar :value="route.done / route.total * 100" color="#52704a" :height="12" :show-label="false" />
         </view>
         <view class="card">
           <text class="heading">探索任务</text>
           <view v-for="node in nodes" :key="node.id" class="row spread divider menu-row" @click="openPoint(node.id)">
-            <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : '去打卡' }} ›</text>
+            <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : node.locked ? '待解锁' : '去打卡' }} ›</text>
           </view>
+        </view>
+        <view v-if="progress?.snapshot.exhibit != null" class="card">
+          <text class="heading">展品彩蛋</text>
+          <button class="secondary" @click="openExhibit">{{ progress?.exhibitCompleted === true ? '回看展品观察' : '开始展品观察' }}</button>
         </view>
         <view v-if="activities.length > 0" class="card">
           <text class="heading">文化任务</text>
@@ -28,6 +32,13 @@
         </view>
         <button v-if="runId == null" class="secondary" @click="openStory">查看剧情章节</button>
         <button v-if="runId == null" class="secondary" @click="showOnMap">在地图查看路线</button>
+        <!-- #ifdef MP-WEIXIN -->
+        <button class="secondary" @click="openPage('/packages/ar/ar/ar')">奥喵 AR</button>
+        <!-- #endif -->
+        <view v-if="routeSections.length > 1" class="card">
+          <text class="heading">实地参观</text>
+          <text v-for="section in routeSections.slice(1)" :key="section" class="body">{{ section }}</text>
+        </view>
       </template>
       <view v-else-if="runId != null" class="card">
         <text class="body">{{ loading ? '正在读取探索进度…' : '暂时无法读取这次探索。' }}</text>
@@ -63,11 +74,16 @@ const route = computed(() => {
   if (content.value != null) return summarizeRoute(content.value!, progress.value)
   return runId.value == null ? findRoute(id.value) : null
 })
+const routeSections = computed(() => (route.value?.description ?? '').split('\n\n'))
 const activities = computed(() => content.value?.activities ?? [])
 const nodes = computed(() => {
-  const snapshot = progress.value?.snapshot
-  if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked }))
-  return snapshot.nodes.map(node => ({ id: snapshot.id + ':' + node.id, title: node.title, checked: progress.value!.completed.includes(node.id) }))
+  const snapshot = content.value
+  if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked, locked: false }))
+  const completed = progress.value?.completed ?? []
+  return snapshot.nodes.map(node => ({
+    id: snapshot.id + ':' + node.id, title: node.title, checked: completed.includes(node.id),
+    locked: node.afterClue != null && !completed.includes(node.afterClue!)
+  }))
 })
 onShow(() => { load() })
 async function load(): Promise<void> {
@@ -103,6 +119,11 @@ async function openPoint(nodeId: string): Promise<void> {
     return
   }
   if (await selectViewedRun()) openCheckin(nodeId)
+}
+function openExhibit(): void {
+  const run = progress.value
+  const exhibit = run?.snapshot.exhibit
+  if (run != null && exhibit != null) openCheckin(run.routeId + ':' + exhibit.id, run.runId)
 }
 function openActivity(activityId: string): void {
   if (id.value == null) return

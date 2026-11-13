@@ -10,16 +10,17 @@ const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCr
 const reviewActions = new Set(['communityReviewList', 'communityReviewDetail', 'communityReviewImage', 'communityReviewPost',
   'communityReviewComment', 'communityResolveReport', 'communityMute', 'communityPolicy', 'communitySavePolicy'])
 const operationsActions = new Set(['communityOverview', 'communityUsers', 'communityUserDetail', 'communityAccountStatus'])
-const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', ...reviewActions, ...operationsActions])
+const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions])
 const guestActions = new Set(['communityFeed', 'communityPost', 'communityImage', 'communityShare', 'communityComments'])
 const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment',
   'communityReport', 'communityRanking', 'communityRemoveOwn'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
   'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
   'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends',
+  'bottleStatus', 'joinBottle', 'respondBottle', 'cancelBottle',
   'inviteCoop', 'respondCoop', 'withdrawCoop', 'leaveCoop', 'coopStatus', 'myCoop', 'settleCoop',
-  'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'assignment', 'completeAssignment', 'rejectAssignment'])
-const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
+  'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'pkEggs', 'chooseEgg', 'cancelPk', 'assignment', 'completeAssignment', 'rejectAssignment'])
+const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','CLUE_LOCKED','CLUE_INCORRECT','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)

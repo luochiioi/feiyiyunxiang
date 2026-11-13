@@ -4,7 +4,7 @@
     <text class="body">选择路线</text>
     <text v-if="routes.length === 0" class="muted">暂无已发布的路线。</text>
     <view v-for="item in routes" :key="item.id" class="choice">
-      <button class="secondary" :class="{ selected: routeId === item.id }" :disabled="busy || !item.enabled" @click="routeId = item.id">{{ item.name }}</button>
+      <button class="secondary" :class="{ selected: routeId === item.id }" :disabled="busy || !item.enabled" @click="chooseRoute(item.id)">{{ item.name }}</button>
       <text v-if="!item.enabled" class="muted">该路线未配置两地席位</text>
     </view>
     <text class="body">选择好友</text>
@@ -14,12 +14,16 @@
       <text class="body">我的席位</text>
       <view class="row">
         <view class="seat-choice">
-          <button class="secondary" :class="{ selected: seat === 'macau' }" :disabled="busy" @click="seat = 'macau'">澳门</button>
+          <button class="secondary" :class="{ selected: seat === 'macau' }" :disabled="busy" @click="chooseSeat('macau')">澳门</button>
         </view>
         <view class="seat-choice">
-          <button class="secondary" :class="{ selected: seat === 'hunan' }" :disabled="busy" @click="seat = 'hunan'">湖南</button>
+          <button class="secondary" :class="{ selected: seat === 'hunan' }" :disabled="busy" @click="chooseSeat('hunan')">湖南</button>
         </view>
       </view>
+      <text class="body">我的文化任务</text>
+      <text v-if="taskOptions.length === 0" class="muted">该路线在此席位没有文化任务，接受方将默认完成全部任务。</text>
+      <button v-for="task in taskOptions" :key="task.id" class="secondary" :class="{ selected: isTaskChosen(task.id) }" :disabled="busy" @click="toggleTask(task.id)">{{ task.title }}</button>
+      <text class="muted">双方各自完成所选文化任务，点位打卡仍按席位全部完成。</text>
     </template>
     <text v-if="!enabled" class="muted">有未处理的失败任务，完成或拒绝后才能发起 PK。</text>
     <button class="primary" :disabled="!canInvite" @click="invite">{{ coop ? '发起合作' : '发起 PK' }}</button>
@@ -30,24 +34,52 @@
 import { computed, ref } from 'vue'
 import { published } from '@/features/exploration/catalog.uts'
 import { coopRouteEnabled } from '@/features/partner/partner.uts'
-import type { PartnerFriend } from '@/features/partner/partner.uts'
+import type { CoopTask, PartnerFriend } from '@/features/partner/partner.uts'
 
 const props = defineProps<{ coop: boolean, friends: PartnerFriend[], busy: boolean, enabled: boolean }>()
-const emit = defineEmits<{ (event: 'invite', code: string, routeId: string, seat: string): void }>()
+const emit = defineEmits<{ (event: 'invite', code: string, routeId: string, seat: string, activities: string[]): void }>()
 const routeId = ref('')
 const friendCode = ref('')
 const seat = ref('macau')
+const chosen = ref<string[]>([])
+const macauTasks = ['tile', 'tileQuiz']
+const hunanTasks = ['quiz', 'learning']
 const routes = computed(() => published.value.map(route => ({
   id: route.id,
   name: route.name,
   enabled: !props.coop || coopRouteEnabled(route.activities ?? [])
 })))
+const taskOptions = computed((): CoopTask[] => {
+  if (!props.coop) return []
+  const route = published.value.find(item => item.id === routeId.value)
+  const ids = seat.value === 'macau' ? macauTasks : hunanTasks
+  return (route?.activities ?? []).filter(activity => ids.includes(activity.id)).map(activity => ({
+    id: activity.id, title: activity.title
+  }))
+})
 const canInvite = computed(() => !props.busy && props.enabled &&
   routes.value.some(route => route.id === routeId.value && route.enabled) &&
   props.friends.some(friend => friend.code === friendCode.value))
 
+function chooseRoute(value: string): void {
+  routeId.value = value
+  chosen.value = []
+}
+function chooseSeat(value: string): void {
+  seat.value = value
+  chosen.value = []
+}
+function isTaskChosen(id: string): boolean {
+  return chosen.value.length === 0 || chosen.value.includes(id)
+}
+function toggleTask(id: string): void {
+  const base = chosen.value.length === 0 ? taskOptions.value.map(item => item.id) : chosen.value
+  chosen.value = base.includes(id) ? base.filter(item => item !== id) : [...base, id]
+}
 function invite(): void {
-  if (canInvite.value) emit('invite', friendCode.value, routeId.value, seat.value)
+  if (!canInvite.value) return
+  const tasks = props.coop ? (chosen.value.length === 0 ? taskOptions.value.map(item => item.id) : chosen.value) : []
+  emit('invite', friendCode.value, routeId.value, seat.value, tasks)
 }
 </script>
 

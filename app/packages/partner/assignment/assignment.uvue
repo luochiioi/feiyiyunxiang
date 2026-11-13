@@ -5,14 +5,17 @@
       <template v-if="task != null">
         <view class="card green">
           <text class="title">{{ taskTitle }}</text>
-          <text class="body">PK 失败后分配的任务。完成后即可参加下一场。</text>
+          <text v-if="task.description.length > 0" class="body">{{ task.description }}</text>
+          <text class="muted">点位 · {{ task.nodeTitle }}</text>
         </view>
         <view class="card">
           <text class="heading">处理方式</text>
-          <text class="body">可以立即完成。分配满 72 小时后，也可以主动拒绝。</text>
+          <text class="body">这是 PK 胜者为你挑选的彩蛋任务，确认完成后即可参加下一场。</text>
+          <text class="body">答对好友发来的非遗猜图可免除一次。分配满 72 小时后也可主动拒绝。</text>
           <text class="muted">{{ rejectHint }}</text>
         </view>
-        <button class="primary" :disabled="busy" @click="finish">完成任务</button>
+        <button class="primary" :disabled="busy" @click="finish">确认完成</button>
+        <button class="secondary" @click="openPage('/packages/story/guess/guess')">查看好友猜图</button>
         <button v-if="rejectEnabled" class="secondary" :disabled="busy" @click="decline">拒绝任务</button>
       </template>
       <view v-else class="card">
@@ -26,11 +29,11 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 
 import { computed, ref } from 'vue'
-import { decodePageId } from '@/features/navigation.uts'
+import { openPage, decodePageId } from '@/features/navigation.uts'
 import { showError } from '@/features/api.uts'
 import { loadAssignment, finishAssignment, declineAssignment, partnerView } from '@/features/partner/partner.uts'
 
-type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string }
+type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string, title: string, description: string }
 
 const assignmentId = ref<string | null>(null)
 const task = ref<AssignmentCard | null>(null)
@@ -40,7 +43,7 @@ onLoad(query => { assignmentId.value = decodePageId(query['assignmentId'] ?? nul
 
 const view = computed(() => partnerView({ assignment: task.value, now: Date.now() }))
 const rejectEnabled = computed(() => view.value.rejectEnabled)
-const taskTitle = computed(() => task.value?.nodeTitle ?? '失败任务')
+const taskTitle = computed(() => task.value?.title ?? task.value?.nodeTitle ?? '失败任务')
 const rejectHint = computed(() => rejectEnabled.value ? '已满 72 小时，可以主动拒绝。' : '未满 72 小时，暂时只能完成，不能拒绝。')
 
 onShow(async () => {

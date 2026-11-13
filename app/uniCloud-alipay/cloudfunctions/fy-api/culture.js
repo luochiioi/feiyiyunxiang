@@ -26,7 +26,7 @@ function activityHeader(activity, nodeIds, code) {
 
 function validateCulture(value, nodeIds) {
   requireValue(value && typeof value === 'object' && !Array.isArray(value), 'INVALID_CULTURE')
-  requireValue(Object.keys(value).length > 0 && Object.keys(value).every(id => activityIds.includes(id) || id === 'chapters'),
+  requireValue(Object.keys(value).length > 0 && Object.keys(value).every(id => activityIds.includes(id) || id === 'chapters' || id === 'eggs'),
     'INVALID_CULTURE_FIELDS')
   const result = {}
   if ('tile' in value) result.tile = activityHeader(value.tile, nodeIds, 'INVALID_TILE')
@@ -59,11 +59,24 @@ function validateCulture(value, nodeIds) {
     result.learning = { ...header, cards }
   }
   if ('chapters' in value) result.chapters = validateChapters(value.chapters, nodeIds, result)
+  if ('eggs' in value) result.eggs = validateEggs(value.eggs, nodeIds)
+  return result
+}
+
+// 彩蛋是 PK 胜者替败者挑选的固定任务：指定点位加固定文案，不参与打卡门槛。
+function validateEggs(eggs, nodeIds) {
+  requireValue(Array.isArray(eggs) && eggs.length >= 1 && eggs.length <= 12, 'INVALID_EGGS')
+  const result = eggs.map(egg => {
+    requireValue(isId(egg?.id) && isText(egg.title, 80) && isText(egg.description, 200) &&
+      typeof egg.nodeId === 'string' && nodeIds.has(egg.nodeId), 'INVALID_EGG')
+    return { id: egg.id, title: egg.title, description: egg.description, nodeId: egg.nodeId }
+  })
+  requireValue(distinct(result.map(egg => egg.id)), 'INVALID_EGG')
   return result
 }
 
 const chapterActivities = { 2: null, 3: 'tile', 4: null, 5: 'quiz', 6: 'learning' }
-const sceneAssets = ['aomiao']
+const sceneAssets = ['aomiao', 'tile-workshop', 'embroidery-stall', 'embroidery-room']
 
 function validateChapters(chapters, nodeIds, activities) {
   requireValue(Array.isArray(chapters) && chapters.length > 0 && chapters.length <= 5, 'INVALID_CHAPTERS')

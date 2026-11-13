@@ -3,6 +3,12 @@
     <text class="heading">内容预览 · {{ value.name }}</text>
     <text>{{ value.region }} · {{ value.testOnly ? '开发测试' : '正式内容' }}</text>
     <text v-if="!value.releaseAllowed">当前内容需要满足环境与内容审核条件后才能发布。</text>
+    <view v-for="node in clueNodes" :key="node.id" class="section">
+      <text class="heading">{{ node.title }} · 展品线索</text>
+      <text v-if="node.afterClue != null">{{ '完成前置线索站 · ' + (value.nodes.find(item => item.id === node.afterClue)?.title ?? node.afterClue) }}</text>
+      <text v-if="node.clue != null">{{ node.clue?.story }}</text>
+      <text v-if="node.clue != null">{{ node.clue?.question }}</text>
+    </view>
     <view v-if="value.culture?.tile != null" class="section">
       <text class="heading">{{ value.culture?.tile?.title }}</text>
       <text>{{ gateLabel(value.culture?.tile?.after ?? []) }}</text>
@@ -35,7 +41,7 @@
         <text>{{ unlockLabel }}</text>
         <view class="stage">
           <image v-if="scene?.asset === 'aomiao'" class="mascot" src="/static/aomiao-wave.png" mode="aspectFit" />
-          <text class="note">场景图待补</text>
+          <text class="note">小程序按幕显示剧情插画</text>
           <text v-if="scene?.speaker != null" class="speaker">{{ scene?.speaker }}</text>
           <text>{{ scene?.text }}</text>
           <view class="actions">
@@ -54,6 +60,7 @@
 import { computed, ref } from 'vue'
 import type { DraftPreview, Quiz } from '@/features/stage-three-content.uts'
 const props = defineProps<{ value: DraftPreview }>()
+const clueNodes = computed(() => props.value.nodes.filter(node => node.clue != null || node.afterClue != null))
 const chapters = computed(() => props.value.culture?.chapters ?? [])
 const quizzes = computed((): Quiz[] => {
   const result: Quiz[] = []

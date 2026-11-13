@@ -12,8 +12,8 @@
         <text class="muted">从每一幕的入口完成任务，返回这里继续阅读。</text>
         <view v-for="(chapter, index) in chapters" :key="chapter.title" class="row spread divider menu-row">
           <view class="stack">
-            <text class="body">{{ '第 ' + (index + 1) + ' 幕 · ' + (chapterFor(index + 1)?.title ?? chapter.title) }}</text>
-            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true" class="muted">{{ chapterFor(index + 1)?.gateText ?? chapter.gate }}</text>
+            <text class="body">{{ '第 ' + (index + 1) + ' 幕 · ' + (chapterFor(index + 1)?.title ?? scopedGuide(index + 1)?.title ?? chapter.title) }}</text>
+            <text v-if="index > 0 && chapterFor(index + 1)?.unlocked !== true && chapterGate(index + 1).length > 0" class="muted">{{ chapterGate(index + 1) }}</text>
           </view>
           <button v-if="hasAction(index + 1)" class="chapter-action" @click="openChapter(index + 1)">{{ chapterLabel(index + 1) }}</button>
           <text v-else class="muted">{{ chapterLabel(index + 1) }}</text>
@@ -30,19 +30,21 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { ref } from 'vue'
 import { api, secured, session } from '@/features/api.uts'
-import type { PublishedRoute } from '@/features/exploration/catalog.uts'
+import type { ChapterGuide, PublishedRoute, RunProgress } from '@/features/exploration/catalog.uts'
 import { decodePageId, openCultureActivity, openPage, openRouteDetail } from '@/features/navigation.uts'
 import { legacyStorm, localStoryPath, savedOpeningPath } from '../story-content.uts'
-import { readLegacyStorm } from '../legacy-story.uts'
+import { legacyStormAccess, readLegacyStorm } from '../legacy-story.uts'
+import type { LegacyStormAccess } from '../legacy-story.uts'
 type Entry = { act: number, title: string, runId: string, routeId: string, unlocked: boolean, started: boolean, gateText?: string, nextActivityId?: string | null, local?: boolean }
-type TaskLink = { routeId: string, activityId: string, label: string }
+type TaskLink = { routeId: string, activityId: string, label: string, runId?: string }
 const entries = ref<Entry[]>([])
 const routes = ref<PublishedRoute[]>([])
 const openingStarted = ref(false)
 const loadFailed = ref(false)
 const olderService = ref(false)
 const message = ref('')
-let loading = false
+const loading = ref(false)
+const hasRouteRun = ref(false)
 let preferredRoute = ''
 const chapters = [
   { title: '触碰海丝地图', gate: '', taskId: '' },
@@ -58,11 +60,13 @@ onShow(() => {
   load()
 })
 async function load(): Promise<void> {
-  if (loading) return
+  if (loading.value) return
   loadFailed.value = false
   olderService.value = false
   message.value = ''
-  loading = true
+  loading.value = true
+  hasRouteRun.value = false
+  if (preferredRoute.length > 0) entries.value = []
   const uid = session.value?.uid
   try {
     try { routes.value = await api<PublishedRoute[]>('catalog') } catch (_) { /* Keep the last public catalog for task links. */ }
@@ -76,20 +80,34 @@ async function load(): Promise<void> {
       missing = true
     }
     if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
-    if (missing || !library.some(item => item.act === 2 && (preferredRoute.length === 0 || item.routeId === preferredRoute))) {
+    let routeRun = false
+    if (preferredRoute.length > 0) {
+      library = library.filter(item => item.routeId === preferredRoute)
+      routeRun = library.length > 0
+    }
+    if ((preferredRoute.length > 0 && !routeRun) ||
+      (preferredRoute.length === 0 && !library.some(item => item.act === 2))) {
       try {
-        const local = await readLegacyStorm(preferredRoute, '')
+        let local: LegacyStormAccess | null
+        if (preferredRoute.length > 0) {
+          const progress = await secured<RunProgress | null>('routeProgress', { routeId: preferredRoute })
+          routeRun = progress != null
+          local = legacyStormAccess(progress, uid)
+        } else {
+          local = await readLegacyStorm('', '')
+        }
         if (local != null && !library.some(item => item.routeId === local.routeId)) {
           library.push({ act: 2, title: legacyStorm.title, routeId: local.routeId, runId: local.runId,
             unlocked: local.unlocked, started: localStoryPath(local.storageKey, legacyStorm).length > 1,
             gateText: '澳门 · 完成本路线任一地点打卡', local: true })
         }
       } catch (error) {
-        if (missing) throw error
+        if (missing || preferredRoute.length > 0) throw error
       }
     }
     if (session.value?.uid !== uid) throw new Error('AUTH_REQUIRED')
     entries.value = library
+    hasRouteRun.value = routeRun
     olderService.value = missing
     if (missing) {
       message.value = library.length > 0
@@ -101,22 +119,44 @@ async function load(): Promise<void> {
     loadFailed.value = true
     message.value = (error as Error).message === 'AUTH_REQUIRED' || session.value == null
       ? '请在「我的」重新登录后读取解锁进度。' : '暂时无法读取路线打卡进度，请重试。'
-  } finally { loading = false }
+  } finally { loading.value = false }
 }
 function chapterFor(act: number): Entry | null {
   const candidates = entries.value.filter(entry => entry.act === act)
+  if (preferredRoute.length > 0) return candidates.find(entry => entry.routeId === preferredRoute) ?? null
   const main = routes.value.find(route => route.cultureUpgrade === true)
-  return candidates.find(entry => entry.routeId === preferredRoute) ??
-    candidates.find(entry => entry.routeId === main?.id) ??
+  return candidates.find(entry => entry.routeId === main?.id) ??
     candidates.find(entry => entry.unlocked) ?? candidates[0] ?? null
+}
+function scopedGuide(act: number): ChapterGuide | null {
+  if (preferredRoute.length === 0 || hasRouteRun.value ||
+    (session.value != null && (loading.value || loadFailed.value))) return null
+  return routes.value.find(route => route.id === preferredRoute)?.chapters?.find(chapter => chapter.act === act) ?? null
+}
+function chapterGate(act: number): string {
+  if (preferredRoute.length === 0) return chapterFor(act)?.gateText ?? chapters[act - 1].gate
+  return chapterFor(act)?.gateText ?? scopedGuide(act)?.gateText ?? ''
+}
+function taskLabel(act: number, task: string): string {
+  return task === 'tile' ? '去配色' : task === 'tileQuiz' ? '答瓷砖题' : task === 'quiz' ? '答湘绣题' : task === 'learning' ? '学知识卡' : act === 2 ? '去打卡' : '查看路线'
 }
 function taskFor(act: number): TaskLink | null {
   if (act < 2) return null
   const entry = chapterFor(act)
+  if (preferredRoute.length > 0) {
+    if (entry != null) {
+      const task = entry.nextActivityId ?? ''
+      return { routeId: entry.routeId, activityId: task, label: taskLabel(act, task), runId: entry.runId }
+    }
+    const guide = scopedGuide(act)
+    if (guide == null) return null
+    const task = guide.activityId === 'learning' ? 'quiz' : guide.activityId ?? ''
+    return { routeId: preferredRoute, activityId: task, label: taskLabel(act, task) }
+  }
   const defaultTask = chapters[act - 1].taskId
   const matching = routes.value.filter(route => route.chapters?.some(chapter => chapter.act === act) === true ||
     route.activities?.some(task => task.id === (act === 2 ? 'tile' : defaultTask)) === true)
-  const route = matching.find(item => item.id === preferredRoute) ?? matching.find(item => item.cultureUpgrade === true) ??
+  const route = matching.find(item => item.cultureUpgrade === true) ??
     matching.find(item => item.id === entry?.routeId) ?? matching[0] ?? null
   if (route == null && entry == null) return null
   const routeId = route?.id ?? entry!.routeId
@@ -128,8 +168,7 @@ function taskFor(act: number): TaskLink | null {
       task = act === 6 && !entries.value.some(item => item.routeId === routeId && item.act === 5 && item.unlocked) ? 'quiz' : defaultTask
     }
   }
-  const label = task === 'tile' ? '去配色' : task === 'tileQuiz' ? '答瓷砖题' : task === 'quiz' ? '答湘绣题' : task === 'learning' ? '学知识卡' : act === 2 ? '去打卡' : '查看路线'
-  return { routeId, activityId: task, label }
+  return { routeId, activityId: task, label: taskLabel(act, task) }
 }
 function hasAction(act: number): boolean {
   return act === 1 || chapterFor(act)?.unlocked === true || taskFor(act) != null
@@ -155,7 +194,7 @@ function openChapter(act: number): void {
   }
   const task = taskFor(act)
   if (task == null) return
-  if (task.activityId.length > 0) openCultureActivity(task.routeId, task.activityId)
+  if (task.activityId.length > 0) openCultureActivity(task.routeId, task.activityId, task.runId ?? null)
   else openRouteDetail(task.routeId)
 }
 </script>

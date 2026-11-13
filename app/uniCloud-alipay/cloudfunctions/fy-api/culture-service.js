@@ -1,6 +1,6 @@
 const { activityIds, quizIds, chapterGuide, completedActivities, requireValue, tileWork, validPath } = require('./culture')
 
-function createCultureService({ repo, owned, key, now, attachCulture }) {
+function createCultureService({ repo, owned, key, now, attachCulture, checkinWindow }) {
   async function checkinsMet(db, runId, after, mode = 'all') {
     for (const nodeId of after) {
       const checked = !!await db.get('fy-checkins', key(runId, nodeId))
@@ -17,10 +17,13 @@ function createCultureService({ repo, owned, key, now, attachCulture }) {
     const quizMet = activityId !== 'learning' || run.culture?.quiz === true
     const unlocked = quizMet && await checkinsMet(db, runId, definition.after)
     const status = { title: definition.title, unlocked, testOnly: run.snapshot.testOnly }
+    const exhibit = (run.purpose ?? 'solo') === 'solo' ? run.snapshot.exhibit : null
+    if (exhibit?.reward === activityId && await db.get('fy-checkins', key(runId, exhibit.id))) status.exhibitBonus = true
     if (!unlocked) {
       return { ...status, lockText: quizMet ? '完成路线指定的定位照片打卡后解锁。' : '答对湘绣辨认题后解锁。' }
     }
-    if (activityId === 'tile') return { ...status, work: run.culture?.tile ?? null }
+    if (activityId === 'tile') return { ...status, work: run.culture?.tile ?? null,
+      ...(status.exhibitBonus ? { exhibitWork: run.culture?.exhibitTile ?? null } : {}) }
     if (quizIds.includes(activityId)) {
       const done = run.culture?.[activityId] === true
       return { ...status, prompt: definition.prompt, options: definition.options, done,
@@ -30,6 +33,7 @@ function createCultureService({ repo, owned, key, now, attachCulture }) {
   }
 
   async function setCulture(db, run, runId, value) {
+    if (run.bottle === true) await checkinWindow(db, run, runId)
     await db.put('fy-runs', runId, { ...run, culture: { ...run.culture, ...value }, revision: run.revision + 1 })
   }
 
@@ -56,6 +60,14 @@ function createCultureService({ repo, owned, key, now, attachCulture }) {
         const run = await owned(db, u, p.runId)
         const status = await activityStatus(db, run, p.runId, 'tile')
         requireValue(status.unlocked, 'ACTIVITY_LOCKED')
+        if (p.framePalette != null) {
+          requireValue(status.exhibitBonus === true, 'ACTIVITY_LOCKED')
+          tileWork({ pattern: p.pattern, palette: p.framePalette }, now())
+          if (status.exhibitWork) return status.exhibitWork
+          const framed = { ...work, framePalette: p.framePalette }
+          await setCulture(db, run, p.runId, { exhibitTile: framed, tile: status.work ?? framed })
+          return framed
+        }
         if (status.work) return status.work
         await setCulture(db, run, p.runId, { tile: work })
         return work
@@ -95,9 +107,12 @@ function createCultureService({ repo, owned, key, now, attachCulture }) {
       requireValue(u?.uid, 'AUTH_REQUIRED')
       const runs = await repo.list('fy-runs', { uid: u.uid })
       const copied = new Set(runs.map(run => run.cultureTileSourceId).filter(Boolean))
-      return runs.filter(run => run.culture?.tile && !copied.has(run._id)).map(run => ({
-        runId: run._id, routeName: run.snapshot.name, ...run.culture.tile
-      })).sort((a, b) => b.savedAt - a.savedAt)
+      return runs.flatMap(run => {
+        if (!run.culture?.tile || copied.has(run._id)) return []
+        const work = { runId: run._id, routeName: run.snapshot.name, ...run.culture.tile }
+        if (!run.culture.exhibitTile || run.culture.tile.framePalette != null) return [work]
+        return [work, { runId: run._id, routeName: run.snapshot.name, ...run.culture.exhibitTile }]
+      }).sort((a, b) => b.savedAt - a.savedAt)
     },
     async storyLibrary(u) {
       requireValue(u?.uid, 'AUTH_REQUIRED')

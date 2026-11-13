@@ -14,3 +14,5 @@ Thumbs.db
 **/uni-config-center/*/config.json
 app/uniCloud-alipay/cloudfunctions/fy-api/fy/config.json
 app/uniCloud-alipay/database/fy-admin-users.init_data.json
+
+app/uniCloud-alipay/cloudfunctions/fy-guess/fy/config.json

@@ -15,5 +15,7 @@ const lengths = ['42%', '80%', '57%', '90%', '46%', '68%']
 .hoop { align-self: center; width: 164px; padding: 19px; background: #f3e2d2; border: 3px solid #a87951; border-radius: 50%; display: flex; flex-direction: column; gap: 4px; align-items: center; }
 .thread { height: 7px; border-radius: 6px; transform: rotate(-12deg); }
 .direction .thread:nth-child(n + 4) { transform: rotate(14deg); }
+.reverse-side .thread { background-color: #416f78 !important; transform: rotate(18deg); }
+.reverse-side .thread:nth-child(odd) { background-color: #7c9c9d !important; width: 64% !important; }
 .layers .thread:nth-child(n + 4) { transform: rotate(30deg) translateY(-13px); }
 </style>
