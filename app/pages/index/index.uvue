@@ -3,13 +3,17 @@
     <RouteMap :nodes="nodes" :route-id="route?.id ?? null" :selected-node-id="mapState.selectedNodeId" :viewport="commandedViewport"
       :current-location="currentLocation" @node-select="openNode" @viewport-change="saveViewport" />
     <view class="home-header" :style="{ top: statusBar + 7 + 'px' }">
-      <text class="home-title">{{ route == null ? '非遗云享' : route.region + ' · 当前路线' }}</text>
-      <text class="home-caption">{{ demoEnabled ? '开发演示 · ' : '' }}{{ route == null ? (nodes.length > 0 ? '点图钉查看打卡点' : '从路线开始探索') : '博物馆探索' }}</text>
+      <text class="home-title">{{ route == null ? '非遗云享' : route.name }}</text>
+      <text class="home-caption">{{ demoEnabled ? '开发演示 · ' : '' }}{{ route == null ? (nodes.length > 0 ? '点图钉查看打卡点' : '从路线开始探索') : route.region + ' · 博物馆探索' }}</text>
+      <view v-if="route != null" class="route-controls">
+        <button class="route-control" @click="openPage('/packages/routes/routes/routes')">切换路线</button>
+        <button class="route-control" @click="clearRoute">退出路线</button>
+      </view>
     </view>
-    <view class="map-rail left" :style="{ top: statusBar + 75 + 'px', bottom: railBottom }">
+    <view class="map-rail left" :style="{ top: statusBar + (route == null ? 75 : 118) + 'px', bottom: railBottom }">
       <MapSideActions side="left" @navigate="openPage" />
     </view>
-    <view class="map-rail right" :style="{ top: statusBar + 75 + 'px', bottom: railBottom }">
+    <view class="map-rail right" :style="{ top: statusBar + (route == null ? 75 : 118) + 'px', bottom: railBottom }">
       <MapSideActions side="right" @navigate="openPage" @zoom="zoom" @locate="locate" />
     </view>
     <view v-if="selectedNode != null" class="home-bottom node-panel">
@@ -60,9 +64,13 @@ onShow(async () => {
   }
 })
 
-watch(() => mapState.value.routeId, id => {
-  if (id != null) commandedViewport.value = mapState.value.viewport
+watch(() => mapState.value.routeId, () => {
+  commandedViewport.value = mapState.value.viewport
 })
+
+function clearRoute(): void {
+  dispatchMapEvent({ type: 'clear-route' })
+}
 
 function saveViewport(viewport: MapViewport): void {
   dispatchMapEvent({ type: 'set-viewport', viewport })
@@ -107,6 +115,9 @@ function closeNode(): void {
 .home-header { position: absolute; left: 13px; z-index: 2; display: flex; flex-direction: column; padding: 8px 13px; border-radius: 22px; background: #fffffa; box-shadow: 0 3px 9px #2f30251a; }
 .home-title { font-size: 14px; font-weight: 700; color: #372b1e; }
 .home-caption { margin-top: 3px; font-size: 10px; color: #5d644e; }
+.route-controls { display: flex; flex-direction: row; gap: 8px; margin-top: 6px; }
+.route-control { margin: 0; padding: 0 8px; border-radius: 12px; background: #edf0e1; color: #42563a; font-size: 11px; line-height: 24px; }
+.route-control::after { border: 0; }
 .map-rail { position: absolute; z-index: 2; overflow-y: auto; }
 .left { left: 13px; }
 .right { right: 13px; }

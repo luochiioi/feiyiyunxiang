@@ -32,6 +32,9 @@
         </view>
         <button v-if="runId == null" class="secondary" @click="openStory">查看剧情章节</button>
         <button v-if="runId == null" class="secondary" @click="showOnMap">在地图查看路线</button>
+        <!-- #ifdef MP-WEIXIN -->
+        <button class="secondary" @click="openPage('/packages/ar/ar/ar')">奥喵 AR</button>
+        <!-- #endif -->
         <view v-if="routeSections.length > 1" class="card">
           <text class="heading">实地参观</text>
           <text v-for="section in routeSections.slice(1)" :key="section" class="body">{{ section }}</text>

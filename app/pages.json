@@ -23,6 +23,21 @@
         }
       ]
     },
+    // #ifdef MP-WEIXIN
+    {
+      "root": "packages/ar",
+      "pages": [
+        {
+          "path": "ar/ar",
+          "style": {
+            "disableScroll": true,
+            "renderer": "webview",
+            "usingComponents": { "ar-view": "/wxcomponents/heritage-ar/index" }
+          }
+        }
+      ]
+    },
+    // #endif
     {
       "root": "packages/profile",
       "pages": [
