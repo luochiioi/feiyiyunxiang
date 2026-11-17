@@ -16,6 +16,20 @@ function gateway({configured=true,validCode=true,privateStorageVerified=false,st
 test('gateway exchanges WeChat code on server and never returns session_key or secret',async()=>{const g=gateway();const r=await g.main({action:'wxLogin',payload:{code:'wx-code'}});assert.equal(r.code,'OK');assert.equal(r.data.token,'issued-token');assert.equal(g.counts().exchanges,1);assert.doesNotMatch(JSON.stringify(r),/never-return|server-fixture|openid/);})
 test('gateway rejects invalid code and missing configuration without pretending login',async()=>{assert.equal((await gateway({validCode:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'LOGIN_FAILED');assert.equal((await gateway({configured:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'CONFIG_REQUIRED');})
 test('gateway ignores submitted uid/admin and denies ordinary member operations',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});for(const action of ['drafts','saveDraft','previewDraft','publish'])assert.equal((await g.main({action,token:'fixture-token',uid:'administrator',admin:true,payload:{}})).code,'AUTH_REQUIRED');assert.equal((await g.main({action:'diary',token:'expired',uid:'member'})).code,'AUTH_REQUIRED');})
+test('only a member session can claim or select Aomiao or read their archive', async () => {
+  const g = gateway()
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: [] })
+  const call = (action, token, payload) => g.main({ action, token, payload })
+  for (const action of ['aomiaoStatus', 'claimAomiao', 'selectAomiao', 'explorationArchive']) {
+    assert.equal((await call(action, '', { uid: 'member' })).code, 'AUTH_REQUIRED')
+    assert.equal((await call(action, 'fy_admin_spoof', { uid: 'member' })).code, 'AUTH_REQUIRED')
+  }
+  const claim = await call('claimAomiao', 'fixture-token', { uid: 'other-member' })
+  assert.equal(claim.code, 'OK')
+  assert.equal(claim.data.selected, 'default')
+  assert.deepEqual([...g.rows].filter(([key]) => key.startsWith('fy-aomiao')).map(([, row]) => row.uid), ['member'])
+  assert.equal((await call('selectAomiao', 'fixture-token', { appearanceId: 'macau' })).code, 'APPEARANCE_LOCKED')
+})
 test('unverified private storage blocks all uploads before SDK is called',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});assert.equal((await g.main({action:'uploadMedia',token:'fixture-token',payload:{base64:'fixture'}})).code,'CONFIG_REQUIRED');assert.equal(g.counts().uploads,0);})
 
 test('storage errors without a file ID preserve retry and never create a broken photo record', async () => {

@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto')
 const { validateCulture, cultureSummary, chapterGuide, completedActivities, activityIds } = require('./culture')
 const { createCultureService } = require('./culture-service')
 const { createCultureUpgrade } = require('./culture-upgrade')
+const { createAomiaoService } = require('./aomiao-service')
 const { seatNodes, seatActivities, seatOf } = require('./partnership-service')
 const fail = code => { throw new Error(code) }
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
@@ -77,6 +78,17 @@ function routeView(v, version, checked = [], includeClues = true) {
 }
 function createService({repo,now=Date.now,allowTestContent=true}) {
   const attachCulture = createCultureUpgrade({ repo, allowTestContent })
+  async function diary(user) {
+    if (!user?.uid) fail('AUTH_REQUIRED')
+    return (await repo.list('fy-diary', { uid: user.uid })).sort((a, b) => b.createdAt - a.createdAt)
+  }
+  function diaryContext(run, nodeId) {
+    return {
+      museumName: run.snapshot.museum?.name ?? run.snapshot.name,
+      kind: run.snapshot.exhibit?.id === nodeId ? 'indoor' : 'outdoor',
+      purpose: run.purpose ?? 'solo'
+    }
+  }
   async function owned(db,u,runId) {
     if (!u?.uid || !id(runId)) fail('NOT_FOUND')
     const run=await db.get('fy-runs',runId)
@@ -137,6 +149,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
   }
   return {
     ...createCultureService({ repo, owned, key, now, attachCulture, checkinWindow }),
+    ...createAomiaoService({ repo, key, now }),
     async drafts(u) { adminOnly(u); return repo.list('fy-drafts',{}) },
     async previewDraft(u, p) {
       adminOnly(u)
@@ -278,7 +291,17 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       }
       return null
     },
-    async diary(u) { if (!u?.uid) fail('AUTH_REQUIRED'); return (await repo.list('fy-diary',{uid:u.uid})).sort((a,b)=>b.createdAt-a.createdAt) }
+    diary,
+    async explorationArchive(user) {
+      const records = await diary(user)
+      const snapshots = new Map()
+      return Promise.all(records.map(async record => {
+        if (record.kind != null) return record
+        if (!snapshots.has(record.runId)) snapshots.set(record.runId, repo.get('fy-runs', record.runId))
+        const run = await snapshots.get(record.runId)
+        return run?.uid === user.uid ? { ...record, ...diaryContext(run, record.nodeId) } : record
+      }))
+    }
   }
 }
 module.exports={createService,key,distance}

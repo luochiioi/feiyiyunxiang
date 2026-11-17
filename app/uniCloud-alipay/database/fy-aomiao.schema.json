@@ -1,0 +1,11 @@
+{
+  "bsonType": "object",
+  "permission": { "read": false, "create": false, "update": false, "delete": false },
+  "required": ["uid", "selected", "claimedAt"],
+  "properties": {
+    "_id": { "bsonType": "string" },
+    "uid": { "bsonType": "string" },
+    "selected": { "bsonType": "string" },
+    "claimedAt": { "bsonType": "long" }
+  }
+}

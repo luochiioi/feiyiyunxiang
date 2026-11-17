@@ -13,6 +13,7 @@
             <image v-if="photo.path.length > 0" class="photo" :src="photo.path" mode="aspectFill" @click="previewPhoto(photo.path)" />
             <button v-else class="photo photo-fallback" :disabled="busy" @click="loadOriginal(photo)">查看原图 {{ photo.keepIndex + 1 }}</button>
             <button class="remove-photo" :disabled="busy" @click="removePhoto(photo.slot)" aria-label="移除这张照片">×</button>
+            <text v-if="failedPhotoSlot === photo.slot" class="photo-status photo-error">上传失败</text>
           </view>
         </view>
         <view class="row choices">
@@ -26,7 +27,7 @@
         </view>
         <text v-if="message.length > 0" class="body">{{ message }}</text>
         <text v-if="phase.length > 0" class="body">{{ phase }}</text>
-        <button class="primary" :disabled="busy" :loading="submitting" @click="submit">{{ submitting ? '提交中…' : '提交审核' }}</button>
+        <button class="primary" :disabled="busy" :loading="submitting" @click="submit">{{ submitting ? '提交中…' : retrySubmit ? '重试提交' : '提交审核' }}</button>
       </view>
       <text v-else-if="message.length > 0" class="body">{{ message }}</text>
     </view>
@@ -44,6 +45,7 @@ const maxPhotos = 9
 const postId = ref(''), revisionId = ref(''), title = ref(''), body = ref('')
 const photos = ref<Photo[]>([]), showDiary = ref(false), records = ref<DiaryPhoto[]>([])
 const busy = ref(false), submitting = ref(false), ready = ref(false), message = ref(''), phase = ref('')
+const failedPhotoSlot = ref(''), retrySubmit = ref(false)
 let pendingDiaryId = '', submitId = requestId(), submittedDraft = '', disposed = false
 onUnload(() => { disposed = true; photos.value.forEach(photo => removePreview(photo.path)) })
 onLoad(query => {
@@ -77,19 +79,25 @@ function removePhoto(slot: string): void {
   const photo = photos.value.find(item => item.slot === slot)
   if (photo != null) removePreview(photo.path)
   photos.value = photos.value.filter(item => item.slot !== slot)
+  if (failedPhotoSlot.value === slot) {
+    failedPhotoSlot.value = ''
+    message.value = ''
+  }
 }
 function choosePhoto(): void {
   const remaining = maxPhotos - photos.value.length
   if (remaining <= 0 || busy.value) return
+  busy.value = true
   uni.chooseImage({ count: remaining, sourceType: ['album'], sizeType: ['compressed'], success: result => {
     if (disposed) return
     const additions = result.tempFilePaths.slice(0, remaining).map((path): Photo =>
       ({ slot: requestId(), source: 'upload', path, diaryId: '', keepIndex: -1, uploadId: '' }))
     photos.value = [...photos.value, ...additions]
-    showDiary.value = false; message.value = ''
+    showDiary.value = false
+    if (failedPhotoSlot.value.length === 0) message.value = ''
   }, fail: error => {
     if (!error.errMsg.toLowerCase().includes('cancel')) message.value = '打开相册失败，请检查微信的照片权限后重试。'
-  } })
+  }, complete: () => { busy.value = false } })
 }
 function previewPhoto(path: string): void {
   uni.previewImage({ current: path, urls: photos.value.filter(photo => photo.path.length > 0).map(photo => photo.path) })
@@ -165,6 +173,8 @@ async function stagePhoto(photo: Photo): Promise<string> {
 async function submit(): Promise<void> {
   if (busy.value) return
   message.value = ''
+  failedPhotoSlot.value = ''
+  retrySubmit.value = false
   if (title.value.trim().length === 0 && body.value.trim().length === 0 && photos.value.length === 0) {
     message.value = '写个标题、正文或选张照片，就可以提交。'
     return
@@ -172,6 +182,7 @@ async function submit(): Promise<void> {
   busy.value = true; submitting.value = true
   const draft = JSON.stringify([title.value.trim(), body.value.trim(), photos.value.map(photo => photo.slot)])
   if (submittedDraft.length > 0 && submittedDraft !== draft) { resetUploads(); submittedDraft = '' }
+  let pendingPhoto: Photo | null = null
   let photoNumber = 0
   try {
     if (session.value == null || session.value!.expiresAt <= Date.now()) {
@@ -185,13 +196,14 @@ async function submit(): Promise<void> {
       if (photo.source === 'keep') {
         images.push({ keepIndex: photo.keepIndex })
       } else {
+        pendingPhoto = photo
         photoNumber = i + 1
         phase.value = '正在上传照片 ' + photoNumber + '/' + photos.value.length + '…'
         images.push({ uploadId: await stagePhoto(photo) })
       }
     }
     if (disposed) return
-    photoNumber = 0
+    pendingPhoto = null
     phase.value = '正在提交审核…'
     submittedDraft = draft
     const value = await secured<{ postId: string, revisionId: string }>('communitySubmitGallery', {
@@ -205,7 +217,9 @@ async function submit(): Promise<void> {
   } catch (error) {
     const code = (error as Error).message
     if (code === 'UPLOAD_NOT_AVAILABLE') resetUploads()
-    const prefix = photoNumber > 0 ? '第 ' + photoNumber + ' 张照片：' : ''
+    failedPhotoSlot.value = pendingPhoto?.slot ?? ''
+    retrySubmit.value = true
+    const prefix = pendingPhoto != null ? '第 ' + photoNumber + ' 张照片：' : ''
     message.value = prefix + communityError(error, true)
   } finally {
     busy.value = false; submitting.value = false; phase.value = ''
@@ -223,6 +237,8 @@ textarea { min-height: 140px; }
 .photo-tile { position: relative; width: calc((100% - 16px) / 3); height: 170rpx; border-radius: 10px; overflow: hidden; background: #f4ead8; }
 .photo { width: 100%; height: 100%; }
 .photo-fallback { padding: 0; font-size: 12px; color: #604323; background: #f4ead8; }
+.photo-status { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px; text-align: center; font-size: 11px; }
+.photo-error { color: #fff; background: #823b25; }
 .remove-photo { position: absolute; right: 3px; top: 3px; margin: 0; padding: 0; width: 25px; height: 25px; line-height: 25px; color: white; background: #332b24b3; border-radius: 13px; }
 .remove-photo::after, .photo-fallback::after { border: 0; }
 </style>

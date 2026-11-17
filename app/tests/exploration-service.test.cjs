@@ -17,6 +17,51 @@ function setup() {
 }
 const draft = {id:'macau', revision:0, name:'测试路线', region:'澳门', description:'开发测试', testOnly:true, viewport:{latitude:22,longitude:113,scale:16}, museum:{name:'测试馆',description:'测试'}, nodes:[{id:'n1',title:'测试节点',description:'定位照片',latitude:22,longitude:113,radius:100}]}
 async function ready() {const f=setup(); await f.s.saveDraft(f.admin,draft); await f.s.publish(f.admin,{id:'macau',revision:1}); f.run=await f.s.start(f.a,{routeId:'macau',requestId:'start-0001'}); return f}
+test('Aomiao claims are idempotent and theme selection uses the account’s existing solo culture progress', async () => {
+  const { s, repo, a, b } = setup()
+  const macau = 'yinian-guiqi-macau'
+  const hunan = 'yinian-guiqi-hunan'
+  await repo.put('fy-runs', 'old-macau', {
+    uid: a.uid, routeId: macau, snapshot: { culture: { tile: {} } }, culture: { tile: { pattern: 'sail' } }
+  })
+  const learning = {
+    uid: a.uid, routeId: hunan, snapshot: { culture: { learning: { cards: [{ id: 'line' }] } } },
+    culture: { quiz: true, cards: ['line'] }
+  }
+  await repo.put('fy-runs', 'coop-hunan', { ...learning, purpose: 'coop' })
+  assert.equal((await s.aomiaoStatus(a)).claimed, false)
+  const claims = await Promise.all(Array.from({ length: 8 }, () => s.claimAomiao(a, { uid: b.uid })))
+  assert.ok(claims.every(value => value.selected === 'default'))
+  assert.equal((await repo.list('fy-aomiao', {})).length, 1)
+  assert.equal((await s.aomiaoStatus(b)).claimed, false)
+  await assert.rejects(s.selectAomiao(a, { appearanceId: 'hunan' }), /APPEARANCE_LOCKED/)
+  await assert.rejects(s.selectAomiao(a, { appearanceId: 'missing' }), /INVALID_APPEARANCE/)
+  await s.selectAomiao(a, { appearanceId: 'macau' })
+  assert.equal((await s.claimAomiao(a)).selected, 'macau')
+  assert.equal((await createService({ repo }).aomiaoStatus(a)).selected, 'macau')
+  await s.claimAomiao(b)
+  await assert.rejects(s.selectAomiao(b, { appearanceId: 'macau', uid: a.uid }), /APPEARANCE_LOCKED/)
+  await repo.put('fy-runs', 'old-hunan', learning)
+  assert.equal((await s.selectAomiao(a, { appearanceId: 'hunan' })).selected, 'hunan')
+  assert.equal((await s.selectAomiao(a, { appearanceId: 'default' })).selected, 'default')
+})
+
+test('archive reads indoor and outdoor diary entries against each owned snapshot', async () => {
+  const { s, repo, a, b } = setup()
+  const run = { uid: a.uid, routeId: 'macau', purpose: 'solo', snapshot: {
+    name: '旧版路线', museum: { name: '澳门博物馆' }, exhibit: { id: 'exhibit' }
+  } }
+  await repo.put('fy-runs', 'old', run)
+  const base = { uid: a.uid, runId: 'old', routeId: run.routeId, title: '打卡记录', mediaId: 'private-photo', note: '今日参观' }
+  await repo.put('fy-diary', 'first', { ...base, nodeId: 'entrance', createdAt: 10 })
+  await repo.put('fy-diary', 'second', { ...base, nodeId: 'exhibit', createdAt: 20 })
+  const archive = await s.explorationArchive(a)
+  assert.deepEqual(archive.map(item => [item.kind, item.museumName, item.note, item.createdAt]), [
+    ['indoor', '澳门博物馆', '今日参观', 20], ['outdoor', '澳门博物馆', '今日参观', 10]
+  ])
+  assert.deepEqual(await s.explorationArchive(b), [])
+})
+
 test('public cannot manage drafts; malformed published coordinates rejected',async()=>{const {s,a,admin}=setup(); await assert.rejects(s.saveDraft(a,draft),/FORBIDDEN/); await assert.rejects(s.saveDraft(admin,{...draft,nodes:[{...draft.nodes[0],latitude:NaN}]}),/INVALID/);})
 test('draft optimistic revision and immutable run snapshot',async()=>{const f=await ready(); await assert.rejects(f.s.saveDraft(f.admin,draft),/CONFLICT/); await f.s.saveDraft(f.admin,{...draft,revision:1,name:'第二版'}); await f.s.publish(f.admin,{id:'macau',revision:2}); const run=await f.repo.get('fy-runs',f.run.id); assert.equal(run.snapshot.name,'测试路线');})
 test('same start request returns same exploration, other user cannot read run',async()=>{const f=await ready(); assert.equal((await f.s.start(f.a,{routeId:'macau',requestId:'start-0001'})).id,f.run.id); await assert.rejects(f.s.progress(f.b,{runId:f.run.id}),/NOT_FOUND/);})
@@ -457,6 +502,9 @@ test('both formal museum routes preserve task gates, private work and reading ch
     const receipt = await s.checkin(a, submission)
     assert.equal((await s.checkin(a, submission)).id, receipt.id)
     assert.equal((await s.progress(a, { runId })).exhibitCompleted, true)
+    const journal = (await s.explorationArchive(a)).filter(item => item.runId === runId)
+    assert.deepEqual(journal.map(item => item.kind).sort(), ['indoor', 'outdoor'])
+    assert.ok(journal.every(item => item.museumName === museum))
     await assert.rejects(s.readMedia(b, { id: exhibitPhoto }), /NOT_FOUND/)
 
     if (episode === '上集') {

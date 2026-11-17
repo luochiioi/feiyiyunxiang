@@ -195,7 +195,10 @@ async function load(append: boolean): Promise<void> {
   rows.value = append ? [...rows.value, ...result.items] : result.items; next.value = result.next
 }
 function reload(): void { task(async () => { clearDetail(); await load(false) }) }
-function clearUser(): void { targetUid.value = ''; targetLabel.value = ''; reload() }
+function clearUser(): void {
+  if (busy.value) return
+  targetUid.value = ''; targetLabel.value = ''; reload()
+}
 function more(): void { task(async () => { await load(true) }) }
 function switchTo(value: string): void {
   if (busy.value) return
@@ -238,22 +241,37 @@ function reviewComment(decision: string): void {
 }
 async function afterDecision(): Promise<void> {
   const row = selected.value
-  if (group.value === 'reports' && row != null) await loadSelection(row)
-  else { clearDetail(); await load(false) }
-  message.value = '已记录处理结果。'
+  await refreshAfterChange('已记录处理结果。', async () => {
+    if (group.value === 'reports' && row != null) await loadSelection(row)
+    else { clearDetail(); await load(false) }
+  })
+}
+async function refreshAfterChange(success: string, refresh: () => Promise<void>): Promise<void> {
+  try {
+    await refresh()
+    message.value = success
+  } catch (_) {
+    clearDetail()
+    rows.value = []; next.value = ''; policy.value = null
+    message.value = success + ' 列表暂未刷新，请点击「刷新」。'
+  }
 }
 function resolveReport(): void {
   task(async () => {
     await api<UTSJSONObject>('communityResolveReport', { reportId: selected.value?.id ?? '', reason: reason.value })
-    clearDetail(); await load(false); message.value = '举报已处理。'
+    clearDetail()
+    await refreshAfterChange('举报已处理。', () => load(false))
   })
 }
 function mute(release: boolean): void {
   task(async () => {
     if (!release && Number(minutes.value) <= 0) throw new Error('INVALID_DURATION')
     const value = await api<{ until: number }>('communityMute', { targetUid: target(), minutes: release ? 0 : Number(minutes.value), reason: reason.value })
-    if (group.value === 'mutes') { clearDetail(); await load(false) }
-    message.value = value.until > 0 ? '已禁言至 ' + new Date(value.until).toLocaleString() : '已解除禁言。'
+    const success = value.until > 0 ? '已禁言至 ' + new Date(value.until).toLocaleString() : '已解除禁言。'
+    if (group.value === 'mutes') {
+      clearDetail()
+      await refreshAfterChange(success, () => load(false))
+    } else message.value = success
   })
 }
 function addRule(): void { rules.value = [...rules.value, { word: '', action: 'pending' }] }
@@ -263,7 +281,7 @@ function savePolicy(): void {
     await api<UTSJSONObject>('communitySavePolicy', { revision: policy.value?.revision ?? -1,
       minSeconds: Number(minSeconds.value), maxPerWindow: Number(maxPerWindow.value),
       duplicateSeconds: Number(duplicateSeconds.value), rules: rules.value })
-    await load(false); message.value = '规则已保存。'
+    await refreshAfterChange('规则已保存。', () => load(false))
   })
 }
 </script>

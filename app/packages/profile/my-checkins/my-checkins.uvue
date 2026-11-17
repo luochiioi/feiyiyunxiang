@@ -1,47 +1,117 @@
 <template>
   <view class="screen"><AppPageHeader title="探索档案" :show-back="true" />
     <view class="content">
-      <view class="card green"><text class="heading">我的私密日记</text><text class="body">{{ records.length }} 条已保存记录 · 作品与合作待开发</text><button class="secondary" :disabled="busy" @click="load">{{ session == null ? '微信登录并查看' : '刷新日记' }}</button></view>
-      <text class="body">{{ message }}</text>
-      <view v-for="item in records" :key="item._id" class="card">
-        <view class="row spread"><text class="heading">{{ item.title }}</text><text class="tag">仅本人可见</text></view>
-        <text class="muted">{{ new Date(item.createdAt).toLocaleString() }}</text>
-        <text class="body">{{ item.note }}</text>
-        <text v-if="unavailablePhotos.includes(item.mediaId)" class="muted">这次打卡的原照片未保存到云端。</text>
-        <button v-else class="secondary" @click="viewPhoto(item.mediaId)">查看私密照片</button>
-        <button v-if="photoId === item.mediaId" class="secondary" @click="compose(item._id)">用这张图发帖</button>
-        <image v-if="photoId === item.mediaId" :src="photo" mode="aspectFit" style="width:100%;height:220px" />
+      <view class="card green">
+        <text class="heading">我的私密日记</text>
+        <text class="body">{{ session == null ? '登录后查看云端日记。' : busy ? '正在读取日记…' : message }}</text>
+        <text v-if="records.length > 0" class="muted">{{ records.length }} 条已保存记录</text>
+        <button class="secondary" :disabled="busy" @click="load">{{ session == null ? '微信登录并查看' : failed ? '重试读取日记' : '刷新日记' }}</button>
       </view>
+      <view class="card">
+        <view class="row spread menu-row" @click="openPage('/packages/story/works/works')"><text class="body">文化作品</text><text class="muted">›</text></view>
+        <view class="row spread divider menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
+      </view>
+      <view v-for="item in records" :key="item._id" class="card">
+        <view class="row spread"><text class="heading">{{ item.museumName ?? item.title }}</text><text class="tag">{{ checkinKind(item) }}</text></view>
+        <text v-if="item.museumName != null" class="body">{{ item.title }}</text>
+        <text class="muted">{{ new Date(item.createdAt).toLocaleString() }} · {{ purposeLabel(item.purpose) }} · 仅本人可见</text>
+        <text class="body">{{ (item.note ?? '').length > 0 ? item.note : '未填写备注' }}</text>
+        <text v-if="!item.mediaId || unavailablePhotos.includes(item.mediaId)" class="muted">这次打卡的原照片未保存到云端。</text>
+        <text v-else-if="failedPhotoId === item.mediaId" class="muted">照片暂时无法显示。</text>
+        <button v-if="item.mediaId && !unavailablePhotos.includes(item.mediaId) && photoId !== item.mediaId" class="secondary" :disabled="loadingPhotoId.length > 0" @click="viewPhoto(item.mediaId)">{{ loadingPhotoId === item.mediaId ? '正在读取照片…' : failedPhotoId === item.mediaId ? '重试读取照片' : '查看私密照片' }}</button>
+        <button v-if="photoId === item.mediaId" class="secondary" @click="compose(item._id)">用这张图发帖</button>
+        <image v-if="photoId === item.mediaId" :src="photo" mode="aspectFit" style="width:100%;height:220px" @error="photoError(item.mediaId)" />
+        <button v-if="item.routeId != null" class="secondary" @click="openRouteDetail(item.routeId!, item.runId ?? null)">查看原路线</button>
+      </view>
+      <button class="primary" @click="openPage('/packages/routes/routes/routes')">查看路线列表</button>
       <button class="secondary" @click="returnToMap">回到地图</button>
     </view>
   </view>
 </template>
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { secured, session } from '@/features/api.uts'
-import { returnToMap, openPage } from '@/features/navigation.uts'
+import { openRouteDetail, openPage, returnToMap } from '@/features/navigation.uts'
 import { composePath } from '@/features/community/community.uts'
-type Diary = { _id: string, title: string, createdAt: number, note: string, mediaId: string }
-const records = ref<Diary[]>([]), busy = ref(false), message = ref('登录后查看云端日记。')
+type Diary = {
+  _id: string, title: string, createdAt: number, note: string, mediaId: string,
+  routeId?: string, runId?: string, museumName?: string, kind?: string, purpose?: string
+}
+const savedRecords = ref<Diary[]>([]), busy = ref(false), message = ref('')
+const owner = ref('')
+const records = computed(() => session.value?.uid === owner.value ? savedRecords.value : [])
+const failed = ref(false)
 const photo = ref(''), photoId = ref('')
+const failedPhotoId = ref(''), loadingPhotoId = ref('')
 const unavailablePhotos = ref<string[]>([])
+let photoRequest = 0
 onShow(() => { if (session.value != null) load() })
-onHide(() => { photo.value = ''; photoId.value = '' })
+onHide(resetPhoto)
+onUnload(resetPhoto)
+function resetPhoto(): void {
+  photoRequest += 1
+  photo.value = ''
+  photoId.value = ''
+  failedPhotoId.value = ''
+  loadingPhotoId.value = ''
+}
+function checkinKind(item: Diary): string {
+  if (item.kind === 'indoor') return '馆内打卡'
+  if (item.kind === 'outdoor') return '馆外打卡'
+  return '打卡记录'
+}
+function purposeLabel(purpose: string | null = null): string {
+  if (purpose === 'coop') return '合作探索'
+  if (purpose === 'pk') return '路线 PK'
+  return purpose === 'solo' ? '个人探索' : '探索日记'
+}
 function compose(id: string): void { openPage(composePath + '?diaryId=' + encodeURIComponent(id)) }
 async function load(): Promise<void> {
   if (busy.value) return
   busy.value = true
-  try { records.value = await secured<Diary[]>('diary'); message.value = records.value.length === 0 ? '暂无打卡记录，先去路线开始探索。' : '' }
-  catch (_) { records.value = []; message.value = '日记暂时无法加载，请检查网络与云端配置后重试。' }
+  failed.value = false
+  message.value = ''
+  resetPhoto()
+  try {
+    const uid = session.value?.uid
+    const value = await secured<Diary[]>('explorationArchive')
+    const current = session.value?.uid
+    if (current == null || (uid != null && uid !== current)) return
+    if (owner.value !== current) unavailablePhotos.value = []
+    owner.value = current
+    savedRecords.value = value
+    message.value = value.length === 0 ? '暂无打卡记录，可以从路线列表开始探索。' : '回看馆内外打卡与私密照片。'
+  }
+  catch (_) {
+    failed.value = true
+    message.value = '日记暂时无法读取，请重试。'
+    if (session.value == null) uni.showToast({ title: '微信登录未完成，请重试', icon: 'none' })
+  }
   finally { busy.value = false }
 }
 async function viewPhoto(id: string): Promise<void> {
-  try { const result = await secured<{ src: string }>('readMedia', { id }); photo.value = result.src; photoId.value = id }
-  catch (error) {
-    if ((error as Error | null)?.message === 'PHOTO_UNAVAILABLE') unavailablePhotos.value = [...unavailablePhotos.value, id]
-    else message.value = '照片暂时无法读取，请重试。'
+  const uid = session.value?.uid
+  if (uid == null || uid !== owner.value || loadingPhotoId.value.length > 0) return
+  resetPhoto()
+  const request = photoRequest
+  loadingPhotoId.value = id
+  try {
+    const result = await secured<{ src: string }>('readMedia', { id })
+    if (photoRequest !== request || session.value?.uid !== uid) return
+    photo.value = result.src
+    photoId.value = id
   }
+  catch (error) {
+    if (photoRequest !== request || session.value?.uid !== uid) return
+    if ((error as Error | null)?.message === 'PHOTO_UNAVAILABLE') unavailablePhotos.value = [...unavailablePhotos.value, id]
+    else failedPhotoId.value = id
+  } finally { if (photoRequest === request) loadingPhotoId.value = '' }
+}
+function photoError(id: string): void {
+  if (photoId.value !== id) return
+  resetPhoto()
+  failedPhotoId.value = id
 }
 </script>
 <style scoped>
