@@ -3,7 +3,7 @@ import { api, secured, session, requestId } from '@/features/api.uts'
 export type Post = {
   id: string, revisionId: string, latestRevision: string, title: string, body?: string, author: string,
   authorCode?: string, authorAvatar?: string,
-  hasImage: boolean, imageCount?: number, owner: boolean, publicView: boolean, status: string, reason: string,
+  hasImage: boolean, imageCount?: number, owner: boolean, publicView: boolean, hasPublicVersion?: boolean, status: string, reason: string,
   commentCount: number, likeCount: number, liked?: boolean, saved?: boolean
 }
 export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string }
@@ -93,6 +93,7 @@ export function communityError(error: any, submitting = false): string {
     case 'UPLOAD_STAGING_UNAVAILABLE': return '云端照片暂存暂不可用，已保留选图和草稿。'
     case 'MEDIA_UPLOAD_FAILED': return '照片上传失败，请重试。'
     case 'ACCOUNT_DISABLED': return '该账户已停用，请联系运营人员。'
+    case 'ACCOUNT_CHANGED': return '微信账号已切换，请返回后重新打开。'
     case 'LOGIN_FAILED': return '微信登录失败，请重试。'
     case 'LOGIN_TIMEOUT': return '微信登录超时，请重试。'
     case 'CONFIG_REQUIRED': return '社区服务或图片存储尚未配置。'

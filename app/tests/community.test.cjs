@@ -15,6 +15,7 @@ function fixture() {
   const rows = new Map(), files = new Map()
   let clock = 1784000000000
   let conflicts = 0
+  let failCommit = false
   function database(snapshot, writes = null) {
     return {
       command: {
@@ -64,6 +65,7 @@ function fixture() {
       return {
         ...database(snapshot, writes),
         async commit() {
+        if (failCommit) { failCommit = false; throw new Error('WRITE_FAILED') }
           for (const path of writes.keys()) {
             if (snapshot.get(path) !== rows.get(path)) { conflicts++; throw new Error('WRITE_CONFLICT') }
           }
@@ -93,7 +95,7 @@ function fixture() {
     return community.communitySubmit(user, { title: 'Title', body: 'Body', requestId: 'request', ...payload })
   }
   async function approve(version) { await community.communityReviewPost(reviewer, { ...version, decision: 'approve' }) }
-  return { repo, community, media, service, cloud, post, approve, mediaKey, files, conflicts: () => conflicts, tick: value => { clock += value } }
+  return { repo, community, media, service, cloud, post, approve, mediaKey, files, failNextCommit: () => { failCommit = true }, conflicts: () => conflicts, tick: value => { clock += value } }
 }
 
 test('guessed IDs cannot read pending posts, private images or someone else’s diary', async () => {
@@ -343,8 +345,20 @@ test('nine staged images are ordered, privately scoped, reusable on retry and at
   await assert.rejects(stage('one', png), /REQUEST_CONFLICT/)
   await assert.rejects(stage('two', 'bad'), /INVALID_IMAGE/)
   const photos = [first]
-  for (let i = 2; i <= 9; i++) photos.push(await stage('slot-' + i))
-  assert.equal(f.files.size, 9)
+  for (let i = 2; i <= 8; i++) photos.push(await stage('slot-' + i))
+  const originalFile = 'cloud://fy-private/mixed-diary'
+  f.files.set(originalFile, encrypt(Buffer.from(png, 'base64'), f.mediaKey))
+  await f.repo.put('fy-media', 'proof-gallery', { uid: author.uid, runId: 'run', nodeId: 'node', used: true, fileID: originalFile, mime: 'image/png' })
+  await f.repo.put('fy-diary', 'diary-gallery', { uid: author.uid, runId: 'run', nodeId: 'node', mediaId: 'proof-gallery' })
+  const diaryPayload = { requestId: 'gallery', slot: 'last', imageSource: 'diary', diaryId: 'diary-gallery' }
+  await assert.rejects(c.communityStageImage(stranger, diaryPayload), /NOT_FOUND/)
+  const upload = f.cloud.uploadFile
+  f.cloud.uploadFile = async () => { throw new Error('NETWORK') }
+  await assert.rejects(c.communityStageImage(author, diaryPayload), /MEDIA_UPLOAD_FAILED/)
+  f.cloud.uploadFile = upload
+  photos.push(await c.communityStageImage(author, diaryPayload))
+  assert.deepEqual(await stage('one', jpeg), first)
+  assert.equal(f.files.size, 10)
   await assert.rejects(c.communitySubmit(stranger, { requestId: 'gallery', images: photos }), /UPLOAD_NOT_AVAILABLE/)
   await assert.rejects(c.communitySubmit(author, { requestId: 'another', images: photos }), /UPLOAD_NOT_AVAILABLE/)
   await assert.rejects(c.communitySubmit(author, { requestId: 'gallery', images: [...photos, first] }), /INVALID_IMAGES/)
@@ -365,7 +379,9 @@ test('nine staged images are ordered, privately scoped, reusable on retry and at
   await f.approve(edit)
   assert.equal((await c.communityPost(null, edit)).imageCount, 2)
   assert.equal((await c.communityImage(null, { ...edit, index: 1 })).src, 'data:image/jpeg;base64,' + jpeg)
-  assert.equal(f.files.size, 9)
+  assert.equal(f.files.size, 10)
+  assert.equal((await f.service.readMedia(author, { id: 'proof-gallery' })).fileID, originalFile)
+  await assert.rejects(f.service.readMedia(stranger, { id: 'proof-gallery' }), /NOT_FOUND/)
   await c.communityReviewPost(reviewer, { ...edit, decision: 'remove', reason: 'Remove gallery' })
   await assert.rejects(c.communityImage(null, edit), /NOT_FOUND/)
 })
@@ -401,4 +417,158 @@ test('account operations require admin, revoke sessions, scope review queues and
   const audit = (await c.communityReviewList(reviewer, { group: 'audit' })).items
   assert.ok(audit.some(row => row.action === 'user.suspend' && row.actor === admin.uid))
   assert.ok(audit.some(row => row.action === 'user.restore' && row.actor === admin.uid))
+})
+
+test('workbench counts only actionable revisions and filtered pages fill across stale candidates', async () => {
+  const f = fixture(), c = f.community, ops = createCommunityOperations({ repo: f.repo })
+  const expected = []
+  for (let i = 0; i < 45; i++) {
+    f.tick(1)
+    expected.unshift(await f.post(author, { requestId: 'post-' + i }))
+  }
+  for (let i = 0; i < 25; i++) {
+    const original = expected[i]
+    f.tick(1)
+    expected[i] = await f.post(author, { postId: original.postId, baseRevision: original.revisionId, requestId: 'edit-' + i })
+    const old = await f.repo.get('fy-community-versions', original.revisionId)
+    await f.repo.put('fy-community-versions', original.revisionId, { ...old, status: 'pending' })
+  }
+  assert.equal((await ops.communityOverview(reviewer)).pendingPosts, 45)
+  const seen = []
+  let cursor = ''
+  do {
+    const { items, next } = await c.communityReviewList(reviewer, { group: 'pending', targetUid: author.uid, cursor })
+    if (next) assert.equal(items.length, 20)
+    seen.push(...items.map(row => row.revisionId))
+    cursor = next
+  } while (cursor)
+  assert.equal(seen.length, 45)
+  assert.equal(new Set(seen).size, 45)
+  assert.deepEqual(new Set(seen), new Set(expected.map(row => row.revisionId)))
+  assert.deepEqual(await c.communityReviewList(reviewer, { group: 'pending', targetUid: stranger.uid }), { items: [], next: '' })
+})
+
+test('reported revision and comment come from the stored report; legacy comments still open', async () => {
+  const f = fixture(), c = f.community
+  const first = await f.post()
+  await f.approve(first)
+  const comment = await c.communityComment(friend, { ...first, body: 'Hello', requestId: 'comment' })
+  const report = await c.communityReport(stranger, { ...first, commentId: comment.id, reason: 'Review this comment' })
+  const newer = await f.post(author, { postId: first.postId, baseRevision: first.revisionId, requestId: 'edit' })
+  await f.approve(newer)
+  const detail = await c.communityReviewDetail(reviewer, { ...newer, reportId: report.id, commentId: 'unrelated' })
+  assert.equal(detail.reportedRevisionId, first.revisionId)
+  assert.equal(detail.selected.id, first.revisionId)
+  assert.equal(detail.current.id, newer.revisionId)
+  assert.equal(detail.reportedComment.id, comment.id)
+  const legacy = await f.repo.get('fy-community-comments', comment.id)
+  legacy.revisionId = ''
+  await f.repo.put('fy-community-comments', comment.id, legacy)
+  const legacyDetail = await c.communityReviewDetail(reviewer, { postId: first.postId, commentId: comment.id })
+  assert.equal(legacyDetail.reportedComment.id, comment.id)
+  assert.equal(legacyDetail.selected.id, newer.revisionId)
+  const legacyReport = await c.communityReport(author, { ...newer, commentId: comment.id, reason: 'Legacy comment' })
+  assert.equal((await c.communityReviewDetail(reviewer, { reportId: legacyReport.id })).reportedRevisionId, newer.revisionId)
+  const stored = await f.repo.get('fy-community-reports', legacyReport.id)
+  await f.repo.put('fy-community-reports', legacyReport.id, { ...stored, revisionId: '' })
+  const unknown = await c.communityReviewDetail(reviewer, { reportId: legacyReport.id })
+  assert.equal(unknown.reportedRevisionId, '')
+  assert.equal(unknown.reportedComment.id, comment.id)
+  await assert.rejects(c.communityReviewDetail(reviewer, { ...await f.post(stranger), commentId: comment.id }), /NOT_FOUND/)
+})
+
+
+test('user accounts without profiles are listed; governance counts match their linked queues', async () => {
+  const f = fixture(), c = f.community, ops = createCommunityOperations({ repo: f.repo })
+  await f.repo.put('uni-id-users', author.uid, { status: 0 })
+  await f.repo.put('uni-id-users', friend.uid, { status: 1 })
+  await f.repo.put('uni-id-users', stranger.uid, { status: 1, fyOpsSuspended: true })
+  assert.deepEqual((await ops.communityUsers(admin, { code: 'ABCDEFGH' })).items, [])
+  assert.equal((await ops.communityUserDetail(admin, { targetUid: author.uid })).code, '')
+  await assert.rejects(ops.communityUserDetail(reviewer, { targetUid: author.uid }), /FORBIDDEN/)
+  assert.deepEqual((await ops.communityUsers(admin, { status: 'disabled' })).items.map(row => row.id), [stranger.uid])
+  const published = await f.post()
+  await f.approve(published)
+  await f.post(author, { postId: published.postId, baseRevision: published.revisionId, requestId: 'pending-edit' })
+  const report = await c.communityReport(friend, { ...published, reason: 'Review post' })
+  await c.communityResolveReport(reviewer, { reportId: report.id, reason: 'Reviewed' })
+  const detail = await ops.communityUserDetail(admin, { targetUid: author.uid })
+  for (const [group, field] of [['pending', 'pendingPosts'], ['published', 'publishedPosts'],
+    ['comments', 'pendingComments'], ['publicComments', 'publicComments'], ['reports', 'openReports'], ['resolvedReports', 'resolvedReports']]) {
+    const page = await c.communityReviewList(admin, { group, targetUid: author.uid })
+    assert.equal(detail[field], page.items.length, group)
+  }
+})
+
+test('scoped mute and audit only return verified target history; failed writes leave no audit', async () => {
+  const f = fixture(), c = f.community, ops = createCommunityOperations({ repo: f.repo })
+  for (const { uid } of [author, stranger]) await f.repo.put('uni-id-users', uid, { status: 0, token: [] })
+  const a = await f.post(), b = await f.post(stranger)
+  f.failNextCommit()
+  await assert.rejects(f.approve(a), /WRITE_FAILED/)
+  assert.equal((await c.communityReviewList(reviewer, { group: 'audit' })).items.length, 0)
+  assert.equal((await c.communityReviewDetail(reviewer, a)).selected.status, 'pending')
+  await f.approve(a); await f.approve(b)
+  const report = await c.communityReport(stranger, { ...a, reason: 'Check the content' })
+  await c.communityResolveReport(reviewer, { reportId: report.id, reason: 'Reviewed' })
+  await assert.rejects(c.communityMute(reviewer, { targetUid: author.uid, minutes: 43201, reason: 'a' }), /INVALID_DURATION/)
+  await assert.rejects(c.communityMute(reviewer, { targetUid: author.uid, minutes: 0.5, reason: 'a' }), /INVALID_DURATION/)
+  await c.communityMute(reviewer, { targetUid: author.uid, minutes: 43200, reason: 'a' })
+  await c.communityMute(reviewer, { targetUid: stranger.uid, minutes: 1, reason: 'b' })
+  await ops.communityAccountStatus(admin, { targetUid: author.uid, suspend: true, reason: 'Pause' })
+  await f.repo.put('fy-community-audit', 'legacy', { action: 'post.approve', target: a.postId, order: '0000000000001-' + key('legacy') })
+  const scoped = group => c.communityReviewList(reviewer, { group, targetUid: author.uid })
+  assert.deepEqual((await scoped('mutes')).items.map(row => row.id), [author.uid])
+  assert.deepEqual(new Set((await scoped('audit')).items.map(row => row.action)), new Set(['post.approve', 'report.resolve', 'user.mute', 'user.suspend']))
+  assert.ok((await scoped('audit')).items.every(row => row.targetUid === author.uid))
+  assert.ok((await c.communityReviewList(reviewer, { group: 'audit' })).items.some(row => row.id === 'legacy'))
+})
+
+test('author alone sees review reasons and whether an earlier version remains public', async () => {
+  const f = fixture(), c = f.community
+  const a = await f.post()
+  await f.approve(a)
+  const b = await f.post(author, { postId: a.postId, baseRevision: a.revisionId, requestId: 'edit' })
+  await c.communityReviewPost(reviewer, { ...b, decision: 'reject', reason: 'Please revise' })
+  const own = (await c.communityFeed(author, { tab: 'mine' })).items[0]
+  assert.equal(own.status, 'rejected')
+  assert.equal(own.reason, 'Please revise')
+  assert.equal(own.hasPublicVersion, true)
+  assert.equal((await c.communityPost(stranger, a)).hasPublicVersion, undefined)
+  assert.deepEqual((await c.communityFeed(stranger, { tab: 'mine' })).items, [])
+  await c.communityReviewPost(reviewer, { ...a, decision: 'remove', reason: 'Removed by operator' })
+  const removed = await c.communityPost(author, { ...b, preview: true })
+  assert.equal(removed.status, 'removed')
+  assert.equal(removed.reason, 'Removed by operator')
+  assert.equal(removed.hasPublicVersion, false)
+  await assert.rejects(c.communityShare(null, a), /NOT_FOUND/)
+})
+
+
+test('competing reviewers commit only one post decision and audit event', async () => {
+  const f = fixture(), c = f.community
+  const version = await f.post()
+  const results = await Promise.allSettled([
+    c.communityReviewPost(admin, { ...version, decision: 'approve' }),
+    c.communityReviewPost(reviewer, { ...version, decision: 'reject', reason: 'Changes requested' })
+  ])
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1)
+  assert.match(results.find(r => r.status === 'rejected').reason.message, /STALE_VERSION/)
+  assert.ok(f.conflicts() > 0)
+  const { items } = await c.communityReviewList(reviewer, { group: 'audit', targetUid: author.uid })
+  assert.equal(items.length, 1)
+  assert.equal(items[0].revisionId, version.revisionId)
+})
+
+test('only one concurrent policy edit is saved; duplicate normalized words are rejected', async () => {
+  const f = fixture(), c = f.community
+  const rules = [{ word: '禁词', action: 'reject' }]
+  const policy = { revision: 0, minSeconds: 10, maxPerWindow: 20, duplicateSeconds: 300, rules }
+  await assert.rejects(c.communitySavePolicy(admin, { ...policy, rules: [...rules, { word: '禁 词', action: 'allow' }] }), /INVALID_POLICY/)
+  const edits = await Promise.allSettled([c.communitySavePolicy(admin, policy), c.communitySavePolicy(admin, { ...policy, minSeconds: 15 })])
+  assert.equal(edits.filter(r => r.status === 'fulfilled').length, 1)
+  assert.match(edits.find(r => r.status === 'rejected').reason.message, /CONFLICT/)
+  assert.equal((await c.communityPolicy(reviewer)).revision, 1)
+  assert.equal((await c.communityPolicy(reviewer)).canEdit, false)
+  assert.equal((await c.communityReviewList(reviewer, { group: 'audit' })).items.length, 1)
 })

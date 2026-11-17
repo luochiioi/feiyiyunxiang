@@ -1,6 +1,6 @@
 <template>
   <view class="screen">
-    <AppPageHeader title="社区" :show-back="true" />
+    <AppPageHeader :title="tab === 'mine' ? '我的帖子' : '社区'" :show-back="true" />
     <view class="content">
       <view class="row filters">
         <button class="secondary" :class="{ active: tab === 'latest' }" @click="select('latest')">最新</button>
@@ -12,21 +12,22 @@
         <button class="secondary" :class="{ active: tab === 'saved' }" @click="select('saved')">我的收藏</button>
       </view>
       <text v-if="message.length > 0" class="body">{{ message }}</text>
-      <button v-if="message.length > 0" class="secondary" :disabled="busy" @click="load(false)">重试</button>
+      <button v-if="message.length > 0" class="secondary" :disabled="busy" @click="load(retryMore)">{{ retryMore ? '重试加载更多' : '重试' }}</button>
       <template v-if="tab === 'ranking'">
         <view class="card">
           <text class="heading">路线完成榜</text>
           <text class="muted">仅本人和好友 · 按完成的探索路线数排名</text>
-          <view v-for="row in ranks" :key="row.mine ? 'me' : row.code" class="row spread divider">
+          <view v-for="row in visibleRanks" :key="row.mine ? 'me' : row.code" class="row spread divider">
             <text class="body">{{ row.rank }}. {{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text>
             <text class="tag">{{ row.count }} 条</text>
           </view>
         </view>
       </template>
       <template v-else>
-        <PostCard v-for="post in posts" :key="post.revisionId" :post="post" :detail="false" :preview="tab === 'mine'" :visible="visible" @open="showPost(post)" />
-        <view v-if="!busy && message.length === 0 && posts.length === 0 && next.length === 0" class="card"><text class="body">暂无帖子。</text></view>
-        <button v-if="next.length > 0" class="secondary" :disabled="busy" @click="load(true)">加载更多</button>
+        <text v-if="tab === 'mine'" class="muted">这里仅你可见。打开帖子查看审核结果及可用操作。</text>
+        <PostCard v-for="post in visiblePosts" :key="post.revisionId" :post="post" :detail="false" :preview="tab === 'mine'" :visible="visible" @open="showPost(post)" />
+        <view v-if="!busy && message.length === 0 && visiblePosts.length === 0 && next.length === 0" class="card"><text class="body">{{ tab === 'mine' ? '还没有发过帖子。' : '暂无帖子。' }}</text></view>
+        <button v-if="next.length > 0 && !retryMore" class="secondary" :disabled="busy" @click="load(true)">加载更多</button>
       </template>
       <button class="primary compose" @click="openPage(composePath)">发帖</button>
     </view>
@@ -34,33 +35,48 @@
 </template>
 
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PostCard from '../components/PostCard.uvue'
-import { secured } from '@/features/api.uts'
+import { secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
 import { publicRead, communityError, postPath, composePath } from '@/features/community/community.uts'
 import type { Post, PostPage, Ranking } from '@/features/community/community.uts'
 const posts = ref<Post[]>([]), ranks = ref<Ranking[]>([]), tab = ref('latest')
 const next = ref(''), message = ref(''), busy = ref(false), visible = ref(false)
+const owner = ref(''), retryMore = ref(false)
+const visiblePosts = computed(() => tab.value === 'latest' || owner.value === session.value?.uid ? posts.value : [])
+const visibleRanks = computed(() => owner.value === session.value?.uid ? ranks.value : [])
 let sequence = 0
+onLoad(query => { if (query['tab'] === 'mine') tab.value = 'mine' })
 onShow(() => { visible.value = true; load(false) })
 onHide(() => { visible.value = false; sequence++ })
 function select(value: string): void { if (tab.value !== value) { tab.value = value; load(false) } }
 async function load(append: boolean): Promise<void> {
   const call = ++sequence, active = tab.value
-  busy.value = true; message.value = ''
+  const uid = session.value?.uid
+  if (active !== 'latest' && owner.value !== uid) append = false
+  busy.value = true; message.value = ''; retryMore.value = false
   if (!append) { posts.value = []; ranks.value = []; next.value = '' }
   try {
     if (active === 'ranking') {
       const result = await secured<Ranking[]>('communityRanking')
-      if (call === sequence) ranks.value = result
+      if (call === sequence) {
+        const current = session.value?.uid
+        if (current == null || (uid != null && uid !== current)) throw new Error('ACCOUNT_CHANGED')
+        owner.value = current; ranks.value = result
+      }
     } else {
       const payload: UTSJSONObject = { tab: active, cursor: append ? next.value : '' }
       const result = active === 'latest' ? await publicRead<PostPage>('communityFeed', payload) : await secured<PostPage>('communityFeed', payload)
-      if (call === sequence) { posts.value = [...posts.value, ...result.items]; next.value = result.next }
+      if (call === sequence) {
+        const current = session.value?.uid
+        if (active !== 'latest' && (current == null || (uid != null && uid !== current))) throw new Error('ACCOUNT_CHANGED')
+        owner.value = current ?? ''
+        posts.value = [...posts.value, ...result.items]; next.value = result.next
+      }
     }
-  } catch (error) { if (call === sequence) message.value = communityError(error) }
+  } catch (error) { if (call === sequence) { message.value = communityError(error); retryMore.value = append } }
   finally { if (call === sequence) busy.value = false }
 }
 function showPost(post: Post): void {

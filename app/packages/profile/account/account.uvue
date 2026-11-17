@@ -29,9 +29,9 @@
         <button class="primary" @click="openPage('/packages/profile/my-checkins/my-checkins')">查看档案</button>
       </view>
       <view class="card">
-        <view class="row spread menu-row" @click="openPage('/packages/story/works/works')"><text class="body">文化作品</text><text class="muted">›</text></view>
-        <view class="row spread menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
-        <view class="row spread divider menu-row" @click="openPage('/packages/community/community/community')"><text class="body">社区</text><text class="muted">›</text></view>
+        <text class="heading">社区记录</text>
+        <view class="row spread menu-row" @click="openPage(communityPath + '?tab=mine')"><text class="body">我的帖子</text><text class="muted">审核进度 ›</text></view>
+        <view class="row spread divider menu-row" @click="openPage(communityPath)"><text class="body">社区</text><text class="muted">›</text></view>
         <!-- #ifdef MP-WEIXIN -->
         <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="muted">›</text></view>
         <!-- #endif -->
@@ -47,6 +47,7 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { openPage } from '@/features/navigation.uts'
 import { computed, ref } from 'vue'
 import { session, login, api, secured, clearSession, showError } from '@/features/api.uts'
+import { communityPath } from '@/features/community/community.uts'
 import { activeRun } from '@/features/exploration/catalog.uts'
 type Aomiao = { claimed: boolean }
 const busy = ref(false)

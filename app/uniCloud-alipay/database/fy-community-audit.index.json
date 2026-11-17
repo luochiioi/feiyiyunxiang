@@ -10,5 +10,21 @@
       ],
       "MgoIsUnique": false
     }
+  },
+  {
+    "IndexName": "targetUid_order",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "targetUid",
+          "Direction": "1"
+        },
+        {
+          "Name": "order",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
   }
 ]

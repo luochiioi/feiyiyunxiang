@@ -3,8 +3,13 @@
     <AppPageHeader :title="postId.length > 0 ? '编辑帖子' : '发帖'" :show-back="true" />
     <view class="content">
       <button v-if="!ready && !busy" class="secondary" @click="initialize">重新加载</button>
-      <view v-if="ready" class="card">
-        <text class="muted">{{ postId.length > 0 ? '修改需重新审核，审核期间继续展示已通过版本。' : '帖子及图片审核通过后公开。' }}</text>
+      <text v-if="accountChanged" class="body">微信账号已切换，请返回后重新打开。</text>
+      <view v-else-if="sessionMissing" class="card">
+        <text class="body">{{ message.length > 0 ? message : '会话已失效，登录原账号可继续编辑。' }}</text>
+        <button class="secondary" :disabled="busy" @click="resumeDraft">重新登录</button>
+      </view>
+      <view v-else-if="ready" class="card">
+        <text class="muted">{{ postId.length > 0 && hasPublicVersion ? '修改需重新审核，期间继续展示已通过版本。' : '帖子及图片审核通过后公开。' }}</text>
         <input class="title-input" v-model="title" :disabled="busy" :maxlength="80" placeholder="标题（选填）" />
         <textarea v-model="body" :disabled="busy" :maxlength="2000" placeholder="想和旅伴分享什么？（选填）" />
         <view class="row spread"><text class="heading">照片</text><text class="muted">{{ photos.length }}/9</text></view>
@@ -35,9 +40,9 @@
 </template>
 
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import { login, secured, session, requestId } from '@/features/api.uts'
+import { api, login, session, requestId } from '@/features/api.uts'
 import { communityError, postPath, savePreview, removePreview, imageCount } from '@/features/community/community.uts'
 import type { Post, DiaryPhoto } from '@/features/community/community.uts'
 type Photo = { slot: string, path: string, source: string, diaryId: string, keepIndex: number, uploadId: string }
@@ -45,19 +50,46 @@ const maxPhotos = 9
 const postId = ref(''), revisionId = ref(''), title = ref(''), body = ref('')
 const photos = ref<Photo[]>([]), showDiary = ref(false), records = ref<DiaryPhoto[]>([])
 const busy = ref(false), submitting = ref(false), ready = ref(false), message = ref(''), phase = ref('')
+const hasPublicVersion = ref(false)
 const failedPhotoSlot = ref(''), retrySubmit = ref(false)
+const draftOwner = ref(session.value?.uid ?? '')
+const sessionMissing = computed(() => draftOwner.value.length > 0 && session.value == null)
+const accountChanged = computed(() => draftOwner.value.length > 0 && session.value != null && draftOwner.value !== session.value!.uid)
 let pendingDiaryId = '', submitId = requestId(), submittedDraft = '', disposed = false
 onUnload(() => { disposed = true; photos.value.forEach(photo => removePreview(photo.path)) })
 onLoad(query => {
   postId.value = query['postId'] ?? ''; revisionId.value = query['revisionId'] ?? ''; pendingDiaryId = query['diaryId'] ?? ''
   initialize()
 })
+async function requireDraftAccount(): Promise<void> {
+  if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
+  const uid = session.value?.uid ?? ''
+  if (draftOwner.value.length > 0 && draftOwner.value !== uid) throw new Error('ACCOUNT_CHANGED')
+  draftOwner.value = uid
+}
+async function draftRequest<T>(action: string, payload: UTSJSONObject = {}, timeout = 60000): Promise<T> {
+  await requireDraftAccount()
+  try { return await api<T>(action, payload, timeout) }
+  catch (error) {
+    if ((error as Error).message !== 'AUTH_REQUIRED') throw error
+    await requireDraftAccount()
+    return await api<T>(action, payload, timeout)
+  }
+}
+async function resumeDraft(): Promise<void> {
+  if (busy.value) return
+  busy.value = true; message.value = ''
+  try { await requireDraftAccount() }
+  catch (error) { message.value = communityError(error) }
+  finally { busy.value = false }
+}
 async function initialize(): Promise<void> {
   busy.value = true; message.value = ''
   try {
     if (postId.value.length > 0) {
-      const post = await secured<Post>('communityPost', { postId: postId.value, revisionId: revisionId.value, preview: true })
+      const post = await draftRequest<Post>('communityPost', { postId: postId.value, revisionId: revisionId.value, preview: true })
       if (!post.owner || post.revisionId !== post.latestRevision || post.status === 'removed' || post.status === 'deleted') throw new Error('STALE_VERSION')
+      hasPublicVersion.value = post.hasPublicVersion === true
       title.value = post.title; body.value = post.body ?? ''
       const originals: Photo[] = []
       for (let index = 0; index < imageCount(post); index++) {
@@ -67,7 +99,7 @@ async function initialize(): Promise<void> {
     }
     ready.value = true
     if (pendingDiaryId.length > 0) {
-      const items = await secured<DiaryPhoto[]>('diary')
+      const items = await draftRequest<DiaryPhoto[]>('diary')
       const item = items.find(row => row._id === pendingDiaryId)
       if (item == null) throw new Error('NOT_FOUND')
       await addDiaryPhoto(item)
@@ -104,14 +136,14 @@ function previewPhoto(path: string): void {
 }
 async function chooseDiary(): Promise<void> {
   busy.value = true; message.value = ''; phase.value = '正在读取日记…'
-  try { records.value = (await secured<DiaryPhoto[]>('diary')).filter(item => item.mediaId.length > 0); showDiary.value = true }
+  try { records.value = (await draftRequest<DiaryPhoto[]>('diary')).filter(item => item.mediaId.length > 0); showDiary.value = true }
   catch (error) { message.value = communityError(error) }
   finally { busy.value = false; phase.value = '' }
 }
 function hasDiary(id: string): boolean { return photos.value.some(photo => photo.diaryId === id) }
 async function addDiaryPhoto(item: DiaryPhoto): Promise<void> {
   if (hasDiary(item._id) || photos.value.length >= maxPhotos) return
-  const result = await secured<{ src: string }>('readMedia', { id: item.mediaId })
+  const result = await draftRequest<{ src: string }>('readMedia', { id: item.mediaId })
   if (disposed) return
   const path = await savePreview(result.src)
   if (disposed) { removePreview(path); return }
@@ -126,7 +158,7 @@ async function selectDiary(item: DiaryPhoto): Promise<void> {
 async function loadOriginal(photo: Photo): Promise<void> {
   busy.value = true; message.value = ''
   try {
-    const result = await secured<{ src: string }>('communityImage', {
+    const result = await draftRequest<{ src: string }>('communityImage', {
       postId: postId.value, revisionId: revisionId.value, preview: true, index: photo.keepIndex
     }, 25000)
     if (disposed) return
@@ -166,7 +198,7 @@ async function stagePhoto(photo: Photo): Promise<string> {
     imageSource: photo.source, diaryId: photo.diaryId
   }
   if (photo.source === 'upload') payload['base64'] = await fileBase64(photo.path)
-  const result = await secured<{ uploadId: string }>('communityStageImage', payload, 25000)
+  const result = await draftRequest<{ uploadId: string }>('communityStageImage', payload, 25000)
   photo.uploadId = result.uploadId
   return result.uploadId
 }
@@ -187,8 +219,8 @@ async function submit(): Promise<void> {
   try {
     if (session.value == null || session.value!.expiresAt <= Date.now()) {
       phase.value = '正在连接微信登录…'
-      await login()
     }
+    await requireDraftAccount()
     const images: UTSJSONObject[] = []
     for (let i = 0; i < photos.value.length; i++) {
       if (disposed) return
@@ -206,7 +238,7 @@ async function submit(): Promise<void> {
     pendingPhoto = null
     phase.value = '正在提交审核…'
     submittedDraft = draft
-    const value = await secured<{ postId: string, revisionId: string }>('communitySubmitGallery', {
+    const value = await draftRequest<{ postId: string, revisionId: string }>('communitySubmitGallery', {
       postId: postId.value, baseRevision: revisionId.value, requestId: submitId,
       title: title.value, body: body.value, images
     }, 25000)

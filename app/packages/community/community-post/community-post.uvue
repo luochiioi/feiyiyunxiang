@@ -6,13 +6,17 @@
       <template v-if="post != null">
         <PostCard :key="post.revisionId" :post="post" :detail="true" :preview="revisionId.length > 0" :visible="visible" />
         <view v-if="post.owner" class="card">
-          <text v-if="post.reason.length > 0" class="body">{{ post.reason }}</text>
+          <text class="heading">{{ statusLabel(post.status) }}</text>
+          <text v-if="post.reason.length > 0" class="body">审核原因：{{ post.reason }}</text>
+          <text v-if="post.status === 'pending'" class="muted">{{ post.hasPublicVersion ? '本版正在审核，其他人仍可查看上一个已通过版本。' : '审核通过后，其他人才能查看。' }}</text>
+          <text v-if="post.status === 'rejected'" class="muted">你可以按审核原因修改后重新提交。</text>
+          <text v-if="post.status === 'removed'" class="muted">帖子已下架，原分享链接已失效。</text>
           <text v-if="post.latestRevision !== post.revisionId" class="muted">已有更新版本，可在我的帖子查看审核结果。</text>
           <view v-if="post.status !== 'removed' && post.status !== 'deleted'" class="row actions">
             <button class="secondary" :disabled="busy" @click="edit">编辑最新版本</button>
             <button class="secondary" :disabled="busy" @click="remove">撤下帖子</button>
           </view>
-          <button v-if="revisionId.length > 0 && !post.publicView" class="secondary" @click="openPublic">查看公开版</button>
+          <button v-if="post.hasPublicVersion === true && !post.publicView" class="secondary" @click="openPublic">查看公开版</button>
         </view>
         <template v-if="post.publicView">
           <view class="row actions">
@@ -35,7 +39,7 @@
             </view>
             <text v-if="comments.length === 0" class="muted">暂无公开评论。</text>
             <button v-if="next.length > 0" class="secondary" :disabled="busy" @click="more">更多评论</button>
-            <view v-for="comment in mine" :key="comment.id" class="stack divider">
+            <view v-for="comment in visibleMine" :key="comment.id" class="stack divider">
               <text class="muted">我的评论 · {{ statusLabel(comment.status) }}</text>
               <text class="body">{{ comment.body }}</text><text v-if="comment.reason" class="muted">{{ comment.reason }}</text>
             </view>
@@ -51,21 +55,24 @@
 </template>
 
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PostCard from '../components/PostCard.uvue'
-import { requestId, secured } from '@/features/api.uts'
+import { requestId, secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
 import { publicRead, statusLabel, communityError, communityPath, postPath, composePath } from '@/features/community/community.uts'
 import type { Post, Comment, CommentPage } from '@/features/community/community.uts'
-const postId = ref(''), revisionId = ref(''), post = ref<Post | null>(null)
+const postId = ref(''), revisionId = ref(''), loadedPost = ref<Post | null>(null)
+const loadedOwner = ref(''), commentOwner = ref('')
+const post = computed(() => loadedOwner.value.length > 0 && loadedOwner.value !== session.value?.uid ? null : loadedPost.value)
 const comments = ref<Comment[]>([]), mine = ref<Comment[]>([]), next = ref('')
+const visibleMine = computed(() => commentOwner.value === session.value?.uid ? mine.value : [])
 const message = ref(''), busy = ref(false), visible = ref(false)
 const body = ref(''), replyId = ref(''), replyName = ref(''), reason = ref(''), reportId = ref(''), reporting = ref(false)
 let commentRequest = '', commentDraft = ''
 onLoad(query => { postId.value = query['postId'] ?? ''; revisionId.value = query['revisionId'] ?? '' })
 onShow(() => { visible.value = true; refresh() })
-onHide(() => { visible.value = false; post.value = null })
+onHide(() => { visible.value = false; loadedPost.value = null })
 onShareAppMessage(() => {
   const fallback = { title: '非遗云享社区', path: communityPath, imageUrl: '/static/ip/aomiao-wave.png' }
   if (post.value?.publicView !== true) return fallback
@@ -76,15 +83,25 @@ onShareAppMessage(() => {
   return { ...fallback, promise }
 })
 async function loadComments(append: boolean): Promise<void> {
+  const uid = session.value?.uid
   const value = await publicRead<CommentPage>('communityComments', { postId: postId.value, cursor: append ? next.value : '' })
   comments.value = append ? [...comments.value, ...value.items] : value.items
-  if (!append) mine.value = value.mine
+  if (!append) {
+    const current = session.value?.uid
+    commentOwner.value = current ?? ''
+    mine.value = uid === current ? value.mine : []
+  }
   next.value = value.next
 }
 async function load(): Promise<void> {
-  const value = await publicRead<Post>('communityPost', { postId: postId.value, revisionId: revisionId.value, preview: revisionId.value.length > 0 })
-  if (!visible.value) return
-  post.value = value
+  const preview = revisionId.value.length > 0
+  const uid = session.value?.uid
+  const payload: UTSJSONObject = { postId: postId.value, revisionId: revisionId.value, preview }
+  const value = preview ? await secured<Post>('communityPost', payload) : await publicRead<Post>('communityPost', payload)
+  if (preview && (!value.owner || (uid != null && uid !== session.value?.uid))) throw new Error('NOT_FOUND')
+  if (!visible.value || (value.owner && uid != null && uid !== session.value?.uid)) return
+  loadedOwner.value = value.owner ? session.value?.uid ?? '' : ''
+  loadedPost.value = value
   if (value.publicView) await loadComments(false)
 }
 async function run(task: () => Promise<void>): Promise<void> {
@@ -92,7 +109,7 @@ async function run(task: () => Promise<void>): Promise<void> {
   busy.value = true; message.value = ''
   try { await task() }
   catch (error) {
-    if ((error as Error).message === 'NOT_FOUND') post.value = null
+    if ((error as Error).message === 'NOT_FOUND') loadedPost.value = null
     message.value = communityError(error)
   } finally { busy.value = false }
 }
@@ -103,9 +120,11 @@ function edit(): void {
   openPage(composePath + '?postId=' + encodeURIComponent(postId.value) + '&revisionId=' + encodeURIComponent(post.value?.latestRevision ?? ''))
 }
 function remove(): void {
+  const current = post.value
+  if (current == null || !current.owner) return
   uni.showModal({ title: '撤下帖子', content: '撤下后，原分享链接将无法打开。', success: result => {
     if (result.confirm) run(async () => {
-      await secured<UTSJSONObject>('communityRemoveOwn', { postId: postId.value, revisionId: post.value?.latestRevision ?? '' })
+      await secured<UTSJSONObject>('communityRemoveOwn', { postId: current.id, revisionId: current.latestRevision })
       uni.navigateBack()
     })
   } })

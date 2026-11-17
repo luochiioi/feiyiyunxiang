@@ -1,64 +1,80 @@
 <template>
   <view class="ops">
     <view class="tools">
-      <input v-model="code" placeholder="按公开旅伴 ID 查找" :maxlength="8" @confirm="search" />
+      <input v-model="code" :disabled="busy" placeholder="8 位公开旅伴 ID" :maxlength="8" @confirm="search" />
       <button :disabled="busy" @click="search">查找</button>
-      <button :disabled="busy" @click="filter('')">全部</button>
+      <button :disabled="busy" @click="filter('')">清除筛选／全部</button>
       <button :disabled="busy" @click="filter('active')">正常</button>
-      <button :disabled="busy" @click="filter('disabled')">已停用</button>
+      <button :disabled="busy" @click="filter('disabled')">运营停用</button>
     </view>
+    <text class="muted">按完整公开 ID 精确查找：8 位英文字母或数字 2–9。</text>
+    <text v-if="receipt.length > 0" class="receipt">{{ receipt }}</text>
     <text v-if="message.length > 0" class="muted">{{ message }}</text>
     <view class="columns">
       <view class="panel account-list">
         <text class="heading">{{ listTitle() }}</text>
-        <text v-if="!busy && users.length === 0" class="muted">没有匹配的账户。</text>
+        <text v-if="!busy && listState === 'ready' && users.length === 0" class="muted">没有匹配的账户。</text>
         <view v-for="user in users" :key="user.id" class="account-row">
-          <view class="ops"><text>{{ user.nickname }}</text><text class="muted">{{ user.code.length > 0 ? 'ID ' + user.code : '尚无公开 ID' }} · {{ statusLabel(user.status) }}</text></view>
+          <view class="ops"><text>{{ user.nickname }}</text><text class="muted">{{ user.code.length > 0 ? 'ID ' + user.code : '尚无公开 ID' }} · {{ statusLabel(user.status, user.suspendedByOps) }}</text></view>
           <button :disabled="busy" @click="select(user.id)">详情</button>
         </view>
-        <button v-if="next.length > 0" :disabled="busy" @click="more">加载更多</button>
+        <button v-if="listState === 'failed'" :disabled="busy" @click="refreshList">重试账户列表</button>
+        <button v-if="next.length > 0 && listState !== 'failed'" :disabled="busy" @click="more">{{ listState === 'moreFailed' ? '重试加载更多' : '加载更多' }}</button>
       </view>
-      <view v-if="selected != null" class="panel inspector">
-        <text class="heading">{{ selected?.nickname }} · {{ statusLabel(selected?.status ?? -1) }}</text>
+      <view v-if="detailFailed" class="panel inspector">
+        <text>暂时无法读取所选账户详情。</text>
+        <button :disabled="busy" @click="retryDetail">重试账户详情</button>
+      </view>
+      <view v-else-if="selected != null" class="panel inspector">
+        <text class="heading">{{ selected?.nickname }} · {{ statusLabel(selected?.status ?? -1, selected?.suspendedByOps === true) }}</text>
         <text class="muted">{{ selected?.code ? 'ID ' + selected?.code : '尚无公开 ID' }} · {{ created() }}</text>
-        <text v-if="(selected?.muteUntil ?? 0) > 0" class="muted">最近禁言到期时间 {{ new Date(selected?.muteUntil ?? 0).toLocaleString() }}</text>
+        <text class="muted">{{ muted ? '禁言中 · 截止 ' + new Date(selected?.muteUntil ?? 0).toLocaleString() : '未禁言' }}</text>
+        <text>好友 {{ selected?.friendCount }} · 帖子共 {{ selected?.postCount }} · 评论共 {{ selected?.commentCount }} · 被举报共 {{ selected?.reportCount }}</text>
         <view class="tools">
-          <text>好友 {{ selected?.friendCount }}</text>
-          <button @click="review('published')">查看帖子（{{ selected?.postCount }}）</button>
-          <button @click="review('publicComments')">查看评论（{{ selected?.commentCount }}）</button>
-          <button @click="review('reports')">查看举报（{{ selected?.reportCount }}）</button>
+          <button :disabled="busy" @click="review('pending')">待审帖子（{{ selected?.pendingPosts }}）</button>
+          <button :disabled="busy" @click="review('published')">公开帖子（{{ selected?.publishedPosts }}）</button>
+          <button :disabled="busy" @click="review('comments')">待审评论（{{ selected?.pendingComments }}）</button>
+          <button :disabled="busy" @click="review('publicComments')">公开评论（{{ selected?.publicComments }}）</button>
+          <button :disabled="busy" @click="review('reports')">待处理举报（{{ selected?.openReports }}）</button>
+          <button :disabled="busy" @click="review('resolvedReports')">已处理举报（{{ selected?.resolvedReports }}）</button>
+          <button :disabled="busy" @click="review('mutes')">禁言记录</button>
+          <button :disabled="busy" @click="review('audit')">审计记录</button>
         </view>
         <text class="muted">停用会撤销会话并暂停微信登录。已公开内容可在社区审核中处理。</text>
-        <textarea v-model="reason" :maxlength="300" placeholder="输入停用、恢复或禁言原因" />
+        <textarea :disabled="busy" v-model="reason" :maxlength="300" placeholder="输入停用、恢复或禁言原因" />
         <view class="tools">
           <button v-if="selected?.status === 0" :disabled="busy" @click="setStatus(true)">停用账户</button>
           <button v-if="selected?.suspendedByOps && selected?.status === 1" :disabled="busy" @click="setStatus(false)">恢复账户</button>
         </view>
         <view class="tools">
-          <input v-model="minutes" type="number" placeholder="禁言分钟数" />
+          <input :disabled="busy" v-model="minutes" type="number" placeholder="1–43200 分钟" />
           <button :disabled="busy" @click="mute(false)">禁言</button>
-          <button :disabled="busy" @click="mute(true)">解除禁言</button>
+          <button v-if="muted" :disabled="busy" @click="mute(true)">解除禁言</button>
         </view>
       </view>
     </view>
   </view>
 </template>
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api } from '@/features/api.uts'
 type Account = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number }
-type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number }
+type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number, pendingPosts: number, publishedPosts: number, pendingComments: number, publicComments: number, openReports: number, resolvedReports: number }
 type AccountPage = { items: Account[], next: string }
+const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (event: 'review', group: string, uid: string, label: string): void }>()
 const users = ref<Account[]>([]), selected = ref<AccountDetail | null>(null)
 const code = ref(''), searchCode = ref(''), status = ref(''), next = ref('')
-const reason = ref(''), minutes = ref('60'), busy = ref(false), message = ref('')
+const reason = ref(''), minutes = ref('60'), busy = ref(false), message = ref(''), receipt = ref('')
+const selectedId = ref(''), detailFailed = ref(false), listState = ref('loading')
+const muted = computed(() => (selected.value?.muteUntil ?? 0) > Date.now())
+watch(() => props.visible, visible => { if (visible && selectedId.value.length > 0) retryDetail() })
 onMounted(() => { filter('') })
 
-function statusLabel(value: number): string {
+function statusLabel(value: number, suspendedByOps: boolean): string {
   switch (value) {
     case 0: return '正常'
-    case 1: return '已停用'
+    case 1: return suspendedByOps ? '运营停用' : '其他停用'
     case 2: return '审核中'
     case 3: return '审核拒绝'
     case 4: return '已注销'
@@ -67,7 +83,7 @@ function statusLabel(value: number): string {
 }
 function listTitle(): string {
   if (searchCode.value.length > 0) return '查找结果'
-  return status.value === 'active' ? '正常账户' : status.value === 'disabled' ? '已停用账户' : '全部账户'
+  return status.value === 'active' ? '正常账户' : status.value === 'disabled' ? '运营停用账户' : '全部账户'
 }
 function created(): string {
   const at = selected.value?.createdAt ?? 0
@@ -88,47 +104,88 @@ async function work(operation: () => Promise<void>): Promise<void> {
     }
   } finally { busy.value = false }
 }
-async function load(append: boolean): Promise<void> {
-  const result = await api<AccountPage>('communityUsers', { code: searchCode.value, status: status.value, cursor: append ? next.value : '' })
-  users.value = append ? [...users.value, ...result.items] : result.items; next.value = result.next
+async function load(append: boolean, pages = 1): Promise<void> {
+  try {
+    let result = await api<AccountPage>('communityUsers', { code: searchCode.value, status: status.value, cursor: append ? next.value : '' })
+    const items = [...result.items]
+    for (let i = 1; i < pages && result.next.length > 0; i++) {
+      result = await api<AccountPage>('communityUsers', { code: searchCode.value, status: status.value, cursor: result.next })
+      items.push(...result.items)
+    }
+    users.value = append ? [...users.value, ...items] : items
+    next.value = result.next; listState.value = 'ready'
+  } catch (error) {
+    listState.value = append ? 'moreFailed' : 'failed'
+    throw error
+  }
 }
+function resetSelection(): void {
+  selectedId.value = ''; selected.value = null; detailFailed.value = false
+  reason.value = ''; minutes.value = '60'; receipt.value = ''
+}
+function resetList(): void { resetSelection(); users.value = []; next.value = ''; listState.value = 'loading' }
 function search(): void {
-  work(async () => { searchCode.value = code.value.trim(); status.value = ''; selected.value = null; await load(false) })
+  work(async () => {
+    const term = code.value.trim()
+    if (!/^[A-Z2-9]{8}$/i.test(term)) throw new Error('INVALID_CODE')
+    resetList(); searchCode.value = term.toUpperCase(); status.value = ''; await load(false)
+  })
 }
 function filter(value: string): void {
-  work(async () => { status.value = value; code.value = ''; searchCode.value = ''; selected.value = null; await load(false) })
+  work(async () => { resetList(); status.value = value; code.value = ''; searchCode.value = ''; await load(false) })
 }
-function more(): void { work(async () => { await load(true) }) }
+function refreshLoadedPages(): Promise<void> { return load(false, Math.max(1, Math.ceil(users.value.length / 20))) }
+function refreshList(): void { work(refreshLoadedPages) }
+function more(): void { work(() => load(true)) }
 async function loadDetail(id: string): Promise<void> {
-  selected.value = await api<AccountDetail>('communityUserDetail', { targetUid: id })
+  try {
+    selected.value = await api<AccountDetail>('communityUserDetail', { targetUid: id })
+    detailFailed.value = false
+  } catch (_) { detailFailed.value = true }
 }
-function select(id: string): void { work(async () => { reason.value = ''; minutes.value = '60'; await loadDetail(id) }) }
+function select(id: string): void {
+  work(async () => { resetSelection(); selectedId.value = id; await loadDetail(id) })
+}
+function retryDetail(): void {
+  const id = selectedId.value
+  if (id.length > 0) work(() => loadDetail(id))
+}
 function review(group: string): void {
   const user = selected.value
-  if (user != null) emit('review', group, user.id, user.nickname)
+  if (user != null) emit('review', group, user.id, user.code ? user.nickname + ' · ' + user.code : user.nickname)
+}
+function confirm(title: string, user: AccountDetail, note: string, details: string): Promise<boolean> {
+  return new Promise<boolean>(resolve => {
+    const label = user.nickname + (user.code ? ' · ' + user.code : ' · ' + user.id)
+    uni.showModal({ title, content: label + details + '\n原因：' + note,
+      success: result => resolve(result.confirm), fail: () => resolve(false) })
+  })
+}
+async function refreshAfterWrite(id: string, result: string): Promise<void> {
+  receipt.value = result; reason.value = ''; message.value = ''
+  await Promise.all([loadDetail(id), refreshLoadedPages().catch(() => {})])
 }
 function setStatus(suspend: boolean): void {
-  const user = selected.value
+  const user = selected.value, note = reason.value.trim()
   if (user == null) return
-  if (!reason.value.trim()) { message.value = '请填写操作原因。'; return }
-  uni.showModal({ title: suspend ? '停用此账户' : '恢复此账户', content: user.nickname,
-    success: result => {
-      if (result.confirm) work(async () => {
-        await api<UTSJSONObject>('communityAccountStatus', { targetUid: user.id, suspend, reason: reason.value })
-        await loadDetail(user.id); await load(false); reason.value = ''
-        message.value = suspend ? '账户已停用，会话已撤销。' : '账户已恢复。'
-      })
-    }
+  work(async () => {
+    if (note.length === 0) throw new Error('INVALID_CONTENT')
+    if (!await confirm(suspend ? '停用此账户' : '恢复此账户', user, note, '\n现有会话将撤销。')) return
+    receipt.value = ''
+    await api<UTSJSONObject>('communityAccountStatus', { targetUid: user.id, suspend, reason: note })
+    await refreshAfterWrite(user.id, suspend ? '账户已停用，会话已撤销。' : '账户已恢复，请重新登录。')
   })
 }
 function mute(release: boolean): void {
-  const user = selected.value
+  const user = selected.value, note = reason.value.trim(), duration = release ? 0 : Number(minutes.value)
   if (user == null) return
   work(async () => {
-    if (!release && Number(minutes.value) <= 0) throw new Error('INVALID_DURATION')
-    await api<UTSJSONObject>('communityMute', { targetUid: user.id, reason: reason.value, minutes: release ? 0 : Number(minutes.value) })
-    await loadDetail(user.id); await load(false); reason.value = ''
-    message.value = release ? '已解除禁言。' : '已设置禁言。'
+    if (note.length === 0) throw new Error('INVALID_CONTENT')
+    if (!release && (!Number.isInteger(duration) || duration < 1 || duration > 43200)) throw new Error('INVALID_DURATION')
+    if (!await confirm(release ? '解除此账户的禁言' : '禁言此账户', user, note, release ? '' : ' · ' + duration + ' 分钟')) return
+    receipt.value = ''
+    const result = await api<{ until: number }>('communityMute', { targetUid: user.id, reason: note, minutes: duration })
+    await refreshAfterWrite(user.id, release ? '已解除禁言。' : '已禁言至 ' + new Date(result.until).toLocaleString())
   })
 }
 </script>
@@ -142,5 +199,6 @@ function mute(release: boolean): void {
 .inspector { flex: 1; min-width: 330px; }
 button { margin: 0; }
 .tools input { width: 180px; }
+.receipt { color: #304c37; font-weight: 700; }
 .muted { font-size: 13px; color: #675d50; }
 </style>

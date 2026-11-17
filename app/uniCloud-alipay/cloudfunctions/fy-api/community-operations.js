@@ -1,3 +1,4 @@
+const { pendingCount } = require('./community-review-queue')
 const { key } = require('./service')
 const { fail, identifier, requiredText } = require('./community-policy')
 
@@ -35,7 +36,7 @@ function createCommunityOperations({ repo, now = Date.now }) {
     async communityOverview(user) {
       if (!user?.admin && !user?.reviewer) fail('FORBIDDEN')
       const [pendingPosts, pendingComments, openReports, publishedPosts] = await Promise.all([
-        repo.count('fy-community-versions', { status: 'pending' }),
+        pendingCount(repo),
         repo.count(comments, { status: 'pending' }),
         repo.count(reports, { status: 'open' }),
         repo.count(posts, { status: 'public' })
@@ -62,7 +63,7 @@ function createCommunityOperations({ repo, now = Date.now }) {
       if (p.cursor && !identifier(p.cursor)) fail('INVALID_CURSOR')
       const filter = {}
       if (p.status === 'active') filter.status = 0
-      if (p.status === 'disabled') filter.status = 1
+      if (p.status === 'disabled') { filter.status = 1; filter.fyOpsSuspended = true }
       const rows = await repo.page(accounts, filter, { field: '_id', after: p.cursor || null, size: 21 })
       return {
         items: await Promise.all(rows.slice(0, 20).map(account => userView(account))),
@@ -74,15 +75,24 @@ function createCommunityOperations({ repo, now = Date.now }) {
       requireAdmin(user)
       const account = identifier(p.targetUid) ? await repo.get(accounts, p.targetUid) : null
       if (!account) fail('NOT_FOUND')
-      const [view, sent, received, postCount, commentCount, reportCount] = await Promise.all([
+      const uid = account._id
+      const [view, sent, received, postCount, commentCount, reportCount, pendingPosts, publishedPosts, pendingComments,
+        publicComments, openReports, resolvedReports] = await Promise.all([
         userView(account),
-        repo.count('fy-friends', { from: account._id, status: 'accepted' }),
-        repo.count('fy-friends', { to: account._id, status: 'accepted' }),
-        repo.count(posts, { uid: account._id }),
-        repo.count(comments, { uid: account._id }),
-        repo.count(reports, { targetUid: account._id })
+        repo.count('fy-friends', { from: uid, status: 'accepted' }),
+        repo.count('fy-friends', { to: uid, status: 'accepted' }),
+        repo.count(posts, { uid }),
+        repo.count(comments, { uid }),
+        repo.count(reports, { targetUid: uid }),
+        pendingCount(repo, { uid }),
+        repo.count(posts, { uid, status: 'public' }),
+        repo.count(comments, { uid, status: 'pending' }),
+        repo.count(comments, { uid, status: 'public' }),
+        repo.count(reports, { targetUid: uid, status: 'open' }),
+        repo.count(reports, { targetUid: uid, status: 'resolved' })
       ])
-      return { ...view, friendCount: sent + received, postCount, commentCount, reportCount }
+      return { ...view, friendCount: sent + received, postCount, commentCount, reportCount,
+        pendingPosts, publishedPosts, pendingComments, publicComments, openReports, resolvedReports }
     },
 
     async communityAccountStatus(user, p) {
@@ -99,7 +109,7 @@ function createCommunityOperations({ repo, now = Date.now }) {
         const guard = await db.get('fy-community-limits', p.targetUid)
         await db.put('fy-community-limits', p.targetUid, { ...guard, accountChangedAt: at })
         await db.put(accounts, p.targetUid, { ...account, status: p.suspend ? 1 : 0, fyOpsSuspended: p.suspend, token: [] })
-        await writeCommunityAudit(db, user, p.suspend ? 'user.suspend' : 'user.restore', p.targetUid, { reason }, at)
+        await writeCommunityAudit(db, user, p.suspend ? 'user.suspend' : 'user.restore', p.targetUid, { reason, targetUid: account._id }, at)
         return {}
       })
     }

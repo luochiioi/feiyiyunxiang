@@ -171,10 +171,16 @@ test('community gateway separates guest reads, author previews and reviewer priv
   assert.equal((await call('communityReviewDetail', 'fixture-token', preview)).code, 'AUTH_REQUIRED')
   assert.equal((await call('communityReviewDetail', reviewerToken, preview)).code, 'OK')
   assert.equal((await call('communitySavePolicy', reviewerToken, {})).code, 'FORBIDDEN')
+  for (const action of ['communityUsers', 'communityUserDetail', 'communityAccountStatus']) {
+    assert.equal((await call(action, reviewerToken, { targetUid: 'member', admin: true })).code, 'FORBIDDEN')
+    assert.equal((await call(action, 'fixture-token', { targetUid: 'member' })).code, 'AUTH_REQUIRED')
+  }
   assert.equal((await call('drafts', reviewerToken, {})).code, 'FORBIDDEN')
   assert.equal((await call('readMedia', reviewerToken, {})).code, 'AUTH_REQUIRED')
   assert.equal((await call('communityReviewPost', reviewerToken, { ...pending.data, decision: 'approve' })).code, 'OK')
   assert.equal((await call('communityPost', '', { postId: pending.data.postId })).data.title, 'Fixture')
+  g.rows.get('fy-admin-usersreviewer').role = []
+  assert.equal((await call('communityReviewDetail', reviewerToken, preview)).code, 'FORBIDDEN')
 })
 
 test('community distinguishes a missing staging collection from an object storage rejection', async () => {
