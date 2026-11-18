@@ -572,3 +572,58 @@ test('only one concurrent policy edit is saved; duplicate normalized words are r
   assert.equal((await c.communityPolicy(reviewer)).canEdit, false)
   assert.equal((await c.communityReviewList(reviewer, { group: 'audit' })).items.length, 1)
 })
+
+
+test('rejection notices follow the author and latest version, and acknowledgments cannot cross accounts', async () => {
+  const f = fixture(), c = f.community
+  const first = await f.post()
+  assert.deepEqual(await c.communityReviewNotices(author), { unread: 0 })
+  await c.communityReviewPost(reviewer, { ...first, decision: 'reject', reason: '需要补充出处' })
+  assert.deepEqual(await c.communityReviewNotices(author), { unread: 1 })
+  assert.deepEqual(await c.communityReviewNotices(stranger), { unread: 0 })
+  assert.equal((await c.communityFeed(author, { tab: 'mine' })).items[0].reviewUnread, true)
+  await assert.rejects(c.communityReadReview(stranger, first), /NOT_FOUND/)
+  await assert.rejects(c.communityReviewNotices(reviewer), /AUTH_REQUIRED/)
+  const read = c.communityReadReview.bind(c)
+  const tx = f.repo.tx
+  f.repo.tx = async () => { throw new Error('NETWORK') }
+  await assert.rejects(read(author, first), /NETWORK/)
+  f.repo.tx = tx
+  assert.equal((await c.communityReviewNotices(author)).unread, 1)
+  await read(author, first)
+  await read(author, first)
+  assert.equal((await c.communityReviewNotices(author)).unread, 0)
+  const edit = await f.post(author, { postId: first.postId, baseRevision: first.revisionId, requestId: 'retry' })
+  await c.communityReviewPost(reviewer, { ...edit, decision: 'reject', reason: '请再次修改' })
+  await read(author, first)
+  assert.equal((await c.communityReviewNotices(author)).unread, 1)
+  await c.communityRemoveOwn(author, edit)
+  assert.equal((await c.communityReviewNotices(author)).unread, 0)
+})
+
+test('starter comment terms block specific abuse, queue ambiguous phrases and preserve custom policy', async () => {
+  const f = fixture(), c = f.community
+  const post = await f.post()
+  await f.approve(post)
+  const say = (body, requestId) => c.communityComment(friend, { ...post, body, requestId })
+  await assert.rejects(say('你是个傻逼', 'abuse'), /COMMENT_REJECTED/)
+  await assert.rejects(say('你 是 个 傻｜逼', 'obfuscated'), /COMMENT_REJECTED/)
+  assert.equal((await say('学习如何识别刷单返利骗局', 'review')).status, 'pending')
+  f.tick(11000)
+  assert.equal((await say('澳门的非遗文化展览值得一看', 'culture')).status, 'public')
+  await c.communitySavePolicy(admin, { revision: 0, minSeconds: 10, maxPerWindow: 20, duplicateSeconds: 300,
+    rules: [{ word: '自定义广告', action: 'reject' }, { word: '刷单返利', action: 'allow' }] })
+  await assert.rejects(c.communitySeedPolicy(reviewer, { revision: 1 }), /FORBIDDEN/)
+  await c.communitySeedPolicy(admin, { revision: 1 })
+  const policy = await c.communityPolicy(admin)
+  assert.equal(policy.rules.find(r => r.word === '刷单返利').action, 'allow')
+  assert.ok(policy.rules.some(r => r.word === '自定义广告'))
+  assert.ok(policy.rules.some(r => r.word === '傻逼'))
+  await assert.rejects(c.communitySeedPolicy(admin, { revision: 1 }), /CONFLICT/)
+  assert.equal((await c.communitySeedPolicy(admin, { revision: 2 })).added, 0)
+  const edited = { ...policy, minSeconds: 17, rules: [...policy.rules, { word: '未保存的新词', action: 'pending' }] }
+  await c.communitySeedPolicy(admin, edited)
+  const saved = await c.communityPolicy(admin)
+  assert.equal(saved.minSeconds, 17)
+  assert.ok(saved.rules.some(rule => rule.word === '未保存的新词'))
+})

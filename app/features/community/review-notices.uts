@@ -1,0 +1,26 @@
+import { computed, ref } from 'vue'
+import { api, secured, session } from '@/features/api.uts'
+
+const unread = ref(0), owner = ref('')
+let sequence = 0
+export const hasUnreadReview = computed(() => owner.value === session.value?.uid && unread.value > 0)
+
+export async function refreshReviewNotices(): Promise<void> {
+  const request = ++sequence
+  const uid = session.value?.uid
+  if (uid == null) { unread.value = 0; owner.value = ''; return }
+  try {
+    const result = await secured<{ unread: number }>('communityReviewNotices')
+    if (request !== sequence || session.value?.uid !== uid) return
+    owner.value = uid; unread.value = result.unread
+  } catch (_) {
+    // Preserve known unread state on transient failures. The next page show retries.
+  }
+}
+
+export async function readReview(postId: string, revisionId: string): Promise<void> {
+  const uid = session.value?.uid
+  if (uid == null) throw new Error('AUTH_REQUIRED')
+  await api<UTSJSONObject>('communityReadReview', { postId, revisionId })
+  if (uid === session.value?.uid) await refreshReviewNotices()
+}

@@ -9,6 +9,10 @@
   "properties": {
     "_id": {
       "bsonType": "string"
+    },
+    "reviewSeen": {
+      "bsonType": "bool",
+      "description": "Author has opened this rejected version. Absent on legacy records means unread."
     }
   }
 }

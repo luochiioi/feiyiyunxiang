@@ -23,7 +23,7 @@
         <view><text>每 10 分钟上限</text><input v-model="maxPerWindow" type="number" :disabled="busy || !policy?.canEdit" /></view>
         <view><text>相同内容去重（秒）</text><input v-model="duplicateSeconds" type="number" :disabled="busy || !policy?.canEdit" /></view>
       </view>
-      <text class="muted">先检查拒绝规则。允许词条完整匹配评论时可直接公开，其余评论按待审词条判断。未命中时直接公开。</text>
+      <text class="muted">词库用于评论。拒绝词条阻止发送，待审词条转人工审核。帖子仍逐篇审核。</text>
       <view v-for="(rule, i) in rules" :key="i" class="tools">
         <input v-model="rule.word" placeholder="词条" :maxlength="80" :disabled="busy || !policy?.canEdit" />
         <text>{{ ruleName(rule.action) }}</text>
@@ -33,7 +33,7 @@
         </template>
       </view>
       <view v-if="policy?.canEdit" class="tools">
-        <button :disabled="busy" @click="addRule">新增词条</button><button :disabled="busy" @click="savePolicy">保存规则</button>
+        <button :disabled="busy" @click="seedPolicy">保存并补充基础屏蔽词</button><button :disabled="busy" @click="addRule">新增词条</button><button :disabled="busy" @click="savePolicy">保存规则</button>
       </view>
     </view>
     <template v-else-if="group !== 'policy'">
@@ -57,7 +57,7 @@
             <text class="record">对象：{{ selected?.target }}</text>
             <text v-if="selected?.revisionId" class="record">版本：{{ selected?.revisionId }}</text>
             <text v-if="selected?.reason" class="record">原因：{{ selected?.reason }}</text>
-            <text v-if="selected?.action === 'policy.save'" class="record">{{ auditText }}</text>
+            <text v-if="selected?.action === 'policy.save' || selected?.action === 'policy.seed'" class="record">{{ auditText }}</text>
           </template>
           <template v-else>
             <template v-if="group === 'mutes'">
@@ -78,10 +78,8 @@
                   <template v-if="currentVersion != null">
                     <text class="muted">{{ currentVersion?.id }}</text>
                     <text>{{ currentVersion?.title }}</text><text class="record">{{ currentVersion?.body }}</text>
-                    <view v-if="currentSlots.length > 0" class="tools"><button v-for="index in currentSlots" :key="index" :disabled="busy" @click="loadImage(true, index)">图 {{ index + 1 }}</button></view>
-                    <text v-if="currentImage.length > 0" class="muted">当前预览第 {{ currentIndex + 1 }} 张</text>
-                    <image v-if="currentImage.length > 0" :src="currentImage" mode="aspectFit" @error="imageFailed(true)" />
-                  <button v-if="currentFailed" :disabled="busy" @click="loadImage(true, currentIndex)">重试第 {{ currentIndex + 1 }} 张图片</button>
+                    <ReviewGallery :key="(detail?.postId ?? '') + '/' + (currentVersion?.id ?? '')"
+                      :post-id="detail?.postId ?? ''" :revision-id="currentVersion?.id ?? ''" :image-count="countImages(currentVersion)" />
                   </template>
                   <text v-else class="muted">当前无公开版本。</text>
                 </view>
@@ -90,10 +88,8 @@
                   <text class="muted">{{ selectedVersion?.id }}</text>
                   <text>{{ selectedVersion?.title }}</text><text class="record">{{ selectedVersion?.body }}</text>
                   <text v-if="selectedVersion?.reason" class="muted">{{ selectedVersion?.reason }}</text>
-                  <view v-if="selectedSlots.length > 0" class="tools"><button v-for="index in selectedSlots" :key="index" :disabled="busy" @click="loadImage(false, index)">图 {{ index + 1 }}</button></view>
-                  <text v-if="selectedImage.length > 0" class="muted">当前预览第 {{ selectedIndex + 1 }} 张</text>
-                  <image v-if="selectedImage.length > 0" :src="selectedImage" mode="aspectFit" @error="imageFailed(false)" />
-                  <button v-if="selectedFailed" :disabled="busy" @click="loadImage(false, selectedIndex)">重试第 {{ selectedIndex + 1 }} 张图片</button>
+                  <ReviewGallery :key="(detail?.postId ?? '') + '/' + (selectedVersion?.id ?? '')"
+                    :post-id="detail?.postId ?? ''" :revision-id="selectedVersion?.id ?? ''" :image-count="countImages(selectedVersion)" />
                 </view>
               </view>
             </template>
@@ -126,6 +122,7 @@
 
 <script setup lang="uts">
 import { computed, ref } from 'vue'
+import ReviewGallery from './ReviewGallery.uvue'
 import { api } from '@/features/api.uts'
 type Row = { id: string, title?: string, author?: string, body?: string, status?: string, postId?: string, revisionId?: string, commentId?: string, targetUid?: string, reason?: string, resolution?: string, createdAt?: number, imageCount?: number, hasImage?: boolean, at?: number, until?: number, actor?: string, action?: string, target?: string }
 type Revision = { id: string, title: string, body: string, status: string, hasImage: boolean, imageCount?: number, reason: string }
@@ -139,16 +136,12 @@ const busy = ref(false), message = ref(''), receipt = ref(''), rows = ref<Row[]>
 const selected = ref<Row | null>(null), detail = ref<Detail | null>(null), comment = ref<Row | null>(null)
 const currentVersion = computed(() => detail.value?.current ?? null)
 const selectedVersion = computed(() => detail.value?.selected ?? null)
-function slots(version: Revision | null): number[] {
-  return Array.from({ length: version?.imageCount ?? (version?.hasImage === true ? 1 : 0) }, (_, index) => index)
-}
-const currentSlots = computed(() => slots(currentVersion.value)), selectedSlots = computed(() => slots(selectedVersion.value))
-const currentIndex = ref(0), selectedIndex = ref(0)
-const currentFailed = ref(false), selectedFailed = ref(false), detailFailed = ref(false)
+function countImages(version: Revision | null): number { return version?.imageCount ?? (version?.hasImage === true ? 1 : 0) }
+const detailFailed = ref(false)
 const queueState = ref('loading')
 const canReviewPost = computed(() => detail.value != null && detail.value.selected.id === detail.value.latestRevision &&
   detail.value.selected.status === 'pending' && detail.value.status !== 'removed' && detail.value.status !== 'deleted')
-const reason = ref(''), minutes = ref('60'), currentImage = ref(''), selectedImage = ref(''), auditText = ref('')
+const reason = ref(''), minutes = ref('60'), auditText = ref('')
 const policy = ref<Policy | null>(null), rules = ref<Rule[]>([])
 const minSeconds = ref('10'), maxPerWindow = ref('20'), duplicateSeconds = ref('300')
 onMounted(() => { reload() })
@@ -190,9 +183,7 @@ function ruleName(value: string): string { return value === 'reject' ? '拒绝' 
 function target(): string { return comment.value?.targetUid ?? detail.value?.targetUid ?? selected.value?.targetUid ?? '' }
 function clearDetail(): void {
   selected.value = null; detail.value = null; comment.value = null; reason.value = ''; minutes.value = '60'
-  selectedImage.value = ''; currentImage.value = ''; auditText.value = ''
-  selectedIndex.value = 0; currentIndex.value = 0
-  currentFailed.value = false; selectedFailed.value = false; detailFailed.value = false
+  auditText.value = ''; detailFailed.value = false
 }
 async function task(work: () => Promise<void>): Promise<void> {
   if (busy.value) return
@@ -261,23 +252,6 @@ function select(row: Row): void { task(async () => { receipt.value = ''; await l
 function retryDetail(): void {
   const row = selected.value
   if (row != null) task(() => loadSelection(row))
-}
-function imageFailed(current: boolean): void {
-  if (current) { currentImage.value = ''; currentFailed.value = true }
-  else { selectedImage.value = ''; selectedFailed.value = true }
-}
-function loadImage(current: boolean, index: number): void {
-  task(async () => {
-    const version = current ? detail.value?.current : detail.value?.selected
-    if (version == null) return
-    if (current) { currentImage.value = ''; currentIndex.value = index; currentFailed.value = false }
-    else { selectedImage.value = ''; selectedIndex.value = index; selectedFailed.value = false }
-    try {
-      const result = await api<{ src: string }>('communityReviewImage', { postId: detail.value?.postId ?? '', revisionId: version.id, index })
-      if (current) currentImage.value = result.src
-      else selectedImage.value = result.src
-    } catch (_) { imageFailed(current) }
-  })
 }
 function confirm(title: string, targetLabel: string, required: boolean): Promise<boolean> {
   const note = reason.value.trim()
@@ -351,6 +325,15 @@ function mute(release: boolean): void {
     } else { receipt.value = success; reason.value = '' }
   })
 }
+function seedPolicy(): void {
+  task(async () => {
+    const result = await api<{ added: number }>('communitySeedPolicy', {
+      revision: policy.value?.revision ?? -1, rules: rules.value,
+      minSeconds: Number(minSeconds.value), maxPerWindow: Number(maxPerWindow.value), duplicateSeconds: Number(duplicateSeconds.value)
+    })
+    await refreshAfterChange(result.added > 0 ? '已补充 ' + result.added + ' 条基础词条。' : '当前规则已保存，基础词条已齐全。', () => load(false))
+  })
+}
 function addRule(): void { rules.value = [...rules.value, { word: '', action: 'pending' }] }
 function removeRule(index: number): void { rules.value.splice(index, 1) }
 function savePolicy(): void {
@@ -373,8 +356,8 @@ function savePolicy(): void {
 .panel { background: #fff; border-radius: 12px; padding: 16px; }
 .results { width: 260px; }
 .inspector { flex: 1; min-width: 420px; }
-.version { flex: 1; min-width: 0; background: #faf7ef; border-radius: 10px; padding: 12px; }
-.version image { width: 100%; height: 220px; }
+.version { flex: 1; min-width: 240px; background: #faf7ef; border-radius: 10px; padding: 12px; }
+.versions { flex-wrap: wrap; }
 .result { border-bottom: 1px solid #ede8dc; padding-bottom: 12px; }
 .heading { color: #2c3b28; font-weight: 700; }
 .muted { color: #685d53; font-size: 13px; overflow-wrap: anywhere; }

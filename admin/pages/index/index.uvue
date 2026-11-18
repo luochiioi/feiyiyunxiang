@@ -1,6 +1,17 @@
 <template>
   <view class="desktop">
-    <view class="sidebar"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text><template v-if="session != null"><text class="hint">{{ session?.username }}</text><button @click="section = 'overview'">运营工作台</button><button @click="openReview('pending', '', '')">社区审核与治理</button><button v-if="session?.admin === true" @click="openUsers">用户管理</button><button v-if="session?.admin === true" @click="openRoutes">路线与博物馆</button></template></view>
+    <view class="sidebar">
+      <image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" />
+      <text class="brand">非遗云享</text>
+      <template v-if="session != null">
+        <text class="hint">{{ session?.username }}</text>
+        <button @click="section = 'overview'">运营工作台</button>
+        <button @click="openReview('pending', '', '')">社区审核与治理</button>
+        <button v-if="session?.admin === true" @click="openUsers">用户管理</button>
+        <button v-if="session?.admin === true" @click="openRoutes">路线与博物馆</button>
+        <button class="logout" :disabled="busy" @click="signOut">退出登录</button>
+      </template>
+    </view>
     <view class="main">
       <text class="title">{{ session == null ? '管理员登录' : sectionTitle() }}</text>
       <text class="message">{{ message }}</text>
@@ -12,7 +23,6 @@
       </view>
       <template v-else>
         <template v-if="section !== 'routes'">
-          <view class="toolbar"><button :disabled="busy" @click="signOut">退出</button></view>
           <CommunityOverview v-if="section === 'overview'" @review="openQueue" />
           <CommunityUsers v-if="usersOpened && session?.admin === true" v-show="section === 'users'" :visible="section === 'users'" @review="openReview" />
           <template v-if="section === 'review'">
@@ -21,7 +31,7 @@
           </template>
         </template>
         <template v-else>
-        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="openMuseumDraft(true)">澳门 · 上集</button><button :disabled="busy" @click="openMuseumDraft(false)">湖南 · 下集</button><button :disabled="busy" @click="showAccountForm">修改登录账号或密码</button><button :disabled="busy" @click="signOut">退出</button></view>
+        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="openMuseumDraft(true)">澳门 · 上集</button><button :disabled="busy" @click="openMuseumDraft(false)">湖南 · 下集</button><button :disabled="busy" @click="showAccountForm">修改登录账号或密码</button></view>
         <view v-if="editingAccount" class="card account-form">
           <text class="heading">修改管理员登录信息</text>
           <text>登录账号（3–40 字符）</text><input v-model="newUsername" :maxlength="40" :disabled="busy" />
@@ -337,8 +347,9 @@ async function publish(): Promise<void> {
 </script>
 <style>
 page { background:#f3f4ed; color:#35452d; font-size:14px; }
-.desktop { min-height:100vh; display:flex; flex-direction:row; }
-.sidebar { width:220px; flex-shrink:0; background:#304c37; color:#fff; padding:32px 22px; box-sizing:border-box; display:flex; flex-direction:column; gap:20px; }
+.desktop { padding-left:220px; box-sizing:border-box; min-height:100vh; display:flex; flex-direction:row; }
+.sidebar { position: fixed; top: 0; left: 0; height: 100vh; overflow-y: auto; z-index: 10; width:220px; flex-shrink:0; background:#304c37; color:#fff; padding:32px 22px; box-sizing:border-box; display:flex; flex-direction:column; gap:20px; }
+.sidebar .logout { margin-top: auto; width: 100%; background: #ffffff14; color: #fff; border: 1px solid #ffffff50; }
 .pet { width:110px; height:110px; }
 .brand,.title { font-size:25px; font-weight:700; }
 .main { padding:32px; flex:1; min-width:0; }
@@ -360,5 +371,5 @@ textarea { height:90px; }
 .node { display:flex; flex-direction:column; gap:10px; padding:18px; border:1px solid #e0e6d6; border-radius:12px; }
 .coords { display:flex; flex-direction:row; gap:12px; }.coords>view { flex:1; min-width:0; }
 .heading { font-weight:700; font-size:16px; }
-@media(max-width:1000px) { .sidebar { width:160px; }.workspace { flex-direction:column; }.list { width:100%; }.main { padding:16px; } }
+@media(max-width:1000px) { .desktop { padding-left:160px; }.sidebar { position: fixed; top: 0; left: 0; height: 100vh; overflow-y: auto; z-index: 10; width:160px; }.workspace { flex-direction:column; }.list { width:100%; }.main { padding:16px; } }
 </style>

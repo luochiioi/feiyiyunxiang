@@ -8,7 +8,7 @@
         <button class="secondary" :class="{ active: tab === 'ranking' }" @click="select('ranking')">好友排行</button>
       </view>
       <view class="row filters">
-        <button class="secondary" :class="{ active: tab === 'mine' }" @click="select('mine')">我的帖子</button>
+        <button class="secondary" :class="{ active: tab === 'mine' }" @click="select('mine')">我的帖子<view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></button>
         <button class="secondary" :class="{ active: tab === 'saved' }" @click="select('saved')">我的收藏</button>
       </view>
       <text v-if="message.length > 0" class="body">{{ message }}</text>
@@ -40,6 +40,7 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PostCard from '../components/PostCard.uvue'
 import { secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
+import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { publicRead, communityError, postPath, composePath } from '@/features/community/community.uts'
 import type { Post, PostPage, Ranking } from '@/features/community/community.uts'
 const posts = ref<Post[]>([]), ranks = ref<Ranking[]>([]), tab = ref('latest')
@@ -49,7 +50,7 @@ const visiblePosts = computed(() => tab.value === 'latest' || owner.value === se
 const visibleRanks = computed(() => owner.value === session.value?.uid ? ranks.value : [])
 let sequence = 0
 onLoad(query => { if (query['tab'] === 'mine') tab.value = 'mine' })
-onShow(() => { visible.value = true; load(false) })
+onShow(() => { visible.value = true; load(false); refreshReviewNotices() })
 onHide(() => { visible.value = false; sequence++ })
 function select(value: string): void { if (tab.value !== value) { tab.value = value; load(false) } }
 async function load(append: boolean): Promise<void> {
@@ -73,6 +74,7 @@ async function load(append: boolean): Promise<void> {
         const current = session.value?.uid
         if (active !== 'latest' && (current == null || (uid != null && uid !== current))) throw new Error('ACCOUNT_CHANGED')
         owner.value = current ?? ''
+        if (active === 'mine') refreshReviewNotices()
         posts.value = [...posts.value, ...result.items]; next.value = result.next
       }
     }
@@ -87,7 +89,8 @@ function showPost(post: Post): void {
 
 <style scoped>
 @import '@/styles/page.css';
-.filters .secondary { flex: 1; white-space: nowrap; }
+.review-dot { position: absolute; top: 4px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: #c73535; border: 2px solid #fffaf4; }
+.filters .secondary { position: relative; flex: 1; white-space: nowrap; }
 .filters .active { background: #426240; color: #fff; }
 .compose { position: fixed; width: auto; right: 16px; bottom: calc(15px + env(safe-area-inset-bottom)); box-shadow: 0 3px 12px #35503138; }
 .screen { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }

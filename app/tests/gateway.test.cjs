@@ -171,6 +171,10 @@ test('community gateway separates guest reads, author previews and reviewer priv
   assert.equal((await call('communityReviewDetail', 'fixture-token', preview)).code, 'AUTH_REQUIRED')
   assert.equal((await call('communityReviewDetail', reviewerToken, preview)).code, 'OK')
   assert.equal((await call('communitySavePolicy', reviewerToken, {})).code, 'FORBIDDEN')
+  assert.equal((await call('communitySeedPolicy', reviewerToken, { revision: 0 })).code, 'FORBIDDEN')
+  assert.equal((await call('communityReadReview', reviewerToken, pending.data)).code, 'AUTH_REQUIRED')
+  assert.equal((await call('communityReadReview', '', pending.data)).code, 'AUTH_REQUIRED')
+  assert.equal((await call('communityReadReview', 'fixture-token', pending.data)).code, 'OK')
   for (const action of ['communityUsers', 'communityUserDetail', 'communityAccountStatus']) {
     assert.equal((await call(action, reviewerToken, { targetUid: 'member', admin: true })).code, 'FORBIDDEN')
     assert.equal((await call(action, 'fixture-token', { targetUid: 'member' })).code, 'AUTH_REQUIRED')

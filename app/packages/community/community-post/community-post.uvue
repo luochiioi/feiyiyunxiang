@@ -6,10 +6,21 @@
       <template v-if="post != null">
         <PostCard :key="post.revisionId" :post="post" :detail="true" :preview="revisionId.length > 0" :visible="visible" />
         <view v-if="post.owner" class="card">
-          <text class="heading">{{ statusLabel(post.status) }}</text>
-          <text v-if="post.reason.length > 0" class="body">审核原因：{{ post.reason }}</text>
+          <view v-if="post.status === 'rejected'" class="review-feedback">
+            <text class="review-heading">审核未通过</text>
+            <text class="review-label">审核员驳回理由</text>
+            <text class="review-reason">{{ post.reason.length > 0 ? post.reason : '请根据社区规范检查内容后重新提交。' }}</text>
+            <text class="review-help">修改帖子后重新提交，审核员会再次审核。</text>
+          </view>
+          <template v-else>
+            <text class="heading">{{ statusLabel(post.status) }}</text>
+            <view v-if="post.reason.length > 0" class="review-feedback">
+              <text class="review-label">审核员处理理由</text>
+              <text class="review-reason">{{ post.reason }}</text>
+            </view>
+          </template>
+          <button v-if="readFailed" class="secondary" :disabled="busy" @click="retryReadReview">重试同步已读状态</button>
           <text v-if="post.status === 'pending'" class="muted">{{ post.hasPublicVersion ? '本版正在审核，其他人仍可查看上一个已通过版本。' : '审核通过后，其他人才能查看。' }}</text>
-          <text v-if="post.status === 'rejected'" class="muted">你可以按审核原因修改后重新提交。</text>
           <text v-if="post.status === 'removed'" class="muted">帖子已下架，原分享链接已失效。</text>
           <text v-if="post.latestRevision !== post.revisionId" class="muted">已有更新版本，可在我的帖子查看审核结果。</text>
           <view v-if="post.status !== 'removed' && post.status !== 'deleted'" class="row actions">
@@ -60,6 +71,7 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PostCard from '../components/PostCard.uvue'
 import { requestId, secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
+import { readReview } from '@/features/community/review-notices.uts'
 import { publicRead, statusLabel, communityError, communityPath, postPath, composePath } from '@/features/community/community.uts'
 import type { Post, Comment, CommentPage } from '@/features/community/community.uts'
 const postId = ref(''), revisionId = ref(''), loadedPost = ref<Post | null>(null)
@@ -67,6 +79,7 @@ const loadedOwner = ref(''), commentOwner = ref('')
 const post = computed(() => loadedOwner.value.length > 0 && loadedOwner.value !== session.value?.uid ? null : loadedPost.value)
 const comments = ref<Comment[]>([]), mine = ref<Comment[]>([]), next = ref('')
 const visibleMine = computed(() => commentOwner.value === session.value?.uid ? mine.value : [])
+const readFailed = ref(false)
 const message = ref(''), busy = ref(false), visible = ref(false)
 const body = ref(''), replyId = ref(''), replyName = ref(''), reason = ref(''), reportId = ref(''), reporting = ref(false)
 let commentRequest = '', commentDraft = ''
@@ -102,7 +115,20 @@ async function load(): Promise<void> {
   if (!visible.value || (value.owner && uid != null && uid !== session.value?.uid)) return
   loadedOwner.value = value.owner ? session.value?.uid ?? '' : ''
   loadedPost.value = value
+  readFailed.value = false
+  if (value.owner && value.status === 'rejected' && value.reviewUnread !== false) await markReviewRead(value)
   if (value.publicView) await loadComments(false)
+}
+async function markReviewRead(value: Post): Promise<void> {
+  try { await readReview(value.id, value.revisionId) }
+  catch (_) { if (post.value?.revisionId === value.revisionId) readFailed.value = true }
+}
+function retryReadReview(): void {
+  const value = post.value
+  if (value != null && value.owner && value.status === 'rejected') run(async () => {
+    readFailed.value = false
+    await markReviewRead(value)
+  })
 }
 async function run(task: () => Promise<void>): Promise<void> {
   if (busy.value) return
@@ -163,6 +189,11 @@ function report(): void {
 
 <style scoped>
 @import '@/styles/page.css';
+.review-feedback { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid #edc3c2; border-radius: 12px; background: #fff3f1; }
+.review-heading { color: #b52b32; font-size: 17px; font-weight: 700; }
+.review-label { color: #94434a; font-size: 13px; font-weight: 600; }
+.review-reason { color: #552c2b; font-size: 16px; line-height: 1.6; white-space: pre-wrap; }
+.review-help { color: #7b605d; font-size: 13px; line-height: 1.6; }
 .actions { flex-wrap: wrap; }
 .actions button { width: auto; margin: 0; }
 textarea { width: 100%; min-height: 72px; background: #faf5ec; padding: 10px; border-radius: 10px; }
