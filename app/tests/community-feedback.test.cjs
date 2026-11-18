@@ -119,3 +119,19 @@ test('expired sessions renew before fetching rejection notices', async () => {
   assert.equal(renewals, 1)
   assert.equal(read('hasUnreadReview.value'), true)
 })
+
+
+test('My page conditions remain safe while the account and Aomiao cloud state are absent', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../packages/profile/account/account.uvue'), 'utf8')
+  const template = source.split('<script')[0]
+  // The mini-program compiler emits some else-if predicates outside their preceding null guard.
+  const conditions = [...template.matchAll(/v-(?:if|else-if)="([^"]+)"/g)].map(match => match[1])
+  for (const session of [null, { uid: 'returning-member' }]) {
+    for (const aomiao of [null, { claimed: false }, { claimed: true }]) {
+      for (const expression of conditions) {
+        const evaluate = new Function('session', 'aomiao', 'roleError', 'hasUnreadReview', 'return (' + expression + ')')
+        assert.doesNotThrow(() => evaluate(session, aomiao, '', false), expression)
+      }
+    }
+  }
+})
