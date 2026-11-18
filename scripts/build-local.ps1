@@ -7,9 +7,18 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Push-Location $projectRoot
 try {
+  Write-Host "Source workspace: $projectRoot"
+  Write-Host "Build target: $Target"
   if ($Target -eq 'Admin') {
-    & $HBuilderCli publish web --project (Join-Path $projectRoot 'admin')
-    if ($LASTEXITCODE -ne 0) { throw 'Admin build failed' }
+    $compiled = $false
+    & $HBuilderCli publish web --project (Join-Path $projectRoot 'admin') | ForEach-Object {
+      if ($_ -match '编译成功|发行成功|compiled successfully|build completed successfully') { $compiled = $true }
+      $_
+    }
+    if ($LASTEXITCODE -ne 0 -or !$compiled) { throw 'HBuilderX did not complete the requested Admin build' }
+    $webOutput = Join-Path $projectRoot 'admin/unpackage/dist/build/web/index.html'
+    if (!(Test-Path -LiteralPath $webOutput -PathType Leaf)) { throw 'Admin Web output is missing' }
+    Write-Host "Admin output: $webOutput"
     return
   }
 

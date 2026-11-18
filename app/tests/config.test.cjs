@@ -12,3 +12,15 @@ test('lost source AppID fails preflight and public config repairs it; tourist ou
  fs.writeFileSync(compiled,JSON.stringify({appid}));assert.equal(run(),0)
  // Keep temp fixture for OS temp cleanup; never recursively delete a computed path.
 })
+
+
+test('admin build rejects a CLI that reports no compilation despite exiting successfully', { skip: process.platform !== 'win32' }, () => {
+ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fy-build-cli-'))
+ const cli = path.join(temporary, 'no-build.ps1')
+ fs.writeFileSync(cli, "Write-Output 'Project not imported'\n$global:LASTEXITCODE = 0\n")
+ const script = path.resolve(__dirname, '../../scripts/build-local.ps1')
+ const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
+   '-Target', 'Admin', '-HBuilderCli', cli], { encoding: 'utf8', timeout: 15000 })
+ assert.equal(result.error, undefined)
+ assert.notEqual(result.status, 0)
+})
