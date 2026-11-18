@@ -1,53 +1,63 @@
 <template>
   <view class="governance">
     <view class="tools">
-      <button @click="switchTo('pending')">待审帖子</button>
-      <button @click="switchTo('published')">已发布帖子</button>
-      <button @click="switchTo('comments')">待审评论</button>
-      <button @click="switchTo('publicComments')">公开评论</button>
-      <button @click="switchTo('reports')">待处理举报</button>
-      <button @click="switchTo('resolvedReports')">已处理举报</button>
-      <button @click="switchTo('mutes')">禁言记录</button>
-      <button @click="switchTo('policy')">词库与限流</button>
-      <button @click="switchTo('audit')">审计记录</button>
+      <button :class="{ active: group === 'pending' }" :disabled="busy" @click="switchTo('pending')">待审帖子</button>
+      <button :class="{ active: group === 'published' }" :disabled="busy" @click="switchTo('published')">已发布帖子</button>
+      <button :class="{ active: group === 'comments' }" :disabled="busy" @click="switchTo('comments')">待审评论</button>
+      <button :class="{ active: group === 'publicComments' }" :disabled="busy" @click="switchTo('publicComments')">公开评论</button>
+      <button :class="{ active: group === 'reports' }" :disabled="busy" @click="switchTo('reports')">待处理举报</button>
+      <button :class="{ active: group === 'resolvedReports' }" :disabled="busy" @click="switchTo('resolvedReports')">已处理举报</button>
+      <button :class="{ active: group === 'mutes' }" :disabled="busy" @click="switchTo('mutes')">禁言记录</button>
+      <button :class="{ active: group === 'policy' }" :disabled="busy" @click="switchTo('policy')">词库与限流</button>
+      <button :class="{ active: group === 'audit' }" :disabled="busy" @click="switchTo('audit')">审计记录</button>
     </view>
     <view v-if="targetUid.length > 0" class="tools"><text class="muted">当前筛选用户 {{ targetLabel }}</text><button :disabled="busy" @click="clearUser">清除筛选</button></view>
-    <view class="tools"><text class="heading">{{ groupName() }}</text><button :disabled="busy" @click="reload">刷新</button></view>
+    <view class="tools"><text class="heading">{{ groupName() }}</text><button :disabled="busy" @click="reload">{{ group === 'policy' ? '重新读取规则' : '刷新队列' }}</button></view>
+    <text v-if="busy" class="muted">正在处理…</text>
+    <text v-if="receipt.length > 0" class="status">{{ receipt }}</text>
     <text v-if="message.length > 0" class="status">{{ message }}</text>
     <view v-if="group === 'policy' && policy != null" class="panel">
+      <text class="heading">{{ policy?.canEdit ? '可编辑' : '仅查看' }} · 规则版本 {{ policy?.revision }}</text>
       <view class="tools">
-        <view><text>最短间隔（秒）</text><input v-model="minSeconds" type="number" :disabled="!policy?.canEdit" /></view>
-        <view><text>每 10 分钟上限</text><input v-model="maxPerWindow" type="number" :disabled="!policy?.canEdit" /></view>
-        <view><text>相同内容去重（秒）</text><input v-model="duplicateSeconds" type="number" :disabled="!policy?.canEdit" /></view>
+        <view><text>最短间隔（秒）</text><input v-model="minSeconds" type="number" :disabled="busy || !policy?.canEdit" /></view>
+        <view><text>每 10 分钟上限</text><input v-model="maxPerWindow" type="number" :disabled="busy || !policy?.canEdit" /></view>
+        <view><text>相同内容去重（秒）</text><input v-model="duplicateSeconds" type="number" :disabled="busy || !policy?.canEdit" /></view>
       </view>
-      <text class="muted">先检查拒绝规则。允许词条完整匹配评论时可直接公开，其余评论按待审词条判断。未命中时直接公开。</text>
+      <text class="muted">词库用于评论。拒绝词条阻止发送，待审词条转人工审核。帖子仍逐篇审核。</text>
       <view v-for="(rule, i) in rules" :key="i" class="tools">
-        <input v-model="rule.word" placeholder="词条" :maxlength="80" :disabled="!policy?.canEdit" />
+        <input v-model="rule.word" placeholder="词条" :maxlength="80" :disabled="busy || !policy?.canEdit" />
         <text>{{ ruleName(rule.action) }}</text>
         <template v-if="policy?.canEdit">
-          <button @click="rule.action = 'reject'">拒绝</button><button @click="rule.action = 'pending'">待审</button>
-          <button @click="rule.action = 'allow'">允许</button><button @click="removeRule(i)">删除词条</button>
+          <button :disabled="busy" @click="rule.action = 'reject'">拒绝</button><button :disabled="busy" @click="rule.action = 'pending'">待审</button>
+          <button :disabled="busy" @click="rule.action = 'allow'">允许</button><button :disabled="busy" @click="removeRule(i)">删除词条</button>
         </template>
       </view>
       <view v-if="policy?.canEdit" class="tools">
-        <button @click="addRule">新增词条</button><button :disabled="busy" @click="savePolicy">保存规则</button>
+        <button :disabled="busy" @click="seedPolicy">保存并补充基础屏蔽词</button><button :disabled="busy" @click="addRule">新增词条</button><button :disabled="busy" @click="savePolicy">保存规则</button>
       </view>
     </view>
     <template v-else-if="group !== 'policy'">
       <view class="workspace">
         <view class="panel results">
-          <text v-if="!busy && rows.length === 0 && next.length === 0" class="muted">当前没有记录。</text>
+          <text v-if="!busy && queueState === 'ready' && rows.length === 0 && next.length === 0" class="muted">当前没有记录。</text>
           <view v-for="row in rows" :key="row.id" class="result">
-            <text class="heading">{{ row.title ?? row.action ?? row.author ?? '举报' }}</text>
+            <text class="heading">{{ row.title || row.action || row.author || (row.commentId ? '评论举报' : '帖子举报') }}</text>
+            <text v-if="group !== 'audit' && group !== 'mutes'" class="muted">{{ objectLabel(row) }} · {{ statusName(row.status ?? '') }} · {{ timeLabel(row.createdAt ?? 0) }}<template v-if="row.imageCount != null || row.hasImage"> · {{ row.imageCount ?? 1 }} 张图片</template></text>
             <text class="excerpt">{{ row.body ?? row.reason ?? '' }}</text>
-            <text v-if="group === 'audit'" class="muted">{{ new Date(row.at ?? 0).toLocaleString() }} · 操作人 {{ row.actor }} · 对象 {{ row.target }}</text>
+            <text v-if="group === 'audit'" class="muted">{{ timeLabel(row.at ?? 0) }} · 操作人 {{ row.actor }} · 对象 {{ row.target }}</text>
             <button :disabled="busy" @click="select(row)">{{ group === 'audit' ? '查看审计记录' : '查看详情' }}</button>
           </view>
-          <button v-if="next.length > 0" :disabled="busy" @click="more">加载更多</button>
+          <button v-if="queueState === 'failed'" :disabled="busy" @click="reload">重试读取队列</button>
+          <button v-if="next.length > 0 && queueState !== 'failed'" :disabled="busy" @click="more">{{ queueState === 'moreFailed' ? '重试加载更多' : '加载更多' }}</button>
         </view>
         <view v-if="selected != null" class="panel inspector">
           <template v-if="group === 'audit'">
-            <text class="heading">审计详情</text><text class="record">{{ auditText }}</text>
+            <text class="heading">{{ selected?.action }}</text>
+            <text class="muted">{{ timeLabel(selected?.at ?? 0) }} · 操作人 {{ selected?.actor }}</text>
+            <text class="record">对象：{{ selected?.target }}</text>
+            <text v-if="selected?.revisionId" class="record">版本：{{ selected?.revisionId }}</text>
+            <text v-if="selected?.reason" class="record">原因：{{ selected?.reason }}</text>
+            <text v-if="selected?.action === 'policy.save' || selected?.action === 'policy.seed'" class="record">{{ auditText }}</text>
           </template>
           <template v-else>
             <template v-if="group === 'mutes'">
@@ -59,6 +69,7 @@
               <text class="heading">举报原因</text><text class="record">{{ selected?.reason }}</text>
               <text v-if="selected?.resolution" class="record">处理结果 · {{ selected?.resolution }}</text>
             </template>
+            <view v-if="detailFailed" class="tools"><text class="muted">未能读取详情。</text><button :disabled="busy" @click="retryDetail">重试详情</button></view>
             <template v-if="detail != null">
               <text class="heading">{{ detail?.author }} · {{ statusName(detail?.status ?? '') }}</text>
               <view class="versions">
@@ -67,20 +78,18 @@
                   <template v-if="currentVersion != null">
                     <text class="muted">{{ currentVersion?.id }}</text>
                     <text>{{ currentVersion?.title }}</text><text class="record">{{ currentVersion?.body }}</text>
-                    <view v-if="currentSlots.length > 0" class="tools"><button v-for="index in currentSlots" :key="index" :disabled="busy" @click="loadImage(true, index)">图 {{ index + 1 }}</button></view>
-                    <text v-if="currentImage.length > 0" class="muted">当前预览第 {{ currentIndex + 1 }} 张</text>
-                    <image v-if="currentImage.length > 0" :src="currentImage" mode="aspectFit" />
+                    <ReviewGallery :key="(detail?.postId ?? '') + '/' + (currentVersion?.id ?? '')"
+                      :post-id="detail?.postId ?? ''" :revision-id="currentVersion?.id ?? ''" :image-count="countImages(currentVersion)" />
                   </template>
                   <text v-else class="muted">当前无公开版本。</text>
                 </view>
                 <view class="version">
-                  <text class="heading">所选版本 · {{ statusName(selectedVersion?.status ?? '') }}</text>
+                  <text class="heading">{{ detail?.reportedRevisionId ? '举报指向版本' : isReportGroup() ? '参考版本（旧举报未记录版本）' : '所选版本' }} · {{ statusName(selectedVersion?.status ?? '') }}</text>
                   <text class="muted">{{ selectedVersion?.id }}</text>
                   <text>{{ selectedVersion?.title }}</text><text class="record">{{ selectedVersion?.body }}</text>
                   <text v-if="selectedVersion?.reason" class="muted">{{ selectedVersion?.reason }}</text>
-                  <view v-if="selectedSlots.length > 0" class="tools"><button v-for="index in selectedSlots" :key="index" :disabled="busy" @click="loadImage(false, index)">图 {{ index + 1 }}</button></view>
-                  <text v-if="selectedImage.length > 0" class="muted">当前预览第 {{ selectedIndex + 1 }} 张</text>
-                  <image v-if="selectedImage.length > 0" :src="selectedImage" mode="aspectFit" />
+                  <ReviewGallery :key="(detail?.postId ?? '') + '/' + (selectedVersion?.id ?? '')"
+                    :post-id="detail?.postId ?? ''" :revision-id="selectedVersion?.id ?? ''" :image-count="countImages(selectedVersion)" />
                 </view>
               </view>
             </template>
@@ -89,15 +98,15 @@
               <text class="record">{{ comment?.body }}</text>
             </template>
             <text>审核或处理原因</text>
-            <textarea v-model="reason" :maxlength="300" placeholder="驳回、下架、举报处理和禁言须填写原因" />
+            <textarea v-model="reason" :disabled="busy" :maxlength="300" placeholder="驳回、下架、举报处理和禁言须填写原因" />
             <view class="tools">
-              <button v-if="group === 'pending'" :disabled="busy" @click="reviewPost('approve')">通过所选版本</button>
-              <button v-if="group === 'pending'" :disabled="busy" @click="reviewPost('reject')">驳回所选版本</button>
+              <button v-if="canReviewPost" :disabled="busy" @click="reviewPost('approve')">通过所选版本</button>
+              <button v-if="canReviewPost" :disabled="busy" @click="reviewPost('reject')">驳回所选版本</button>
               <button v-if="detail != null && detail?.current != null" :disabled="busy" @click="reviewPost('remove')">下架当前公开版</button>
-              <button v-if="comment != null && comment?.status === 'pending'" :disabled="busy" @click="reviewComment('approve')">通过评论</button>
+              <button v-if="comment != null && comment?.status === 'pending' && detail?.current != null" :disabled="busy" @click="reviewComment('approve')">通过评论</button>
               <button v-if="comment != null && comment?.status === 'pending'" :disabled="busy" @click="reviewComment('reject')">驳回评论</button>
               <button v-if="comment != null && comment?.status === 'public'" :disabled="busy" @click="reviewComment('remove')">移除评论</button>
-              <button v-if="group === 'reports'" :disabled="busy" @click="resolveReport">结束举报处理</button>
+              <button v-if="detail?.reportStatus === 'open'" :disabled="busy" @click="resolveReport">结束举报处理</button>
             </view>
             <view v-if="target().length > 0" class="tools">
               <input v-model="minutes" type="number" placeholder="禁言分钟数" />
@@ -113,25 +122,26 @@
 
 <script setup lang="uts">
 import { computed, ref } from 'vue'
+import ReviewGallery from './ReviewGallery.uvue'
 import { api } from '@/features/api.uts'
-type Row = { id: string, title?: string, author?: string, body?: string, status?: string, postId?: string, revisionId?: string, commentId?: string, targetUid?: string, reason?: string, resolution?: string, at?: number, until?: number, actor?: string, action?: string, target?: string }
+type Row = { id: string, title?: string, author?: string, body?: string, status?: string, postId?: string, revisionId?: string, commentId?: string, targetUid?: string, reason?: string, resolution?: string, createdAt?: number, imageCount?: number, hasImage?: boolean, at?: number, until?: number, actor?: string, action?: string, target?: string }
 type Revision = { id: string, title: string, body: string, status: string, hasImage: boolean, imageCount?: number, reason: string }
-type Detail = { postId: string, status: string, author: string, targetUid: string, selected: Revision, current: Revision | null, reportedComment: Row | null }
+type Detail = { postId: string, status: string, author: string, targetUid: string, latestRevision: string, reportedRevisionId: string, reportStatus: string, selected: Revision, current: Revision | null, reportedComment: Row | null }
 type Rule = { word: string, action: string }
 type Policy = { revision: number, canEdit: boolean, minSeconds: number, maxPerWindow: number, duplicateSeconds: number, rules: Rule[] }
 type Page = { items: Row[], next: string }
 const props = defineProps<{ initialGroup: string, targetUid: string, targetLabel: string }>()
 const group = ref(props.initialGroup), targetUid = ref(props.targetUid), targetLabel = ref(props.targetLabel)
-const busy = ref(false), message = ref(''), rows = ref<Row[]>([]), next = ref('')
+const busy = ref(false), message = ref(''), receipt = ref(''), rows = ref<Row[]>([]), next = ref('')
 const selected = ref<Row | null>(null), detail = ref<Detail | null>(null), comment = ref<Row | null>(null)
 const currentVersion = computed(() => detail.value?.current ?? null)
 const selectedVersion = computed(() => detail.value?.selected ?? null)
-function slots(version: Revision | null): number[] {
-  return Array.from({ length: version?.imageCount ?? (version?.hasImage === true ? 1 : 0) }, (_, index) => index)
-}
-const currentSlots = computed(() => slots(currentVersion.value)), selectedSlots = computed(() => slots(selectedVersion.value))
-const currentIndex = ref(0), selectedIndex = ref(0)
-const reason = ref(''), minutes = ref('60'), currentImage = ref(''), selectedImage = ref(''), auditText = ref('')
+function countImages(version: Revision | null): number { return version?.imageCount ?? (version?.hasImage === true ? 1 : 0) }
+const detailFailed = ref(false)
+const queueState = ref('loading')
+const canReviewPost = computed(() => detail.value != null && detail.value.selected.id === detail.value.latestRevision &&
+  detail.value.selected.status === 'pending' && detail.value.status !== 'removed' && detail.value.status !== 'deleted')
+const reason = ref(''), minutes = ref('60'), auditText = ref('')
 const policy = ref<Policy | null>(null), rules = ref<Rule[]>([])
 const minSeconds = ref('10'), maxPerWindow = ref('20'), duplicateSeconds = ref('300')
 onMounted(() => { reload() })
@@ -156,15 +166,24 @@ function statusName(value: string): string {
     case 'rejected': return '已驳回'
     case 'removed': return '已下架'
     case 'deleted': return '作者已撤下'
+    case 'open': return '待处理'
+    case 'resolved': return '已处理'
+    case 'withdrawn': return '已撤回'
     case 'superseded': return '已有更新版本'
     default: return '未发布'
   }
+}
+function timeLabel(at: number): string { return at > 0 ? new Date(at).toLocaleString() : '时间未记录' }
+function isReportGroup(): boolean { return group.value === 'reports' || group.value === 'resolvedReports' }
+function objectLabel(row: Row): string {
+  if (isReportGroup()) return row.commentId ? '评论举报' : '帖子举报'
+  return group.value === 'comments' || group.value === 'publicComments' ? '评论' : '帖子'
 }
 function ruleName(value: string): string { return value === 'reject' ? '拒绝' : value === 'pending' ? '待审' : '允许' }
 function target(): string { return comment.value?.targetUid ?? detail.value?.targetUid ?? selected.value?.targetUid ?? '' }
 function clearDetail(): void {
   selected.value = null; detail.value = null; comment.value = null; reason.value = ''; minutes.value = '60'
-  selectedImage.value = ''; currentImage.value = ''; auditText.value = ''
+  auditText.value = ''; detailFailed.value = false
 }
 async function task(work: () => Promise<void>): Promise<void> {
   if (busy.value) return
@@ -176,7 +195,8 @@ async function task(work: () => Promise<void>): Promise<void> {
       case 'FORBIDDEN': message.value = '当前账号没有此权限。'; break
       case 'STALE_VERSION':
       case 'NOT_PENDING':
-      case 'CONFLICT': message.value = '记录已变化，请刷新后再操作。'; break
+      case 'NOT_FOUND': message.value = '记录已变化，请刷新后再操作。'; break
+      case 'CONFLICT': message.value = '规则已由他人更新。输入已保留，请先备份改动，再重新读取规则。'; break
       case 'INVALID_CONTENT': message.value = '请填写处理原因，最多 300 字。'; break
       case 'INVALID_POLICY': message.value = '请检查词条是否重复、留空，以及频率数字是否有效。'; break
       case 'INVALID_DURATION': message.value = '禁言时间须为 1 至 43200 分钟。'; break
@@ -191,50 +211,72 @@ async function load(append: boolean): Promise<void> {
     minSeconds.value = '' + value.minSeconds; maxPerWindow.value = '' + value.maxPerWindow; duplicateSeconds.value = '' + value.duplicateSeconds
     return
   }
-  const result = await api<Page>('communityReviewList', { group: group.value, targetUid: targetUid.value, cursor: append ? next.value : '' })
-  rows.value = append ? [...rows.value, ...result.items] : result.items; next.value = result.next
+  try {
+    const result = await api<Page>('communityReviewList', { group: group.value, targetUid: targetUid.value, cursor: append ? next.value : '' })
+    rows.value = append ? [...rows.value, ...result.items] : result.items
+    next.value = result.next; queueState.value = 'ready'
+  } catch (error) {
+    queueState.value = append ? 'moreFailed' : 'failed'
+    throw error
+  }
 }
 function reload(): void { task(async () => { clearDetail(); await load(false) }) }
 function clearUser(): void {
   if (busy.value) return
-  targetUid.value = ''; targetLabel.value = ''; reload()
+  targetUid.value = ''; targetLabel.value = ''; resetQueue(); reload()
 }
 function more(): void { task(async () => { await load(true) }) }
 function switchTo(value: string): void {
   if (busy.value) return
-  group.value = value; rows.value = []; next.value = ''; policy.value = null; reload()
+  if (group.value === value) return
+  group.value = value; resetQueue(); reload()
+}
+function resetQueue(): void {
+  rows.value = []; next.value = ''; policy.value = null; receipt.value = ''; queueState.value = 'loading'
 }
 async function loadSelection(row: Row): Promise<void> {
   clearDetail(); selected.value = row
   if (group.value === 'audit') { auditText.value = JSON.stringify(row, null, 2); return }
   if (group.value === 'mutes') return
-  if (group.value === 'comments' || group.value === 'publicComments') comment.value = row
-  const value = await api<Detail>('communityReviewDetail', {
-    postId: row.postId ?? '', revisionId: row.revisionId ?? '', commentId: comment.value?.id ?? row.commentId ?? ''
-  })
-  detail.value = value
-  if (value.reportedComment != null) comment.value = value.reportedComment
+  const isComment = group.value === 'comments' || group.value === 'publicComments'
+  const isReport = isReportGroup()
+  try {
+    const value = await api<Detail>('communityReviewDetail', {
+      postId: row.postId ?? '', revisionId: row.revisionId ?? '', commentId: isComment ? row.id : row.commentId ?? '',
+      reportId: isReport ? row.id : ''
+    })
+    detail.value = value; comment.value = value.reportedComment
+  } catch (_) { detailFailed.value = true }
 }
-function select(row: Row): void { task(async () => { await loadSelection(row) }) }
-function loadImage(current: boolean, index: number): void {
-  task(async () => {
-    const version = current ? detail.value?.current : detail.value?.selected
-    if (version == null) return
-    const result = await api<{ src: string }>('communityReviewImage', { postId: detail.value?.postId ?? '', revisionId: version.id, index })
-    if (current) { currentImage.value = result.src; currentIndex.value = index }
-    else { selectedImage.value = result.src; selectedIndex.value = index }
+function select(row: Row): void { task(async () => { receipt.value = ''; await loadSelection(row) }) }
+function retryDetail(): void {
+  const row = selected.value
+  if (row != null) task(() => loadSelection(row))
+}
+function confirm(title: string, targetLabel: string, required: boolean): Promise<boolean> {
+  const note = reason.value.trim()
+  if (required && note.length === 0) throw new Error('INVALID_CONTENT')
+  return new Promise<boolean>(resolve => {
+    uni.showModal({ title, content: targetLabel + (note.length ? '\n原因：' + note : ''),
+      success: result => resolve(result.confirm), fail: () => resolve(false) })
   })
 }
 function reviewPost(decision: string): void {
   task(async () => {
     const version = decision === 'remove' ? detail.value?.current : detail.value?.selected
     if (version == null) return
+    if (!await confirm(decision === 'remove' ? '下架公开帖子' : decision === 'approve' ? '通过帖子版本' : '驳回帖子版本',
+      (version.title || '无标题帖子') + '\n版本：' + version.id, decision !== 'approve')) return
     await api<UTSJSONObject>('communityReviewPost', { postId: detail.value?.postId ?? '', revisionId: version.id, decision, reason: reason.value })
     await afterDecision()
   })
 }
 function reviewComment(decision: string): void {
   task(async () => {
+    const item = comment.value
+    if (item == null) return
+    if (!await confirm(decision === 'remove' ? '移除评论' : decision === 'approve' ? '通过评论' : '驳回评论',
+      (item.author ?? '') + '：' + (item.body ?? '').slice(0, 80), decision !== 'approve')) return
     await api<UTSJSONObject>('communityReviewComment', { commentId: comment.value?.id ?? '', decision, reason: reason.value })
     await afterDecision()
   })
@@ -242,22 +284,29 @@ function reviewComment(decision: string): void {
 async function afterDecision(): Promise<void> {
   const row = selected.value
   await refreshAfterChange('已记录处理结果。', async () => {
-    if (group.value === 'reports' && row != null) await loadSelection(row)
+    if (group.value === 'reports' && row != null) {
+      await loadSelection(row)
+      if (detailFailed.value) message.value = '详情暂未刷新，请重试详情。'
+    }
     else { clearDetail(); await load(false) }
   })
 }
 async function refreshAfterChange(success: string, refresh: () => Promise<void>): Promise<void> {
-  try {
-    await refresh()
-    message.value = success
-  } catch (_) {
+  receipt.value = success
+  try { await refresh() }
+  catch (_) {
     clearDetail()
     rows.value = []; next.value = ''; policy.value = null
-    message.value = success + ' 列表暂未刷新，请点击「刷新」。'
+    message.value = '写入已完成，但读取失败，请刷新恢复。'
   }
 }
 function resolveReport(): void {
   task(async () => {
+    const row = selected.value, item = detail.value
+    if (row == null || item?.reportStatus !== 'open') return
+    const subject = comment.value != null ? '评论：' + (comment.value?.body ?? '').slice(0, 50) : '帖子：' + (item.selected.title || '无标题')
+    const version = item.reportedRevisionId || '旧举报未记录版本'
+    if (!await confirm('结束举报处理', subject + '\n版本：' + version + '\n这一步只记录处理结果。', true)) return
     await api<UTSJSONObject>('communityResolveReport', { reportId: selected.value?.id ?? '', reason: reason.value })
     clearDetail()
     await refreshAfterChange('举报已处理。', () => load(false))
@@ -266,12 +315,23 @@ function resolveReport(): void {
 function mute(release: boolean): void {
   task(async () => {
     if (!release && Number(minutes.value) <= 0) throw new Error('INVALID_DURATION')
+    const label = comment.value?.author ?? detail.value?.author ?? selected.value?.author ?? '旅伴'
+    if (!await confirm(release ? '解除禁言' : '设置禁言', label + (release ? '' : ' · ' + minutes.value + ' 分钟'), true)) return
     const value = await api<{ until: number }>('communityMute', { targetUid: target(), minutes: release ? 0 : Number(minutes.value), reason: reason.value })
     const success = value.until > 0 ? '已禁言至 ' + new Date(value.until).toLocaleString() : '已解除禁言。'
     if (group.value === 'mutes') {
       clearDetail()
       await refreshAfterChange(success, () => load(false))
-    } else message.value = success
+    } else { receipt.value = success; reason.value = '' }
+  })
+}
+function seedPolicy(): void {
+  task(async () => {
+    const result = await api<{ added: number }>('communitySeedPolicy', {
+      revision: policy.value?.revision ?? -1, rules: rules.value,
+      minSeconds: Number(minSeconds.value), maxPerWindow: Number(maxPerWindow.value), duplicateSeconds: Number(duplicateSeconds.value)
+    })
+    await refreshAfterChange(result.added > 0 ? '已补充 ' + result.added + ' 条基础词条。' : '当前规则已保存，基础词条已齐全。', () => load(false))
   })
 }
 function addRule(): void { rules.value = [...rules.value, { word: '', action: 'pending' }] }
@@ -291,12 +351,13 @@ function savePolicy(): void {
 .tools, .workspace, .versions { display: flex; flex-direction: row; gap: 10px; align-items: flex-start; }
 .tools { flex-wrap: wrap; align-items: center; }
 .tools button { margin: 0; }
+.tools button.active { background: #304c37; color: white; }
 .workspace { flex-wrap: wrap; }
 .panel { background: #fff; border-radius: 12px; padding: 16px; }
 .results { width: 260px; }
 .inspector { flex: 1; min-width: 420px; }
-.version { flex: 1; min-width: 0; background: #faf7ef; border-radius: 10px; padding: 12px; }
-.version image { width: 100%; height: 220px; }
+.version { flex: 1; min-width: 240px; background: #faf7ef; border-radius: 10px; padding: 12px; }
+.versions { flex-wrap: wrap; }
 .result { border-bottom: 1px solid #ede8dc; padding-bottom: 12px; }
 .heading { color: #2c3b28; font-weight: 700; }
 .muted { color: #685d53; font-size: 13px; overflow-wrap: anywhere; }

@@ -4,10 +4,11 @@
     <view class="app-page-header">
       <view class="app-page-header-safe"></view>
       <view class="app-page-header-row">
-        <view class="app-page-header-action" aria-label="返回" @click="goBack">
-          <text v-if="showBack" class="app-page-header-back">‹</text>
-        </view>
-        <text class="app-page-header-title">{{ title }}</text>
+        <button v-if="props.showBack" class="app-page-header-action app-page-header-return" aria-label="返回" @click="goBack">
+          <text class="app-page-header-back">‹</text>
+        </button>
+        <view v-else class="app-page-header-action"></view>
+        <text class="app-page-header-title">{{ props.title }}</text>
         <view class="app-page-header-action"></view>
       </view>
     </view>
@@ -16,11 +17,9 @@
 
 <script setup lang="uts">
 const props = defineProps<{ title: string, showBack: boolean }>()
-const title = props.title
-const showBack = props.showBack
 
 function goBack(): void {
-  if (!showBack) return
+  if (!props.showBack) return
   if (getCurrentPages().length > 1) {
     uni.navigateBack({ delta: 1 })
     return
@@ -34,7 +33,9 @@ function goBack(): void {
 .app-page-header { position: fixed; top: 0; left: 0; right: 0; z-index: 10; background-color: #fffaf7; }
 .app-page-header-safe { height: var(--status-bar-height); }
 .app-page-header-row { height: 88rpx; display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20rpx; }
-.app-page-header-action { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.app-page-header-action { width: 120rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.app-page-header-return { margin: 0; padding: 0; background: transparent; border-radius: 0; }
+.app-page-header-return::after { border: 0; }
 .app-page-header-back { margin-top: -10rpx; color: #4a321c; font-size: 64rpx; line-height: 64rpx; }
 .app-page-header-title { flex: 1; color: #332b24; font-size: 32rpx; font-weight: 700; text-align: center; lines: 1; text-overflow: ellipsis; }
 </style>

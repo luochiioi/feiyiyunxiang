@@ -1,6 +1,6 @@
 <template>
   <view class="ops">
-    <view class="tools"><text class="heading">运营工作台</text><button :disabled="busy" @click="load">刷新</button></view>
+    <view class="tools"><text class="heading">运营工作台</text><button :disabled="busy" @click="load">{{ busy ? '正在刷新…' : message.length > 0 ? '重试刷新' : '刷新' }}</button></view>
     <text v-if="message.length > 0" class="muted">{{ message }}</text>
     <view v-if="overview != null" class="metrics">
       <button class="metric" @click="emit('review', 'pending')"><text>待审帖子</text><text class="value">{{ overview?.pendingPosts }}</text></button>
@@ -25,9 +25,9 @@ const overview = ref<Overview | null>(null), busy = ref(false), message = ref(''
 onMounted(() => { load() })
 async function load(): Promise<void> {
   if (busy.value) return
-  busy.value = true; message.value = '加载中…'
+  busy.value = true; message.value = ''
   try { overview.value = await api<Overview>('communityOverview'); message.value = '' }
-  catch (_) { message.value = '暂时无法读取工作台，请刷新。' }
+  catch (_) { message.value = overview.value == null ? '未能读取工作台，请重试。' : '刷新失败，以下为上次读取的指标。' }
   finally { busy.value = false }
 }
 </script>

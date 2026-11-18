@@ -21,7 +21,7 @@
         <button v-if="roleError.length > 0 && aomiao != null" class="secondary" :disabled="busy" @click="loadAomiao">重试读取澳喵</button>
         <button v-if="session == null" class="primary" :disabled="busy" @click="signIn">{{ busy ? '正在登录…' : '微信登录后领取' }}</button>
         <button v-else-if="aomiao == null" class="secondary" :disabled="busy" @click="loadAomiao">{{ busy ? '正在读取澳喵…' : '重试读取澳喵' }}</button>
-        <button v-else-if="!aomiao.claimed" class="primary" :disabled="busy" @click="claim">{{ busy ? '正在领取…' : '领取澳喵' }}</button>
+        <button v-else-if="aomiao?.claimed !== true" class="primary" :disabled="busy" @click="claim">{{ busy ? '正在领取…' : '领取澳喵' }}</button>
         <button v-else class="primary" @click="openPage('/packages/routes/routes/routes')">带澳喵去探索</button>
       </view>
       <view class="card green">
@@ -29,9 +29,9 @@
         <button class="primary" @click="openPage('/packages/profile/my-checkins/my-checkins')">查看档案</button>
       </view>
       <view class="card">
-        <view class="row spread menu-row" @click="openPage('/packages/story/works/works')"><text class="body">文化作品</text><text class="muted">›</text></view>
-        <view class="row spread menu-row" @click="openPage('/packages/partner/partner/partner')"><text class="body">旅伴与合作记录</text><text class="muted">›</text></view>
-        <view class="row spread divider menu-row" @click="openPage('/packages/community/community/community')"><text class="body">社区</text><text class="muted">›</text></view>
+        <text class="heading">社区记录</text>
+        <view class="row spread menu-row" @click="openPage(communityPath + '?tab=mine')"><view class="my-posts-label"><text class="body">我的帖子</text><view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></view><text class="muted">审核进度 ›</text></view>
+        <view class="row spread divider menu-row" @click="openPage(communityPath)"><text class="body">社区</text><text class="muted">›</text></view>
         <!-- #ifdef MP-WEIXIN -->
         <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="muted">›</text></view>
         <!-- #endif -->
@@ -47,6 +47,8 @@ import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { openPage } from '@/features/navigation.uts'
 import { computed, ref } from 'vue'
 import { session, login, api, secured, clearSession, showError } from '@/features/api.uts'
+import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
+import { communityPath } from '@/features/community/community.uts'
 import { activeRun } from '@/features/exploration/catalog.uts'
 type Aomiao = { claimed: boolean }
 const busy = ref(false)
@@ -54,7 +56,7 @@ const roleError = ref('')
 const role = ref<Aomiao | null>(null)
 const owner = ref('')
 const aomiao = computed(() => session.value?.uid === owner.value ? role.value : null)
-onShow(() => { if (session.value != null) loadAomiao() })
+onShow(() => { if (session.value != null) loadAomiao(); refreshReviewNotices() })
 
 async function updateAomiao(action: string): Promise<void> {
   if (busy.value) return
@@ -83,7 +85,7 @@ async function signIn(): Promise<void> {
     const message = (e as Error).message === 'CONFIG_REQUIRED' ? '微信登录尚未配置' : '微信登录未完成，请重试'
     uni.showToast({ title: message, icon: 'none' })
   } finally { busy.value = false }
-  if (session.value != null) await loadAomiao()
+  if (session.value != null) { await loadAomiao(); await refreshReviewNotices() }
 }
 function showPrivacy(): void {
   // #ifdef MP-WEIXIN
@@ -106,6 +108,8 @@ async function signOut(): Promise<void> {
 
 <style scoped>
 @import '@/styles/page.css';
+.my-posts-label { position: relative; padding-right: 12px; }
+.review-dot { position: absolute; right: 0; top: 0; width: 8px; height: 8px; border-radius: 50%; background: #c73535; }
 .pet-stage { height: 172px; align-items: center; justify-content: center; border-radius: 14px; background: #f8efd9; }
 .pet { width: 158px; height: 158px; }
 </style>

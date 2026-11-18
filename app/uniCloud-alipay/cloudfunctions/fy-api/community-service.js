@@ -1,8 +1,9 @@
+const { pendingRevisions, validateCursor } = require('./community-review-queue')
 const { key } = require('./service')
 const { createPartnershipService } = require('./partnership-service')
 const { writeCommunityAudit: log } = require('./community-operations')
 const { completedActivities, activityIds } = require('./culture')
-const { defaults, fail, identifier, normalize, requiredText, validatePolicy, decide, consume } = require('./community-policy')
+const { defaults, starterRules, fail, identifier, normalize, requiredText, validatePolicy, decide, consume } = require('./community-policy')
 
 const posts = 'fy-community-posts'
 const versions = 'fy-community-versions'
@@ -105,13 +106,17 @@ function createCommunityService({ repo, media, now = Date.now }) {
       authorAvatar: typeof author.avatar === 'string' && /^https:\/\//i.test(author.avatar) ? author.avatar : '',
       status: post.status === 'removed' || post.status === 'deleted' ? post.status : version.status,
       latestRevision: u?.uid === post.uid ? post.latestRevision : '',
+      ...(u?.uid === post.uid ? {
+        hasPublicVersion: isPublic(post),
+        reviewUnread: post.latestRevision === version._id && version.status === 'rejected' && version.reviewSeen !== true && !['removed', 'deleted'].includes(post.status)
+      } : {}),
       reason: u?.uid === post.uid ? post.removalReason ?? version.reason ?? '' : '',
       commentCount: publicView ? post.commentCount : 0, likeCount: publicView ? post.likeCount : 0
     }
   }
 
   async function page(collection, query, cursor, size = 20) {
-    if (cursor && !/^[0-9]{13}-[a-f0-9]{64}$/.test(cursor)) fail('INVALID_CURSOR')
+    validateCursor(cursor)
     const rows = await repo.page(collection, query, { field: 'order', before: cursor || null, size: size + 1 })
     return { rows: rows.slice(0, size), next: rows.length > size ? rows[size - 1].order : '' }
   }
@@ -350,6 +355,34 @@ function createCommunityService({ repo, media, now = Date.now }) {
       return { items: items.filter(Boolean), next }
     },
 
+    async communityReviewNotices(u) {
+      member(u)
+      let unread = 0, cursor = ''
+      do {
+        const result = await page(versions, { uid: u.uid, status: 'rejected' }, cursor)
+        for (const version of result.rows) {
+          if (version.reviewSeen === true) continue
+          const post = await repo.get(posts, version.postId)
+          if (post?.uid === u.uid && post.latestRevision === version._id && !['removed', 'deleted'].includes(post.status)) unread++
+        }
+        cursor = result.next
+      } while (cursor)
+      return { unread }
+    },
+
+    async communityReadReview(u, p) {
+      member(u)
+      return repo.tx(async db => {
+        const post = await postBy(db, p.postId)
+        if (post.uid !== u.uid) fail('NOT_FOUND')
+        const version = await versionBy(db, post, p.revisionId)
+        if (version.status === 'rejected' && version.reviewSeen !== true) {
+          await db.put(versions, version._id, { ...version, reviewSeen: true })
+        }
+        return {}
+      })
+    },
+
     async communityPost(u, p) {
       const { post, version } = await visible(repo, u, p)
       const view = { ...await baseView(post, version, u), body: version.body }
@@ -447,7 +480,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
         const at = now()
         await db.put(reports, id, {
           reporter: u.uid, targetUid: comment?.uid ?? post.uid, postId: post._id,
-          revisionId: comment?.revisionId ?? post.publicRevision, commentId: comment?._id ?? '',
+          revisionId: comment?.revisionId || post.publicRevision, commentId: comment?._id ?? '',
           reason, status: 'open', createdAt: at, order: cursorKey(at, id)
         })
         return { id }
@@ -500,18 +533,19 @@ function createCommunityService({ repo, media, now = Date.now }) {
       const reportFilter = p.targetUid ? { targetUid: valid(p.targetUid) } : {}
       let result
       if (group === 'pending') {
-        result = await page(versions, { status: 'pending', ...userFilter }, p.cursor)
-        result.rows = (await Promise.all(result.rows.map(async v => {
-          const post = await repo.get(posts, v.postId)
-          if (!post || post.latestRevision !== v._id || ['removed', 'deleted'].includes(post.status)) return null
-          return { ...revisionView(v), postId: v.postId, revisionId: v._id, author: post.author }
-        }))).filter(Boolean)
+        result = { rows: [], next: '' }
+        let last = ''
+        for await (const { version, post } of pendingRevisions(repo, userFilter, p.cursor)) {
+          if (result.rows.length === 20) { result.next = last; break }
+          result.rows.push({ ...revisionView(version), postId: post._id, revisionId: version._id, author: post.author })
+          last = version.order
+        }
       } else if (group === 'published') {
         result = await page(posts, { status: 'public', ...userFilter }, p.cursor)
         result.rows = (await Promise.all(result.rows.map(async post => {
           try {
             const { post: current, version } = await visible(repo, null, { postId: post._id })
-            return { ...revisionView(version), postId: current._id, revisionId: version._id, author: current.author }
+            return { ...revisionView(version), status: current.status, postId: current._id, revisionId: version._id, author: current.author }
           } catch (error) { if (error.message !== 'NOT_FOUND') throw error; return null }
         }))).filter(Boolean)
       } else if (group === 'comments' || group === 'publicComments') {
@@ -519,12 +553,19 @@ function createCommunityService({ repo, media, now = Date.now }) {
         result.rows = result.rows.map(c => ({ ...commentView(c), targetUid: c.uid, revisionId: c.revisionId }))
       } else if (group === 'reports' || group === 'resolvedReports') {
         result = await page(reports, { status: group === 'reports' ? 'open' : 'resolved', ...reportFilter }, p.cursor)
-        result.rows = result.rows.map(({ _id, order, ...row }) => ({ ...row, id: _id }))
+        result.rows = result.rows.map(row => ({
+          id: row._id, postId: row.postId, revisionId: row.revisionId, commentId: row.commentId,
+          reason: row.reason, status: row.status, resolution: row.resolution, createdAt: row.createdAt
+        }))
       } else if (group === 'audit') {
-        result = await page(audit, {}, p.cursor)
+        result = await page(audit, reportFilter, p.cursor)
         result.rows = result.rows.map(({ _id, order, ...row }) => ({ ...row, id: _id }))
       } else if (group === 'mutes') {
-        result = await page(mutes, {}, p.cursor)
+        if (p.targetUid) {
+          validateCursor(p.cursor)
+          const row = await repo.get(mutes, userFilter.uid)
+          result = { rows: row && (!p.cursor || row.order < p.cursor) ? [row] : [], next: '' }
+        } else result = await page(mutes, {}, p.cursor)
         result.rows = result.rows.map(row => ({
           id: row._id, targetUid: row._id, author: row.author, reason: row.reason,
           until: row.until, status: row.until > now() ? 'muted' : 'expired'
@@ -534,17 +575,26 @@ function createCommunityService({ repo, media, now = Date.now }) {
     },
 
     async communityReviewDetail(u, p) {
-      const { post, version } = await reviewVersion(u, p)
+      moderator(u)
+      const report = p.reportId ? await repo.get(reports, valid(p.reportId)) : null
+      if (p.reportId && !report) fail('NOT_FOUND')
+      const post = await postBy(repo, report ? report.postId : p.postId)
       const current = isPublic(post) ? await versionBy(repo, post, post.publicRevision) : null
-      let reportedComment = null
-      if (p.commentId) {
-        const comment = await repo.get(comments, valid(p.commentId))
+      const commentId = report ? report.commentId : p.commentId
+      let comment = null
+      if (commentId) {
+        comment = await repo.get(comments, valid(commentId))
         if (comment?.postId !== post._id) fail('NOT_FOUND')
-        reportedComment = { ...commentView(comment), targetUid: comment.uid }
       }
+      const reportedRevisionId = report?.revisionId || ''
+      const revisionId = report || comment
+        ? reportedRevisionId || comment?.revisionId || current?._id || post.latestRevision : p.revisionId
+      const version = await versionBy(repo, post, revisionId)
       return {
         postId: post._id, status: post.status, targetUid: post.uid, author: post.author, latestRevision: post.latestRevision,
-        selected: revisionView(version), current: current ? revisionView(current) : null, reportedComment
+        selected: revisionView(version), current: current ? revisionView(current) : null,
+        reportedRevisionId, reportStatus: report?.status ?? '',
+        reportedComment: comment ? { ...commentView(comment), targetUid: comment.uid } : null
       }
     },
 
@@ -563,10 +613,10 @@ function createCommunityService({ repo, media, now = Date.now }) {
         } else {
           if (post.latestRevision !== version._id || version.status !== 'pending' || ['removed', 'deleted'].includes(post.status)) fail('STALE_VERSION')
           const approved = action === 'approve'
-          await db.put(versions, version._id, { ...version, status: approved ? 'approved' : 'rejected', reason })
+          await db.put(versions, version._id, { ...version, status: approved ? 'approved' : 'rejected', reason, reviewSeen: false })
           if (approved) await db.put(posts, post._id, { ...post, status: 'public', publicRevision: version._id })
         }
-        await log(db, u, 'post.' + action, post._id, { revisionId: version._id, reason }, at)
+        await log(db, u, 'post.' + action, post._id, { revisionId: version._id, reason, targetUid: post.uid }, at)
         return {}
       })
     },
@@ -586,7 +636,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
         await db.put(comments, comment._id, { ...comment, status: next, reason })
         const delta = next === 'public' ? 1 : before === 'public' ? -1 : 0
         if (delta) await db.put(posts, post._id, { ...post, commentCount: post.commentCount + delta })
-        await log(db, u, 'comment.' + p.decision, comment._id, { revisionId: comment.revisionId, reason }, now())
+        await log(db, u, 'comment.' + p.decision, comment._id, { revisionId: comment.revisionId ?? '', reason, targetUid: comment.uid }, now())
         return {}
       })
     },
@@ -600,7 +650,12 @@ function createCommunityService({ repo, media, now = Date.now }) {
         if (report.status !== 'open') fail('NOT_PENDING')
         const at = now()
         await db.put(reports, report._id, { ...report, status: 'resolved', resolution: reason, resolvedAt: at })
-        await log(db, u, 'report.resolve', report._id, { revisionId: report.revisionId, reason }, at)
+        const post = await db.get(posts, report.postId)
+        const comment = post && report.commentId ? await db.get(comments, report.commentId) : null
+        const targetUid = report.commentId ? (comment?.postId === post?._id ? comment?.uid : '') : post?.uid
+        await log(db, u, 'report.resolve', report._id, {
+          revisionId: report.revisionId ?? '', reason, ...(identifier(targetUid) ? { targetUid } : {})
+        }, at)
         return {}
       })
     },
@@ -619,7 +674,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
         // Serialize against comment writes and against the per-author submission guard.
         await db.put(limits, uid, { ...(state ?? {}), muteChangedAt: at })
         await db.put(mutes, uid, { until, reason, actor: u.uid, author, order: cursorKey(at, key('mute', uid)) })
-        await log(db, u, until ? 'user.mute' : 'user.unmute', uid, { reason, until }, at)
+        await log(db, u, until ? 'user.mute' : 'user.unmute', uid, { reason, until, targetUid: uid }, at)
         return { until }
       })
     },
@@ -628,6 +683,25 @@ function createCommunityService({ repo, media, now = Date.now }) {
       moderator(u)
       const { _id, ...policy } = await repo.get(config, 'comments') ?? defaults
       return { ...policy, canEdit: !!u.admin }
+    },
+
+    async communitySeedPolicy(u, p) {
+      if (!u?.admin) fail('FORBIDDEN')
+      const edited = p.rules === undefined ? null : validatePolicy(p)
+      return repo.tx(async db => {
+        const old = await db.get(config, 'comments') ?? defaults
+        if (old.revision !== p.revision) fail('CONFLICT')
+        const current = edited ?? validatePolicy(old)
+        const existing = new Set(current.rules.map(rule => normalize(rule.word)))
+        const additions = starterRules.filter(rule => !existing.has(rule.term))
+        const value = validatePolicy({ ...current, rules: [...current.rules, ...additions] })
+        if (JSON.stringify(value) === JSON.stringify(validatePolicy(old))) return { added: 0, revision: old.revision }
+        const revision = old.revision + 1
+        await db.put(config, 'comments', { ...value, revision })
+        const { _id, ...previous } = old
+        await log(db, u, 'policy.seed', 'comments', { revision, added: additions.length, previous, value }, now())
+        return { added: additions.length, revision }
+      })
     },
 
     async communitySavePolicy(u, p) {

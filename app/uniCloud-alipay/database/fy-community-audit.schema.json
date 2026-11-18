@@ -9,6 +9,10 @@
   "properties": {
     "_id": {
       "bsonType": "string"
+    },
+    "targetUid": {
+      "bsonType": "string",
+      "description": "Verified account targeted by a governance action; absent for unscoped and legacy events."
     }
   }
 }

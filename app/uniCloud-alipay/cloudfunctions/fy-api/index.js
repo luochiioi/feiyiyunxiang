@@ -8,12 +8,12 @@ const {createRepository}=require('./repository')
 const {encrypt,decrypt,decodeImage,authenticate}=require('./security')
 const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCredentials } = require('./admin-session')
 const reviewActions = new Set(['communityReviewList', 'communityReviewDetail', 'communityReviewImage', 'communityReviewPost',
-  'communityReviewComment', 'communityResolveReport', 'communityMute', 'communityPolicy', 'communitySavePolicy'])
+  'communityReviewComment', 'communityResolveReport', 'communityMute', 'communityPolicy', 'communitySavePolicy', 'communitySeedPolicy'])
 const operationsActions = new Set(['communityOverview', 'communityUsers', 'communityUserDetail', 'communityAccountStatus'])
 const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions])
 const guestActions = new Set(['communityFeed', 'communityPost', 'communityImage', 'communityShare', 'communityComments'])
 const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment',
-  'communityReport', 'communityRanking', 'communityRemoveOwn'])
+  'communityReport', 'communityRanking', 'communityRemoveOwn', 'communityReviewNotices', 'communityReadReview'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
   'aomiaoStatus', 'claimAomiao', 'selectAomiao', 'explorationArchive',
   'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
