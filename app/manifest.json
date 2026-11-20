@@ -21,6 +21,9 @@
 		},
 		"usingComponents": true,
 		"permission": {
+			"scope.werun": {
+				"desc": "用于同步微信运动步数、展示每日里程碑和好友步数排行"
+			},
 			"scope.userLocation": {
 				"desc": "用于用户定位"
 			}

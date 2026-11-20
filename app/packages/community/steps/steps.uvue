@@ -1,0 +1,19 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="步数中心" :show-back="true" />
+    <view class="content"><StepPanel :visible="visible" :details="true" /></view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import StepPanel from '../components/StepPanel.uvue'
+const visible = ref(false)
+onShow(() => { visible.value = true })
+onHide(() => { visible.value = false })
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+</style>

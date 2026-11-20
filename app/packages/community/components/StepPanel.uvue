@@ -1,0 +1,130 @@
+<template>
+  <view class="step-panel">
+    <view class="card green">
+      <view class="row spread">
+        <text class="heading">今日好友步数榜</text>
+        <text v-if="status != null" class="muted">{{ status.date }}</text>
+      </view>
+      <view class="row step-total">
+        <text class="step-count">{{ status?.steps == null ? '—' : status.steps.toLocaleString() }}</text>
+        <view class="stack">
+          <text class="body">今日步数</text>
+          <text class="muted">{{ status?.syncedAt == null ? '等待微信运动同步' : '已同步 ' + clockText(status.syncedAt) }}</text>
+        </view>
+      </view>
+      <text v-if="session == null" class="body">微信登录后可同步步数，查看自己和好友的排名。</text>
+      <text v-if="message.length > 0" class="step-message" role="status">{{ message }}</text>
+      <button class="primary" :disabled="syncing" @click="sync">{{ syncing ? '正在同步…' : session == null ? '微信登录并同步步数' : '同步微信步数' }}</button>
+      <button v-if="message.length > 0 && session != null" class="secondary" :disabled="loading || syncing" @click="refresh">重新读取记录</button>
+      <template v-if="ranking != null">
+        <view v-for="row in visibleRanks" :key="row.mine ? 'me' : row.code" class="row spread divider">
+          <view class="row">
+            <text class="step-rank">{{ row.rank == null ? '—' : row.rank }}</text>
+            <text class="body">{{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text>
+          </view>
+          <text class="body">{{ row.steps == null ? '未同步' : row.steps.toLocaleString() + ' 步' }}</text>
+        </view>
+        <text class="muted">仅本人和已接受的好友可见，按今日已同步步数排名。</text>
+      </template>
+      <text v-if="loading" class="muted">正在读取记录…</text>
+      <button v-if="!details" class="secondary" @click="openPage(stepsPath)">历史与每日里程碑</button>
+    </view>
+    <template v-if="details && status != null">
+      <view class="card">
+        <text class="heading">每日里程碑</text>
+        <text class="body">{{ status.nextMilestone == null ? '今天的三个里程碑已全部达成。' : '距离下一里程碑还差 ' + (status.nextMilestone - (status.steps ?? 0)).toLocaleString() + ' 步' }}</text>
+        <view v-for="item in status.milestones" :key="item.threshold" class="milestone">
+          <view class="row spread"><text class="body">{{ item.threshold.toLocaleString() }} 步</text><text class="milestone-state">{{ item.reached ? '已达成' : '进行中' }}</text></view>
+          <view class="step-track"><view class="step-fill" :style="{ width: Math.min(100, (status.steps ?? 0) / item.threshold * 100) + '%' }" /></view>
+        </view>
+        <text class="muted">每天 00:00（澳门与内地时间）重新开始，每日最多记录 {{ status.dailyCap.toLocaleString() }} 步。</text>
+      </view>
+      <view class="card">
+        <view class="row spread"><text class="heading">最近 30 天</text><text class="muted">已同步的每日记录</text></view>
+        <text v-if="history == null" class="body">记录尚未加载，请重试。</text>
+        <view v-for="day in history?.days ?? []" :key="day.date" class="row spread divider">
+          <view class="stack"><text class="body">{{ day.date }}</text><text v-if="day.steps != null" class="muted">{{ day.milestones.filter(item => item.reached).length }} / 3 个里程碑</text></view>
+          <text class="body">{{ day.steps == null ? '未同步' : day.steps.toLocaleString() + ' 步' }}</text>
+        </view>
+      </view>
+    </template>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, ref, watch } from 'vue'
+import { session, login, api, secured } from '@/features/api.uts'
+import { openPage } from '@/features/navigation.uts'
+import { readWechatRunProof, stepError, stepsPath } from '@/features/steps.uts'
+import type { StepStatus, StepRanking, StepHistory } from '@/features/steps.uts'
+
+const props = defineProps<{ visible: boolean, details: boolean }>()
+const status = ref<StepStatus | null>(null)
+const ranking = ref<StepRanking | null>(null)
+const history = ref<StepHistory | null>(null)
+const message = ref(''), loading = ref(false), syncing = ref(false)
+let sequence = 0
+const visibleRanks = computed(() => props.details ? ranking.value?.rows ?? [] : (ranking.value?.rows ?? []).filter((row, index) => index < 3 || row.mine))
+
+function clear(): void {
+  sequence++
+  status.value = null; ranking.value = null; history.value = null; message.value = ''
+  loading.value = false
+}
+watch(() => session.value?.uid, () => {
+  clear()
+  if (props.visible && !syncing.value) refresh()
+})
+watch(() => props.visible, value => { if (value && !syncing.value) refresh() }, { immediate: true })
+
+function clockText(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString().slice(0, 5)
+}
+async function refresh(): Promise<void> {
+  if (session.value == null || syncing.value) return
+  const call = ++sequence, uid = session.value!.uid
+  loading.value = true; message.value = ''
+  try {
+    const tasks: Promise<void>[] = [
+      secured<StepStatus>('stepStatus').then(value => { if (call === sequence && session.value?.uid === uid) status.value = value }),
+      secured<StepRanking>('stepRanking').then(value => { if (call === sequence && session.value?.uid === uid) ranking.value = value })
+    ]
+    if (props.details) tasks.push(secured<StepHistory>('stepHistory').then(value => { if (call === sequence && session.value?.uid === uid) history.value = value }))
+    await Promise.all(tasks)
+  } catch (error) { if (call === sequence && session.value?.uid === uid) message.value = stepError(error) }
+  finally { if (call === sequence) loading.value = false }
+}
+async function sync(): Promise<void> {
+  if (syncing.value) return
+  sequence++; syncing.value = true; loading.value = false; message.value = ''
+  let uid = session.value?.uid
+  let updated = false
+  try {
+    if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
+    if (uid != null && uid !== session.value?.uid) return
+    uid = session.value!.uid
+    const proof = await readWechatRunProof()
+    if (session.value?.uid !== uid) return
+    // A login code is single-use. A retry reads a fresh WeRun proof.
+    const value = await api<StepStatus>('stepSync', proof)
+    if (session.value?.uid !== uid) return
+    status.value = value; updated = true
+  } catch (error) {
+    if (uid == null || session.value?.uid === uid) message.value = stepError(error)
+  } finally { syncing.value = false }
+  if (updated) await refresh()
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.step-panel { display: flex; flex-direction: column; gap: 13px; }
+.step-total { align-items: center; padding: 6px 0; }
+.step-count { font-size: 40px; line-height: 1.2; font-weight: 700; color: #2c4d31; }
+.step-rank { min-width: 24px; font-size: 16px; font-weight: 700; color: #426240; }
+.step-message { color: #854526; font-size: 14px; line-height: 1.5; }
+.milestone { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.milestone-state { font-size: 13px; color: #426240; }
+.step-track { height: 8px; border-radius: 4px; background: #e5e9dc; overflow: hidden; }
+.step-fill { height: 100%; background: #52704a; border-radius: 4px; }
+</style>

@@ -210,3 +210,19 @@ test('community distinguishes a missing staging collection from an object storag
   assert.equal(blocked.counts().uploads, 1)
   assert.equal([...blocked.rows.keys()].some(key => key.startsWith('fy-community-uploads')), false)
 })
+
+test('step gateway authenticates all reads and never accepts a client-reported total', async () => {
+  const g = gateway()
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: [] })
+  for (const action of ['stepStatus', 'stepHistory', 'stepRanking', 'stepSync']) {
+    assert.equal((await g.main({ action, payload: { uid: 'member', steps: 50000 } })).code, 'AUTH_REQUIRED')
+    assert.equal((await g.main({ action, token: 'fy_admin_spoof', payload: {} })).code, 'AUTH_REQUIRED')
+  }
+  const before = await g.main({ action: 'stepStatus', token: 'fixture-token', payload: { uid: 'other' } })
+  assert.equal(before.code, 'OK')
+  assert.equal(before.data.steps, null)
+  const forged = await g.main({ action: 'stepSync', token: 'fixture-token', payload: { steps: 50000 } })
+  assert.equal(forged.code, 'INVALID_WERUN_PROOF')
+  assert.equal(g.counts().exchanges, 0)
+  assert.equal([...g.rows.keys()].filter(key => key.startsWith('fy-daily-steps')).length, 0)
+})
