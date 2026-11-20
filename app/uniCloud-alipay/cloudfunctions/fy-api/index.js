@@ -1,5 +1,8 @@
 const crypto=require('node:crypto')
 const {createService,key}=require('./service')
+const { createStepService } = require('./step-service')
+const { verifyWechatRun } = require('./wechat-run')
+const stepActions = new Set(['stepStatus', 'stepSync', 'stepHistory', 'stepRanking'])
 const {createPartnershipService}=require('./partnership-service')
 const {createCommunityService}=require('./community-service')
 const {createCommunityMedia}=require('./community-media')
@@ -23,6 +26,7 @@ const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts'
   'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'pkEggs', 'chooseEgg', 'cancelPk', 'assignment', 'completeAssignment', 'rejectAssignment'])
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','CLUE_LOCKED','CLUE_INCORRECT','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
 known.add('APPEARANCE_LOCKED')
+for (const code of ['WERUN_SESSION_FAILED', 'WERUN_ACCOUNT_MISMATCH', 'WERUN_DAY_CHANGED']) known.add(code)
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -104,6 +108,11 @@ exports.main=async(event,context)=>{
       const {fileContent}=await uniCloud.downloadFile({fileID:media.fileID})
       if (!Buffer.isBuffer(fileContent) || fileContent.length < 28) throw new Error('SERVICE_UNAVAILABLE')
       data={src:'data:'+media.mime+';base64,'+decrypt(fileContent,mediaKey).toString('base64')}
+    } else if (stepActions.has(action)) {
+      if (action === 'stepSync') await limited('werun:' + user.uid, 10)
+      data = await createStepService({ repo, verify: payload => verifyWechatRun(payload, {
+        http: uniCloud.httpclient, appId: cfg.wechatAppId, secret: cfg.wechatSecret
+      }) })[action](user, p)
     } else if (operationsActions.has(action)) {
       data = await createCommunityOperations({ repo })[action](user, p)
     } else if (communityActions.has(action)) {

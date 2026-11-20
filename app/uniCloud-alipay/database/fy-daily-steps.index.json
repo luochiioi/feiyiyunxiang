@@ -1,0 +1,18 @@
+[
+  {
+    "IndexName": "uid_date",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "uid",
+          "Direction": "1"
+        },
+        {
+          "Name": "date",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": true
+    }
+  }
+]

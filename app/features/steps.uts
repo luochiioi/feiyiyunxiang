@@ -1,0 +1,67 @@
+export type StepMilestone = { threshold: number, reached: boolean, reachedAt: number | null }
+export type StepStatus = { date: string, steps: number | null, syncedAt: number | null, milestones: StepMilestone[], nextMilestone: number | null, dailyCap: number }
+export type StepRank = { code: string, nickname: string, mine: boolean, steps: number | null, syncedAt: number | null, rank: number | null }
+export type StepRanking = { date: string, rows: StepRank[] }
+export type StepHistory = { date: string, days: StepStatus[] }
+export const stepsPath = '/packages/community/steps/steps'
+
+export function stepError(error: any): string {
+  const code = (error as Error).message
+  if (code === 'AUTH_REQUIRED' || code === 'LOGIN_FAILED') return '请重新登录微信后同步步数。'
+  if (code === 'CONFIG_REQUIRED') return '微信步数服务暂未配置，请稍后重试。'
+  if (code === 'INVALID_WERUN_PROOF' || code === 'WERUN_SESSION_FAILED') return '微信步数凭证已失效，请再次点击同步。'
+  if (code === 'WERUN_ACCOUNT_MISMATCH') return '读取步数的微信与登录账号不一致，请重新登录。'
+  if (code === 'WERUN_DAY_CHANGED') return '日期已更新，请再次同步今天的步数。'
+  if (code === 'RATE_LIMITED') return '同步较频繁，请稍后重试。'
+  if (code === 'WERUN_PERMISSION_DENIED') return '微信运动权限未开启，点击同步后可前往设置。'
+  if (code === 'WERUN_PRIVACY_DENIED') return '同意微信隐私指引后，可再次同步步数。'
+  if (code === 'WERUN_UNSUPPORTED') return '请使用支持微信运动的手机微信同步。'
+  if (code === 'WERUN_READ_FAILED') return '读取步数失败，请确认已开启微信运动，并在手机微信重试。'
+  return '步数暂时无法读取，请检查网络后重试。'
+}
+
+export async function readWechatRunProof(): Promise<UTSJSONObject> {
+  // #ifdef MP-WEIXIN
+  if (typeof wx.getWeRunData !== 'function' || typeof wx.requirePrivacyAuthorize !== 'function') {
+    throw new Error('WERUN_UNSUPPORTED')
+  }
+  await new Promise<void>((resolve, reject) => {
+    wx.requirePrivacyAuthorize({ success: () => resolve(), fail: () => reject(new Error('WERUN_PRIVACY_DENIED')) })
+  })
+  const settings = await new Promise<UTSJSONObject>((resolve, reject) => {
+    wx.getSetting({ success: result => resolve(result.authSetting), fail: () => reject(new Error('WERUN_PERMISSION_DENIED')) })
+  })
+  if (settings['scope.werun'] === false) {
+    const agreed = await new Promise<boolean>(resolve => {
+      uni.showModal({
+        title: '开启微信运动权限', content: '允许后可同步今日步数并参与好友步数排行。',
+        confirmText: '去设置', success: result => resolve(result.confirm), fail: () => resolve(false)
+      })
+    })
+    if (!agreed) throw new Error('WERUN_PERMISSION_DENIED')
+    await new Promise<void>((resolve, reject) => {
+      wx.openSetting({
+        success: result => result.authSetting['scope.werun'] === true ? resolve() : reject(new Error('WERUN_PERMISSION_DENIED')),
+        fail: () => reject(new Error('WERUN_PERMISSION_DENIED'))
+      })
+    })
+  } else if (settings['scope.werun'] !== true) {
+    await new Promise<void>((resolve, reject) => {
+      wx.authorize({ scope: 'scope.werun', success: () => resolve(), fail: () => reject(new Error('WERUN_PERMISSION_DENIED')) })
+    })
+  }
+  const code = await new Promise<string>((resolve, reject) => {
+    wx.login({ success: result => resolve(result.code), fail: () => reject(new Error('WERUN_READ_FAILED')) })
+  })
+  const proof = await new Promise<UTSJSONObject>((resolve, reject) => {
+    wx.getWeRunData({
+      success: result => resolve({ code, encryptedData: result.encryptedData, iv: result.iv }),
+      fail: () => reject(new Error('WERUN_READ_FAILED'))
+    })
+  })
+  return proof
+  // #endif
+  // #ifndef MP-WEIXIN
+  throw new Error('WERUN_UNSUPPORTED')
+  // #endif
+}

@@ -2,6 +2,7 @@
   <view class="screen">
     <AppPageHeader :title="tab === 'mine' ? '我的帖子' : '社区'" :show-back="true" />
     <view class="content">
+      <StepPanel :visible="visible" :details="false" />
       <view class="row filters">
         <button class="secondary" :class="{ active: tab === 'latest' }" @click="select('latest')">最新</button>
         <button class="secondary" :class="{ active: tab === 'friends' }" @click="select('friends')">好友</button>
@@ -38,6 +39,7 @@
 import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PostCard from '../components/PostCard.uvue'
+import StepPanel from '../components/StepPanel.uvue'
 import { secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
 import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
