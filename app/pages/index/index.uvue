@@ -5,15 +5,18 @@
     <view class="home-header" :style="{ top: statusBar + 7 + 'px' }">
       <text class="home-title">{{ route == null ? '非遗云享' : route.name }}</text>
       <text class="home-caption">{{ demoEnabled ? '开发演示 · ' : '' }}{{ route == null ? (nodes.length > 0 ? '点图钉查看打卡点' : '从路线开始探索') : route.region + ' · 博物馆探索' }}</text>
+      <!-- #ifdef MP-WEIXIN -->
+      <button class="home-steps" @click="openPage(stepsPath)">{{ todaySteps == null ? '今日步数 · 去同步' : '今日步数 · ' + todaySteps.toLocaleString() + ' 步' }}</button>
+      <!-- #endif -->
       <view v-if="route != null" class="route-controls">
         <button class="route-control" @click="openPage('/packages/routes/routes/routes')">切换路线</button>
         <button class="route-control" @click="clearRoute">退出路线</button>
       </view>
     </view>
-    <view class="map-rail left" :style="{ top: statusBar + (route == null ? 75 : 118) + 'px', bottom: railBottom }">
+    <view class="map-rail left" :style="{ top: statusBar + stepsHeaderHeight + (route == null ? 75 : 118) + 'px', bottom: railBottom }">
       <MapSideActions side="left" @navigate="openPage" />
     </view>
-    <view class="map-rail right" :style="{ top: statusBar + (route == null ? 75 : 118) + 'px', bottom: railBottom }">
+    <view class="map-rail right" :style="{ top: statusBar + stepsHeaderHeight + (route == null ? 75 : 118) + 'px', bottom: railBottom }">
       <MapSideActions side="right" @navigate="openPage" @zoom="zoom" @locate="locate" />
     </view>
     <view v-if="selectedNode != null" class="home-bottom node-panel">
@@ -45,6 +48,13 @@ import { mapState, dispatchMapEvent } from '@/features/exploration/map-store.uts
 import type { MapPosition, MapViewport } from '@/features/exploration/types.uts'
 import { openCheckin, openPage } from '@/features/navigation.uts'
 
+// #ifdef MP-WEIXIN
+import { api, session } from '@/features/api.uts'
+import { stepsPath } from '@/features/steps.uts'
+import type { StepStatus } from '@/features/steps.uts'
+import { syncWechatSteps } from '@/features/step-sync.uts'
+// #endif
+
 const statusBar = uni.getWindowInfo().statusBarHeight ?? 0
 const route = computed(() => findRoute(mapState.value.routeId))
 const nodes = computed(() => listNodes(mapState.value.routeId))
@@ -54,6 +64,40 @@ const railBottom = computed(() => 'calc(' + (selectedNode.value != null ? 180 : 
 const commandedViewport = shallowRef<MapViewport>(mapState.value.viewport)
 const currentLocation = shallowRef<MapPosition | null>(null)
 const locating = ref(false)
+// #ifdef MP-WEIXIN
+const stepsHeaderHeight = 49
+const todaySteps = ref<number | null>(null)
+let homeVisible = false
+let stepRequest = 0
+
+onShow(() => { homeVisible = true; refreshTodaySteps() })
+onHide(() => { homeVisible = false; stepRequest++ })
+watch(() => session.value?.uid, () => {
+  todaySteps.value = null
+  if (homeVisible) refreshTodaySteps()
+})
+
+async function refreshTodaySteps(): Promise<void> {
+  const call = ++stepRequest
+  const account = session.value
+  if (account == null) {
+    todaySteps.value = null
+    return
+  }
+  try {
+    let status: StepStatus | null = null
+    try { status = await syncWechatSteps(account.uid, true, () => homeVisible) } catch (_) {}
+    if (!homeVisible || call !== stepRequest || session.value?.uid !== account.uid) return
+    status = status ?? await api<StepStatus>('stepStatus')
+    if (homeVisible && call === stepRequest && session.value?.uid === account.uid) todaySteps.value = status.steps
+  } catch (_) {
+    if (call === stepRequest) todaySteps.value = null
+  }
+}
+// #endif
+// #ifndef MP-WEIXIN
+const stepsHeaderHeight = 0
+// #endif
 onShow(async () => {
   await refreshCatalog()
   const selected = mapState.value.routeId
@@ -115,6 +159,8 @@ function closeNode(): void {
 .home-header { position: absolute; left: 13px; z-index: 2; display: flex; flex-direction: column; padding: 8px 13px; border-radius: 22px; background: #fffffa; box-shadow: 0 3px 9px #2f30251a; }
 .home-title { font-size: 14px; font-weight: 700; color: #372b1e; }
 .home-caption { margin-top: 3px; font-size: 10px; color: #5d644e; }
+.home-steps { margin: 5px 0 0; min-height: 44px; padding: 0 10px; line-height: 44px; border-radius: 13px; background: #edf0e1; color: #354d35; font-size: 13px; font-weight: 700; }
+.home-steps::after { border: 0; }
 .route-controls { display: flex; flex-direction: row; gap: 8px; margin-top: 6px; }
 .route-control { margin: 0; padding: 0 8px; border-radius: 12px; background: #edf0e1; color: #42563a; font-size: 11px; line-height: 24px; }
 .route-control::after { border: 0; }

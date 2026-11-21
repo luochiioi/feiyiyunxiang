@@ -5,6 +5,23 @@ export type StepRanking = { date: string, rows: StepRank[] }
 export type StepHistory = { date: string, days: StepStatus[] }
 export const stepsPath = '/packages/community/steps/steps'
 
+const lastStepSync = new Map<string, number>()
+const STEP_SYNC_INTERVAL = 60000
+const preferenceKey = (uid: string): string => 'fy-step-auto-sync:' + uid
+
+export function stepAutoSyncEnabled(uid: string): boolean {
+  return uid.length > 0 && uni.getStorageSync(preferenceKey(uid)) === true
+}
+export function setStepAutoSync(uid: string, enabled: boolean): void {
+  uni.setStorageSync(preferenceKey(uid), enabled)
+}
+export function stepSyncDue(uid: string, now: number = Date.now()): boolean {
+  return stepAutoSyncEnabled(uid) && now - (lastStepSync.get(uid) ?? -STEP_SYNC_INTERVAL) >= STEP_SYNC_INTERVAL
+}
+export function noteStepSyncAttempt(uid: string, now: number = Date.now()): void {
+  lastStepSync.set(uid, now)
+}
+
 export function stepError(error: any): string {
   const code = (error as Error).message
   if (code === 'AUTH_REQUIRED' || code === 'LOGIN_FAILED') return '请重新登录微信后同步步数。'
@@ -21,17 +38,28 @@ export function stepError(error: any): string {
   return '步数暂时无法读取，请检查网络后重试。'
 }
 
-export async function readWechatRunProof(): Promise<UTSJSONObject> {
+export async function readWechatRunProof(automatic: boolean = false): Promise<UTSJSONObject> {
   // #ifdef MP-WEIXIN
   if (typeof wx.getWeRunData !== 'function' || typeof wx.requirePrivacyAuthorize !== 'function') {
     throw new Error('WERUN_UNSUPPORTED')
   }
-  await new Promise<void>((resolve, reject) => {
-    wx.requirePrivacyAuthorize({ success: () => resolve(), fail: () => reject(new Error('WERUN_PRIVACY_DENIED')) })
-  })
+  if (automatic) {
+    if (typeof wx.getPrivacySetting !== 'function') throw new Error('WERUN_UNSUPPORTED')
+    await new Promise<void>((resolve, reject) => {
+      wx.getPrivacySetting({
+        success: result => result.needAuthorization === false ? resolve() : reject(new Error('WERUN_PRIVACY_DENIED')),
+        fail: () => reject(new Error('WERUN_PRIVACY_DENIED'))
+      })
+    })
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      wx.requirePrivacyAuthorize({ success: () => resolve(), fail: () => reject(new Error('WERUN_PRIVACY_DENIED')) })
+    })
+  }
   const settings = await new Promise<UTSJSONObject>((resolve, reject) => {
     wx.getSetting({ success: result => resolve(result.authSetting), fail: () => reject(new Error('WERUN_PERMISSION_DENIED')) })
   })
+  if (automatic && settings['scope.werun'] !== true) throw new Error('WERUN_PERMISSION_DENIED')
   if (settings['scope.werun'] === false) {
     const agreed = await new Promise<boolean>(resolve => {
       uni.showModal({
