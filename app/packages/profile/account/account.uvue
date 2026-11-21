@@ -82,7 +82,9 @@ async function signIn(): Promise<void> {
     await login()
     uni.showToast({ title: '微信登录成功', icon: 'success' })
   } catch (e) {
-    const message = (e as Error).message === 'CONFIG_REQUIRED' ? '微信登录尚未配置' : '微信登录未完成，请重试'
+    const code = (e as Error).message
+    const message = code === 'CONFIG_REQUIRED' || code === 'WECHAT_LOGIN_CONFIG'
+      ? '微信登录服务配置异常，请联系维护人员' : '微信登录未完成，请重试'
     uni.showToast({ title: message, icon: 'none' })
   } finally { busy.value = false }
   if (session.value != null) { await loadAomiao(); await refreshReviewNotices() }

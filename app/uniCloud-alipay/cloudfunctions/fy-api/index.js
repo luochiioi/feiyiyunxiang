@@ -2,6 +2,7 @@ const crypto=require('node:crypto')
 const {createService,key}=require('./service')
 const { createStepService } = require('./step-service')
 const { verifyWechatRun } = require('./wechat-run')
+const { exchangeWechatSession } = require('./wechat-session')
 const stepActions = new Set(['stepStatus', 'stepSync', 'stepHistory', 'stepRanking'])
 const {createPartnershipService}=require('./partnership-service')
 const {createCommunityService}=require('./community-service')
@@ -26,7 +27,7 @@ const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts'
   'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'pkEggs', 'chooseEgg', 'cancelPk', 'assignment', 'completeAssignment', 'rejectAssignment'])
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','CLUE_LOCKED','CLUE_INCORRECT','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
 known.add('APPEARANCE_LOCKED')
-for (const code of ['WERUN_SESSION_FAILED', 'WERUN_ACCOUNT_MISMATCH', 'WERUN_DAY_CHANGED']) known.add(code)
+for (const code of ['WERUN_SESSION_FAILED', 'WERUN_ACCOUNT_MISMATCH', 'WERUN_DAY_CHANGED', 'WECHAT_LOGIN_CONFIG']) known.add(code)
 exports.main=async(event,context)=>{
   try {
     const db=uniCloud.database(), repo=createRepository(db)
@@ -58,11 +59,9 @@ exports.main=async(event,context)=>{
     else if(action==='wxLogin') {
       await limited('wx:'+context.CLIENTIP,20)
       if(typeof p.code!=='string'||p.code.length>256||!p.code)throw new Error('LOGIN_FAILED')
-      if(!cfg.wechatSecret)throw new Error('CONFIG_REQUIRED')
-      const result=await uniCloud.httpclient.request('https://api.weixin.qq.com/sns/jscode2session',{method:'GET',data:{appid:cfg.wechatAppId,secret:cfg.wechatSecret,js_code:p.code,grant_type:'authorization_code'},dataType:'json',timeout:10000})
-      // session_key deliberately never persisted or returned.
-      if(result.data?.errcode||typeof result.data?.openid!=='string')throw new Error('LOGIN_FAILED')
-      const uid=key(cfg.wechatAppId,result.data.openid)
+      const { openid } = await exchangeWechatSession({ http: uniCloud.httpclient, appId: cfg.wechatAppId,
+        secret: cfg.wechatSecret, code: p.code, rejectedCode: 'LOGIN_FAILED' })
+      const uid=key(cfg.wechatAppId,openid)
       await repo.tx(async t=>{if(!await t.get('uni-id-users',uid))await t.put('uni-id-users',uid,{role:[],token:[],status:0,dcloud_appid:[context.APPID],register_date:Date.now()})})
       const account=await repo.get('uni-id-users',uid)
       if(account.status!==0)throw new Error(account.status===1?'ACCOUNT_DISABLED':'LOGIN_FAILED')

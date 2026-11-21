@@ -3,11 +3,11 @@ const assert=require('node:assert/strict')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{createRequire}=require('node:module')
 const entry=path.resolve(__dirname,'../uniCloud-alipay/cloudfunctions/fy-api/index.js')
 const nativeRequire=createRequire(entry)
-function gateway({configured=true,validCode=true,privateStorageVerified=false,storage=null,missingCollection=null}={}) {
+function gateway({configured=true,validCode=true,wechatError=40029,privateStorageVerified=false,storage=null,missingCollection=null}={}) {
  const rows=new Map()
  const db={collection(c){if(c===missingCollection)throw new Error('collection does not exist');return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([k,v])=>({...v,_id:k.slice(c.length)}))}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
  let exchanges=0,uploads=0
- const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:40029}}}},async uploadFile(args){uploads++;assert.ok(storage,'unexpected upload');return storage.uploadFile(args)},async downloadFile(args){assert.ok(storage,'unexpected download');return storage.downloadFile(args)}}
+ const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {status:200,data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:wechatError}}}},async uploadFile(args){uploads++;assert.ok(storage,'unexpected upload');return storage.uploadFile(args)},async downloadFile(args){assert.ok(storage,'unexpected download');return storage.downloadFile(args)}}
  const identity={async checkToken(token){return token==='fixture-token'?{uid:'member',errCode:0}:{errCode:'expired'}},async createToken({uid}){return {errCode:0,token:'issued-token',tokenExpired:1000,uid}}}
  const sandbox={exports:{},uniCloud:cloud,Buffer,__dirname:path.dirname(entry),require(name){if(name==='uni-config-center')return ()=>({config:()=>configured?{wechatAppId:'public-appid',wechatSecret:'server-fixture-secret',identity:{tokenSecret:'fixture-token-secret'},environment:'development',privateStorageVerified,mediaEncryptionKey:Buffer.alloc(32,7).toString('base64')}:null});if(name==='uni-id-common')return {createInstance:()=>identity};return nativeRequire(name)}}
  vm.runInNewContext(fs.readFileSync(entry,'utf8'),sandbox,{filename:entry})
@@ -15,6 +15,13 @@ function gateway({configured=true,validCode=true,privateStorageVerified=false,st
 }
 test('gateway exchanges WeChat code on server and never returns session_key or secret',async()=>{const g=gateway();const r=await g.main({action:'wxLogin',payload:{code:'wx-code'}});assert.equal(r.code,'OK');assert.equal(r.data.token,'issued-token');assert.equal(g.counts().exchanges,1);assert.doesNotMatch(JSON.stringify(r),/never-return|server-fixture|openid/);})
 test('gateway rejects invalid code and missing configuration without pretending login',async()=>{assert.equal((await gateway({validCode:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'LOGIN_FAILED');assert.equal((await gateway({configured:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'CONFIG_REQUIRED');})
+test('gateway identifies rejected WeChat app credentials without creating an account', async () => {
+  const g = gateway({ validCode: false, wechatError: 40125 })
+  const reply = await g.main({ action: 'wxLogin', payload: { code: 'wx-code' } })
+  assert.equal(reply.code, 'WECHAT_LOGIN_CONFIG')
+  assert.equal(reply.data, null)
+  assert.equal([...g.rows.keys()].some(key => key.startsWith('uni-id-users')), false)
+})
 test('gateway ignores submitted uid/admin and denies ordinary member operations',async()=>{const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]});for(const action of ['drafts','saveDraft','previewDraft','publish'])assert.equal((await g.main({action,token:'fixture-token',uid:'administrator',admin:true,payload:{}})).code,'AUTH_REQUIRED');assert.equal((await g.main({action:'diary',token:'expired',uid:'member'})).code,'AUTH_REQUIRED');})
 test('only a member session can claim or select Aomiao or read their archive', async () => {
   const g = gateway()
