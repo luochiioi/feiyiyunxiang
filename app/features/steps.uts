@@ -8,6 +8,7 @@ export const stepsPath = '/packages/community/steps/steps'
 export function stepError(error: any): string {
   const code = (error as Error).message
   if (code === 'AUTH_REQUIRED' || code === 'LOGIN_FAILED') return '请重新登录微信后同步步数。'
+  if (code === 'WECHAT_LOGIN_CONFIG') return '微信登录服务配置异常，请联系维护人员。'
   if (code === 'CONFIG_REQUIRED') return '微信步数服务暂未配置，请稍后重试。'
   if (code === 'INVALID_WERUN_PROOF' || code === 'WERUN_SESSION_FAILED') return '微信步数凭证已失效，请再次点击同步。'
   if (code === 'WERUN_ACCOUNT_MISMATCH') return '读取步数的微信与登录账号不一致，请重新登录。'

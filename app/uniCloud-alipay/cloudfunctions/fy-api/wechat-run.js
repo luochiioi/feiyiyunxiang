@@ -1,4 +1,5 @@
 const { createDecipheriv, createHash } = require('node:crypto')
+const { exchangeWechatSession } = require('./wechat-session')
 
 // Reused from app_dev's activity-economy WeRun adapter.
 const DAY_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -33,23 +34,11 @@ function decodeTodaySteps({ encryptedData, iv, sessionKey, appId, now }) {
   } catch (_) { throw new Error('INVALID_WERUN_PROOF') }
 }
 async function verifyWechatRun(data, { http, appId, secret, now = Date.now() }) {
-  if (!appId || !secret) throw new Error('CONFIG_REQUIRED')
   const { code, encryptedData, iv } = data ?? {}
   if (typeof code !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(code) ||
       typeof encryptedData !== 'string' || encryptedData.length < 24 || encryptedData.length > 8192 ||
       typeof iv !== 'string' || iv.length !== 24) throw new Error('INVALID_WERUN_PROOF')
-  let session
-  try {
-    const response = await http.request('https://api.weixin.qq.com/sns/jscode2session', {
-      method: 'GET', dataType: 'json', timeout: 10000,
-      data: { appid: appId, secret, js_code: code, grant_type: 'authorization_code' }
-    })
-    session = response.data
-    if (response.status !== 200 || !session || session.errcode ||
-        typeof session.openid !== 'string' || !session.openid || typeof session.session_key !== 'string') {
-      throw new Error('WERUN_SESSION_FAILED')
-    }
-  } catch (_) { throw new Error('WERUN_SESSION_FAILED') }
+  const session = await exchangeWechatSession({ http, appId, secret, code, rejectedCode: 'WERUN_SESSION_FAILED' })
   const daily = decodeTodaySteps({ encryptedData, iv, sessionKey: session.session_key, appId, now })
   const uid = createHash('sha256').update(JSON.stringify([appId, session.openid])).digest('hex')
   return { ...daily, uid }

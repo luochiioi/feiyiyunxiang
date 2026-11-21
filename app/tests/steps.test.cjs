@@ -82,7 +82,7 @@ test('WeRun exchanges code server-side and only returns verified steps and deriv
   const verified = await verifyWechatRun(payload, { http, now, appId: proof.appId, secret: 'server-only-secret' })
   assert.deepEqual(verified, { date: activityDate(now), steps: 12345, uid: key(proof.appId, 'real-openid') })
   assert.doesNotMatch(JSON.stringify(verified), /secret|openid|session_key|encryptedData/)
-  await assert.rejects(verifyWechatRun(payload, { http, appId: proof.appId }), /CONFIG_REQUIRED/)
+  await assert.rejects(verifyWechatRun(payload, { http, appId: proof.appId }), /WECHAT_LOGIN_CONFIG/)
   await assert.rejects(verifyWechatRun({ code: 'fake' }, { http, now, appId: proof.appId, secret: 'x' }), /INVALID_WERUN_PROOF/)
   await assert.rejects(verifyWechatRun(payload, { http: { request: async () => ({ status: 200, data: { errcode: 40029 } }) },
     now, appId: proof.appId, secret: 'x' }), /WERUN_SESSION_FAILED/)
