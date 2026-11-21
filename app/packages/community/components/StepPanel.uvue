@@ -14,8 +14,12 @@
       </view>
       <text v-if="session == null" class="body">微信登录后可同步步数，查看自己和好友的排名。</text>
       <text v-if="message.length > 0" class="step-message" role="status">{{ message }}</text>
-      <button class="primary" :disabled="syncing" @click="sync">{{ syncing ? '正在同步…' : session == null ? '微信登录并同步步数' : '同步微信步数' }}</button>
-      <button v-if="message.length > 0 && session != null" class="secondary" :disabled="loading || syncing" @click="refresh">重新读取记录</button>
+      <button class="primary" :disabled="syncing" @click="sync(false)">{{ syncing ? '正在同步…' : session == null ? '微信登录并同步步数' : '同步微信步数' }}</button>
+      <button v-if="message.length > 0 && session != null" class="secondary" :disabled="loading || syncing" @click="refresh()">重新读取记录</button>
+      <template v-if="details && session != null">
+        <button class="secondary step-preference" :disabled="syncing" @click="toggleAutoSync">{{ autoEnabled ? '关闭自动同步' : '开启自动同步' }}</button>
+        <text class="muted">{{ autoEnabled ? '自动同步已开启，打开首页、社区或步数中心时更新今天的步数。' : '开启后，打开首页、社区或步数中心会同步今天的步数，已接受的好友可在榜单查看。' }}</text>
+      </template>
       <template v-if="ranking != null">
         <view v-for="row in visibleRanks" :key="row.mine ? 'me' : row.code" class="row spread divider">
           <view class="row">
@@ -53,16 +57,17 @@
 
 <script setup lang="uts">
 import { computed, ref, watch } from 'vue'
-import { session, login, api, secured } from '@/features/api.uts'
+import { session, login, secured } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
-import { readWechatRunProof, stepError, stepsPath } from '@/features/steps.uts'
+import { stepError, stepsPath, stepAutoSyncEnabled, setStepAutoSync } from '@/features/steps.uts'
+import { syncWechatSteps } from '@/features/step-sync.uts'
 import type { StepStatus, StepRanking, StepHistory } from '@/features/steps.uts'
 
 const props = defineProps<{ visible: boolean, details: boolean }>()
 const status = ref<StepStatus | null>(null)
 const ranking = ref<StepRanking | null>(null)
 const history = ref<StepHistory | null>(null)
-const message = ref(''), loading = ref(false), syncing = ref(false)
+const message = ref(''), loading = ref(false), syncing = ref(false), autoEnabled = ref(false)
 let sequence = 0
 const visibleRanks = computed(() => props.details ? ranking.value?.rows ?? [] : (ranking.value?.rows ?? []).filter((row, index) => index < 3 || row.mine))
 
@@ -73,17 +78,37 @@ function clear(): void {
 }
 watch(() => session.value?.uid, () => {
   clear()
-  if (props.visible && !syncing.value) refresh()
+  autoEnabled.value = false
+  if (props.visible) refreshVisible()
 })
-watch(() => props.visible, value => { if (value && !syncing.value) refresh() }, { immediate: true })
+watch(() => props.visible, value => { if (value) refreshVisible() }, { immediate: true })
+
+function refreshVisible(): void {
+  const account = session.value
+  autoEnabled.value = account != null && stepAutoSyncEnabled(account.uid)
+  if (syncing.value) return
+  if (account != null && autoEnabled.value) sync(true)
+  else refresh()
+}
+function toggleAutoSync(): void {
+  const uid = session.value?.uid
+  if (uid == null || syncing.value) return
+  if (!autoEnabled.value) {
+    sync(false, true)
+    return
+  }
+  setStepAutoSync(uid, false)
+  autoEnabled.value = false
+}
 
 function clockText(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString().slice(0, 5)
 }
-async function refresh(): Promise<void> {
+async function refresh(preserveMessage: boolean = false): Promise<void> {
   if (session.value == null || syncing.value) return
   const call = ++sequence, uid = session.value!.uid
-  loading.value = true; message.value = ''
+  loading.value = true
+  if (!preserveMessage) message.value = ''
   try {
     const tasks: Promise<void>[] = [
       secured<StepStatus>('stepStatus').then(value => { if (call === sequence && session.value?.uid === uid) status.value = value }),
@@ -91,28 +116,31 @@ async function refresh(): Promise<void> {
     ]
     if (props.details) tasks.push(secured<StepHistory>('stepHistory').then(value => { if (call === sequence && session.value?.uid === uid) history.value = value }))
     await Promise.all(tasks)
-  } catch (error) { if (call === sequence && session.value?.uid === uid) message.value = stepError(error) }
+  } catch (error) { if (call === sequence && session.value?.uid === uid && !preserveMessage) message.value = stepError(error) }
   finally { if (call === sequence) loading.value = false }
 }
-async function sync(): Promise<void> {
+async function sync(automatic: boolean, enableAuto: boolean = false): Promise<void> {
   if (syncing.value) return
   sequence++; syncing.value = true; loading.value = false; message.value = ''
   let uid = session.value?.uid
   let updated = false
   try {
-    if (session.value == null || session.value!.expiresAt <= Date.now()) await login()
+    if (!automatic && (session.value == null || session.value!.expiresAt <= Date.now())) await login()
     if (uid != null && uid !== session.value?.uid) return
     uid = session.value!.uid
-    const proof = await readWechatRunProof()
+    const value = await syncWechatSteps(uid!, automatic, () => props.visible)
     if (session.value?.uid !== uid) return
-    // A login code is single-use. A retry reads a fresh WeRun proof.
-    const value = await api<StepStatus>('stepSync', proof)
-    if (session.value?.uid !== uid) return
-    status.value = value; updated = true
+    if (value != null) {
+      status.value = value; updated = true
+      if (enableAuto) {
+        setStepAutoSync(uid!, true)
+        autoEnabled.value = true
+      }
+    }
   } catch (error) {
     if (uid == null || session.value?.uid === uid) message.value = stepError(error)
   } finally { syncing.value = false }
-  if (updated) await refresh()
+  if (updated || (automatic && props.visible)) await refresh(message.value.length > 0)
 }
 </script>
 
@@ -122,6 +150,7 @@ async function sync(): Promise<void> {
 .step-total { align-items: center; padding: 6px 0; }
 .step-count { font-size: 40px; line-height: 1.2; font-weight: 700; color: #2c4d31; }
 .step-rank { min-width: 24px; font-size: 16px; font-weight: 700; color: #426240; }
+.step-preference { min-height: 44px; }
 .step-message { color: #854526; font-size: 14px; line-height: 1.5; }
 .milestone { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .milestone-state { font-size: 13px; color: #426240; }

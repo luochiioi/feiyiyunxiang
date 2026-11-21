@@ -1,0 +1,29 @@
+import { api, login, session } from './api.uts'
+import { readWechatRunProof, stepAutoSyncEnabled, stepSyncDue, noteStepSyncAttempt } from './steps.uts'
+import type { StepStatus } from './steps.uts'
+
+let pending: Promise<StepStatus | null> | null = null
+let owner = ''
+
+export async function syncWechatSteps(uid: string, automatic: boolean, visible: () => boolean): Promise<StepStatus | null> {
+  if (session.value?.uid !== uid) return null
+  if (pending != null) return owner === uid ? pending! : null
+  if (automatic && (!visible() || !stepSyncDue(uid))) return null
+
+  noteStepSyncAttempt(uid)
+  owner = uid
+  const run = async (): Promise<StepStatus | null> => {
+    const account = session.value
+    if (account == null || account.uid !== uid) return null
+    if (account.expiresAt <= Date.now()) {
+      await login()
+      if (session.value?.uid !== uid || (automatic && (!visible() || !stepAutoSyncEnabled(uid)))) return null
+    }
+    const proof = await readWechatRunProof(automatic)
+    if (session.value?.uid !== uid || (automatic && (!visible() || !stepAutoSyncEnabled(uid)))) return null
+    return api<StepStatus>('stepSync', proof)
+  }
+  pending = run()
+  try { return await pending! }
+  finally { pending = null; owner = '' }
+}
