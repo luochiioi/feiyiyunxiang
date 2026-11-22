@@ -10,7 +10,7 @@
           <text v-if="item.preview.length > 0" class="body">{{ item.preview }}</text><text class="muted">{{ formatTime(item.createdAt) }}</text>
         </view>
         <text v-if="loaded && items.length === 0 && error.length === 0" class="muted">暂无审核消息</text>
-        <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="loadMessages(!loaded)">重试加载</button></view>
+        <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="retryLoad">重试加载</button></view>
         <button v-else-if="cursor.length > 0" class="secondary" :disabled="loading" @click="loadMessages(false)">加载更多</button>
         <text v-if="loading" class="muted">正在读取消息…</text>
       </template>
@@ -27,15 +27,16 @@ import { communityPath } from '@/features/community/community.uts'
 const items = ref<NotificationItem[]>([]), cursor = ref(''), error = ref('')
 const loading = ref(false), loaded = ref(false)
 let sequence = 0
+const retryRestart = ref(true)
 function reset(): void { sequence++; items.value = []; cursor.value = ''; error.value = ''; loading.value = false; loaded.value = false }
-watch(() => session.value?.uid, () => reset(), { flush: 'sync' })
+watch(() => session.value?.uid, () => { reset(); if (session.value != null) loadMessages(true) }, { flush: 'sync' })
 onShow(() => { loadMessages(true); refreshNotificationsSummary() })
 async function loadMessages(restart: boolean): Promise<void> {
   const uid = session.value?.uid
   if (uid == null) { reset(); return }
   if (loading.value) return
   const request = ++sequence
-  loading.value = true; error.value = ''
+  loading.value = true; error.value = ''; retryRestart.value = restart
   try {
     const result = await listNotifications(restart ? '' : cursor.value)
     if (request !== sequence || uid !== session.value?.uid) return
@@ -45,6 +46,7 @@ async function loadMessages(restart: boolean): Promise<void> {
     if (request === sequence && uid === session.value?.uid) error.value = '消息暂时无法读取，请重试。'
   } finally { if (request === sequence && uid === session.value?.uid) loading.value = false }
 }
+async function retryLoad(): Promise<void> { await loadMessages(retryRestart.value) }
 async function signIn(): Promise<void> { try { await login(); await loadMessages(true); await refreshNotificationsSummary() } catch (_) { uni.showToast({ title: '登录未完成，请重试', icon: 'none' }) } }
 function openMine(): void { openPage(communityPath + '?tab=mine') }
 function openMessage(id: string): void { openPage('/packages/profile/message-detail/message-detail?id=' + encodeURIComponent(id)) }

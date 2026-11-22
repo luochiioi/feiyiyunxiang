@@ -6,9 +6,9 @@
       <text v-if="loading" class="muted">正在读取消息…</text>
       <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="loadDetail">重试读取消息</button></view>
       <view v-if="detail != null" class="card">
-        <text class="heading">{{ detail.title }}</text><text class="muted">{{ formatTime(detail.createdAt) }}</text>
-        <view v-if="detail.reason.length > 0" class="reason"><text class="title">审核员处理原因</text><text class="body">{{ detail.reason }}</text></view>
-        <button v-if="detail.target != null" class="primary" @click="openTarget">查看对应帖子／版本</button>
+        <text class="heading">{{ detail?.title ?? '' }}</text><text class="muted">{{ formatTime(detail?.createdAt ?? 0) }}</text>
+        <view v-if="(detail?.reason ?? '').length > 0" class="reason"><text class="title">审核员处理原因</text><text class="body">{{ detail?.reason ?? '' }}</text></view>
+        <button v-if="detail?.target != null" class="primary" @click="openTarget">查看对应帖子／版本</button>
         <text v-else class="muted">对应内容当前不可打开，审核结果仍保留在此。</text>
       </view>
       <view v-if="readError.length > 0" class="card"><text class="body">{{ readError }}</text><button class="secondary" :disabled="reading" @click="markRead">重试标为已读</button></view>
@@ -26,7 +26,7 @@ import { openPage } from '@/features/navigation.uts'
 const id = ref(''), detail = ref<NotificationDetail | null>(null)
 const error = ref(''), readError = ref(''), loading = ref(false), reading = ref(false)
 let sequence = 0
-watch(() => session.value?.uid, () => { sequence++; detail.value = null; error.value = ''; readError.value = ''; loading.value = false; reading.value = false }, { flush: 'sync' })
+watch(() => session.value?.uid, () => { sequence++; detail.value = null; error.value = ''; readError.value = ''; loading.value = false; reading.value = false; if (session.value != null) loadDetail() }, { flush: 'sync' })
 onLoad((options) => { id.value = options['id'] ?? ''; loadDetail() })
 async function loadDetail(): Promise<void> {
   const uid = session.value?.uid
@@ -58,7 +58,7 @@ async function markRead(): Promise<void> {
 function openTarget(): void {
   const target = detail.value?.target
   if (target == null) return
-  openPage('/packages/community/community-post/community-post?postId=' + encodeURIComponent(target.postId) + '&revisionId=' + encodeURIComponent(target.revisionId) + (target.preview ? '&preview=1' : ''))
+  openPage('/packages/community/community-post/community-post?postId=' + encodeURIComponent(target.postId) + (target.preview ? '&revisionId=' + encodeURIComponent(target.revisionId) : ''))
 }
 function backToList(): void { uni.redirectTo({ url: '/packages/profile/messages/messages' }) }
 function formatTime(at: number): string { return new Date(at).toLocaleString() }

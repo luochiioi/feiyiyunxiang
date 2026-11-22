@@ -7,7 +7,7 @@ export type NotificationDetail = { id: string, kind: string, title: string, prev
 export type NotificationPage = { items: NotificationItem[], next: string }
 const owner = ref(''), unread = ref(0)
 let sequence = 0
-watch(() => session.value?.uid, () => { sequence++; owner.value = ''; unread.value = 0 }, { flush: 'sync' })
+watch(() => session.value?.uid, () => { sequence++; owner.value = ''; unread.value = 0; if (session.value != null) refreshNotificationsSummary() }, { flush: 'sync' })
 export const hasUnreadNotifications = computed(() => owner.value === session.value?.uid && unread.value > 0)
 export async function refreshNotificationsSummary(): Promise<void> {
   const request = ++sequence, uid = session.value?.uid
