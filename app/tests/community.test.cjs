@@ -16,6 +16,7 @@ function fixture() {
   let clock = 1784000000000
   let conflicts = 0
   let failCommit = false
+  let loseResponse = false
   function database(snapshot, writes = null) {
     return {
       command: {
@@ -70,6 +71,7 @@ function fixture() {
             if (snapshot.get(path) !== rows.get(path)) { conflicts++; throw new Error('WRITE_CONFLICT') }
           }
           for (const [path, value] of writes) rows.set(path, value)
+          if (loseResponse) { loseResponse = false; throw new Error("RESPONSE_LOST") }
         },
         async rollback() {}
       }
@@ -95,7 +97,7 @@ function fixture() {
     return community.communitySubmit(user, { title: 'Title', body: 'Body', requestId: 'request', ...payload })
   }
   async function approve(version) { await community.communityReviewPost(reviewer, { ...version, decision: 'approve' }) }
-  return { repo, community, media, service, cloud, post, approve, mediaKey, files, failNextCommit: () => { failCommit = true }, conflicts: () => conflicts, tick: value => { clock += value } }
+  return { repo, community, media, service, cloud, post, approve, mediaKey, files, failNextCommit: () => { failCommit = true }, loseNextResponse: () => { loseResponse = true }, conflicts: () => conflicts, tick: value => { clock += value } }
 }
 
 test('guessed IDs cannot read pending posts, private images or someone else’s diary', async () => {
@@ -626,4 +628,56 @@ test('starter comment terms block specific abuse, queue ambiguous phrases and pr
   const saved = await c.communityPolicy(admin)
   assert.equal(saved.minSeconds, 17)
   assert.ok(saved.rules.some(rule => rule.word === '未保存的新词'))
+})
+
+test('manual post and comment transitions notify verified authors once and synchronize exact rejection receipts',async()=>{
+ const {createNotificationService}=require('../uniCloud-alipay/cloudfunctions/fy-api/notification-service')
+ const f=fixture(), c=f.community, n=createNotificationService({repo:f.repo})
+ const first=await f.post();await f.approve(first)
+ let list=await n.notificationsList(author,{});assert.equal(list.items.length,1);assert.equal(list.items[0].kind,'community.post.approved');assert.equal((await n.notificationDetail(author,{id:list.items[0].id})).reason,'')
+ const second=await f.post(author,{postId:first.postId,baseRevision:first.revisionId,requestId:'edit'})
+ await c.communityReviewPost(reviewer,{...second,decision:'reject',reason:'修改',recipientUid:'stranger'})
+ list=await n.notificationsList(author,{});const rejected=list.items.find(x=>x.kind==='community.post.rejected')
+ await c.communityReadReview(author,second);assert.equal((await n.notificationDetail(author,{id:rejected.id})).read,true)
+ const third=await f.post(author,{postId:first.postId,baseRevision:second.revisionId,requestId:'edit2'})
+ await c.communityReviewPost(reviewer,{...third,decision:'reject',reason:'新版'})
+ await n.notificationRead(author,{id:rejected.id});assert.equal((await f.repo.get('fy-community-versions',third.revisionId)).reviewSeen,false)
+ await c.communityReviewPost(reviewer,{...first,decision:'remove',reason:'下架'})
+ assert.equal((await n.notificationDetail(author,{id:(await n.notificationsList(author,{})).items.find(x=>x.kind==='community.post.removed').id})).target,null)
+ const other=await f.post(author,{requestId:'other'});await f.approve(other)
+ for(const [id,status,decision] of [['c1','pending','approve'],['c2','pending','reject'],['c3','public','remove']]) {
+  await f.repo.put('fy-community-comments',id,{uid:'friend',postId:other.postId,revisionId:other.revisionId,status})
+  await c.communityReviewComment(reviewer,{commentId:id,decision,reason:decision==='approve'?'':'处理',recipientUid:'author'})
+ }
+ const messages=await n.notificationsList(friend,{});assert.equal(messages.items.length,3);assert.deepEqual(messages.items.map(x=>x.kind).sort(),['community.comment.approved','community.comment.rejected','community.comment.removed'])
+ assert.equal((await n.notificationsSummary(stranger)).unread,0)
+})
+test('concurrent reviews, lost responses and notification failure preserve one atomic result',async()=>{
+ const f=fixture(), p=await f.post()
+ const outcomes=await Promise.allSettled([f.approve(p),f.approve(p)])
+ assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,1)
+ assert.equal(await f.repo.count('fy-notifications',{}),1);assert.equal(await f.repo.count('fy-community-audit',{}),1)
+ await assert.rejects(f.approve(p),/STALE_VERSION/);assert.equal(await f.repo.count('fy-notifications',{}),1)
+ const q=await f.post(author,{requestId:'fail-notification'})
+ const original=f.repo.tx
+ f.repo.tx=fn=>original(async db=>fn({...db,put:async(c,id,v)=>{if(c==='fy-notifications')throw new Error('NOTIFICATION_FAILED');return db.put(c,id,v)}}))
+ await assert.rejects(f.approve(q),/NOTIFICATION_FAILED/)
+ assert.equal((await f.repo.get('fy-community-versions',q.revisionId)).status,'pending');assert.equal(await f.repo.count('fy-community-audit',{}),1)
+ f.repo.tx=original;await f.approve(q);assert.equal(await f.repo.count('fy-notifications',{}),2)
+})
+
+test('committed moderation with lost response remains one notification and preserves its receipt on retry',async()=>{
+ const {createNotificationService}=require('../uniCloud-alipay/cloudfunctions/fy-api/notification-service')
+ const f=fixture(),p=await f.post(),n=createNotificationService({repo:f.repo})
+ f.loseNextResponse();await assert.rejects(f.approve(p),/RESPONSE_LOST/)
+ assert.equal((await f.repo.get('fy-community-versions',p.revisionId)).status,'approved')
+ const list=await n.notificationsList(author,{});assert.equal(list.items.length,1);await n.notificationRead(author,{id:list.items[0].id})
+ await assert.rejects(f.approve(p),/STALE_VERSION/);assert.equal(await f.repo.count('fy-community-audit',{}),1);assert.equal((await n.notificationsList(author,{})).items.length,1);assert.equal((await n.notificationDetail(author,{id:list.items[0].id})).read,true)
+})
+test('legacy rejected versions without notification still mark read and never synthesize historical messages',async()=>{
+ const f=fixture(),p=await f.post()
+ const v=await f.repo.get('fy-community-versions',p.revisionId)
+ await f.repo.put('fy-community-versions',p.revisionId,{...v,status:'rejected',reason:'旧驳回'})
+ await f.community.communityReadReview(author,p)
+ assert.equal((await f.repo.get('fy-community-versions',p.revisionId)).reviewSeen,true);assert.equal(await f.repo.count('fy-notifications',{}),0)
 })

@@ -1,4 +1,6 @@
 const crypto=require('node:crypto')
+const {createNotificationService}=require('./notification-service')
+const notificationActions = new Set(['notificationsList','notificationsSummary','notificationDetail','notificationRead'])
 const {createService,key}=require('./service')
 const { createStepService } = require('./step-service')
 const { verifyWechatRun } = require('./wechat-run')
@@ -112,6 +114,8 @@ exports.main=async(event,context)=>{
       data = await createStepService({ repo, verify: payload => verifyWechatRun(payload, {
         http: uniCloud.httpclient, appId: cfg.wechatAppId, secret: cfg.wechatSecret
       }) })[action](user, p)
+    } else if (notificationActions.has(action)) {
+      data = await createNotificationService({repo})[action](user,p)
     } else if (operationsActions.has(action)) {
       data = await createCommunityOperations({ repo })[action](user, p)
     } else if (communityActions.has(action)) {

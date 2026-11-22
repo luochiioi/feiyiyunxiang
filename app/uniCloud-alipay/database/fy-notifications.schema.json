@@ -1,0 +1,52 @@
+{
+  "bsonType": "object",
+  "required": [
+    "recipientUid",
+    "kind",
+    "postId",
+    "revisionId",
+    "commentId",
+    "reason",
+    "createdAt",
+    "order",
+    "readAt"
+  ],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false
+  },
+  "properties": {
+    "_id": {
+      "bsonType": "string"
+    },
+    "recipientUid": {
+      "bsonType": "string"
+    },
+    "kind": {
+      "bsonType": "string"
+    },
+    "postId": {
+      "bsonType": "string"
+    },
+    "revisionId": {
+      "bsonType": "string"
+    },
+    "commentId": {
+      "bsonType": "string"
+    },
+    "reason": {
+      "bsonType": "string"
+    },
+    "order": {
+      "bsonType": "string"
+    },
+    "createdAt": {
+      "bsonType": "long"
+    },
+    "readAt": {
+      "bsonType": "long"
+    }
+  }
+}

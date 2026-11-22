@@ -12,7 +12,7 @@ function script(file, globals) {
   const context = vm.createContext({
     ref: value => ({ value }),
     computed: read => ({ get value() { return read() } }),
-    watch() {}, onUnmounted() {},
+    watch() {}, onUnmounted() {}, refreshNotificationsSummary: async () => {},
     ...globals
   })
   vm.runInContext(stripTypeScriptTypes(source), context)
@@ -129,7 +129,7 @@ test('My page conditions remain safe while the account and Aomiao cloud state ar
   for (const session of [null, { uid: 'returning-member' }]) {
     for (const aomiao of [null, { claimed: false }, { claimed: true }]) {
       for (const expression of conditions) {
-        const evaluate = new Function('session', 'aomiao', 'roleError', 'hasUnreadReview', 'return (' + expression + ')')
+        const evaluate = new Function('session', 'aomiao', 'roleError', 'hasUnreadReview', 'hasUnreadNotifications', 'return (' + expression + ')')
         assert.doesNotThrow(() => evaluate(session, aomiao, '', false), expression)
       }
     }

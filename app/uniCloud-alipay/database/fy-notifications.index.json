@@ -1,0 +1,34 @@
+[
+  {
+    "IndexName": "recipient_order",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "recipientUid",
+          "Direction": "1"
+        },
+        {
+          "Name": "order",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "recipient_readAt",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "recipientUid",
+          "Direction": "1"
+        },
+        {
+          "Name": "readAt",
+          "Direction": "1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

@@ -249,3 +249,12 @@ test('step gateway authenticates all reads and never accepts a client-reported t
   assert.equal(g.counts().exchanges, 0)
   assert.equal([...g.rows.keys()].filter(key => key.startsWith('fy-daily-steps')).length, 0)
 })
+
+test('notification gateway rejects guests and admin tokens and ignores forged recipients',async()=>{
+ const g=gateway();g.rows.set('uni-id-usersmember',{status:0,token:['fixture-token'],role:[]})
+ for(const action of ['notificationsList','notificationsSummary','notificationDetail','notificationRead']) {
+  for(const token of ['', 'fy_admin_spoof']) assert.equal((await g.main({action,token,payload:{id:'notice',recipientUid:'victim'}})).code,'AUTH_REQUIRED')
+ }
+ g.rows.set('fy-notificationsnotice',{recipientUid:'victim',kind:'community.post.rejected',reason:'private',readAt:0})
+ for(const action of ['notificationDetail','notificationRead']) assert.equal((await g.main({action,token:'fixture-token',payload:{id:'notice',recipientUid:'victim'}})).code,'NOT_FOUND')
+})

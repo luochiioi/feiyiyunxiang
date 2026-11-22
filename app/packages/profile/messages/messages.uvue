@@ -1,0 +1,58 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="消息" :show-back="true" />
+    <view class="content">
+      <view v-if="session == null" class="card"><text class="body">微信登录后查看本人的社区审核消息。</text><button class="primary" @click="signIn">微信登录</button></view>
+      <template v-else>
+        <view class="card"><text class="muted">这里保留帖子和评论的人工审核结果。历史驳回可在我的帖子查看。</text><button class="secondary" @click="openMine">我的帖子</button></view>
+        <view v-for="item in items" :key="item.id" class="card" @click="openMessage(item.id)">
+          <view class="row spread"><text class="heading">{{ item.title }}</text><text v-if="!item.read" class="unread">未读</text></view>
+          <text v-if="item.preview.length > 0" class="body">{{ item.preview }}</text><text class="muted">{{ formatTime(item.createdAt) }}</text>
+        </view>
+        <text v-if="loaded && items.length === 0 && error.length === 0" class="muted">暂无审核消息</text>
+        <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="retryLoad">重试加载</button></view>
+        <button v-else-if="cursor.length > 0" class="secondary" :disabled="loading" @click="loadMessages(false)">加载更多</button>
+        <text v-if="loading" class="muted">正在读取消息…</text>
+      </template>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import { ref, watch } from 'vue'
+import { session, login } from '@/features/api.uts'
+import { listNotifications, refreshNotificationsSummary, NotificationItem } from '@/features/notifications.uts'
+import { openPage } from '@/features/navigation.uts'
+import { communityPath } from '@/features/community/community.uts'
+const items = ref<NotificationItem[]>([]), cursor = ref(''), error = ref('')
+const loading = ref(false), loaded = ref(false)
+let sequence = 0
+const retryRestart = ref(true)
+function reset(): void { sequence++; items.value = []; cursor.value = ''; error.value = ''; loading.value = false; loaded.value = false }
+watch(() => session.value?.uid, () => { reset(); if (session.value != null) loadMessages(true) }, { flush: 'sync' })
+onShow(() => { loadMessages(true); refreshNotificationsSummary() })
+async function loadMessages(restart: boolean): Promise<void> {
+  const uid = session.value?.uid
+  if (uid == null) { reset(); return }
+  if (loading.value) return
+  const request = ++sequence
+  loading.value = true; error.value = ''; retryRestart.value = restart
+  try {
+    const result = await listNotifications(restart ? '' : cursor.value)
+    if (request !== sequence || uid !== session.value?.uid) return
+    items.value = restart ? result.items : items.value.concat(result.items)
+    cursor.value = result.next; loaded.value = true
+  } catch (_) {
+    if (request === sequence && uid === session.value?.uid) error.value = '消息暂时无法读取，请重试。'
+  } finally { if (request === sequence && uid === session.value?.uid) loading.value = false }
+}
+async function retryLoad(): Promise<void> { await loadMessages(retryRestart.value) }
+async function signIn(): Promise<void> { try { await login(); await loadMessages(true); await refreshNotificationsSummary() } catch (_) { uni.showToast({ title: '登录未完成，请重试', icon: 'none' }) } }
+function openMine(): void { openPage(communityPath + '?tab=mine') }
+function openMessage(id: string): void { openPage('/packages/profile/message-detail/message-detail?id=' + encodeURIComponent(id)) }
+function formatTime(at: number): string { return new Date(at).toLocaleString() }
+</script>
+<style scoped>
+@import '@/styles/page.css';
+.unread { color: #c73535; font-size: 12px; }
+</style>
