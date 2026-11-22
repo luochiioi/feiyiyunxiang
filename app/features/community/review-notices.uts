@@ -1,3 +1,4 @@
+import { refreshNotificationsSummary } from '@/features/notifications.uts'
 import { computed, ref } from 'vue'
 import { api, secured, session } from '@/features/api.uts'
 
@@ -22,5 +23,5 @@ export async function readReview(postId: string, revisionId: string): Promise<vo
   const uid = session.value?.uid
   if (uid == null) throw new Error('AUTH_REQUIRED')
   await api<UTSJSONObject>('communityReadReview', { postId, revisionId })
-  if (uid === session.value?.uid) await refreshReviewNotices()
+  if (uid === session.value?.uid) { await refreshReviewNotices(); await refreshNotificationsSummary() }
 }

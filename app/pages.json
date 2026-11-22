@@ -42,6 +42,12 @@
       "root": "packages/profile",
       "pages": [
         {
+          "path": "messages/messages"
+        },
+        {
+          "path": "message-detail/message-detail"
+        },
+        {
           "path": "account/account"
         },
         {

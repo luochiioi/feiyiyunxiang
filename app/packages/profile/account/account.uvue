@@ -30,6 +30,7 @@
       </view>
       <view class="card">
         <text class="heading">社区记录</text>
+        <view class="row spread menu-row" @click="openPage('/packages/profile/messages/messages')"><view class="my-posts-label"><text class="body">消息</text><view v-if="hasUnreadNotifications" class="review-dot" aria-label="有未读审核消息" /></view><text class="muted">审核消息 ›</text></view>
         <view class="row spread menu-row" @click="openPage(communityPath + '?tab=mine')"><view class="my-posts-label"><text class="body">我的帖子</text><view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></view><text class="muted">审核进度 ›</text></view>
         <view class="row spread divider menu-row" @click="openPage(communityPath)"><text class="body">社区</text><text class="muted">›</text></view>
         <!-- #ifdef MP-WEIXIN -->
@@ -48,6 +49,7 @@ import { openPage } from '@/features/navigation.uts'
 import { computed, ref } from 'vue'
 import { session, login, api, secured, clearSession, showError } from '@/features/api.uts'
 import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
+import { hasUnreadNotifications, refreshNotificationsSummary } from '@/features/notifications.uts'
 import { communityPath } from '@/features/community/community.uts'
 import { activeRun } from '@/features/exploration/catalog.uts'
 type Aomiao = { claimed: boolean }
@@ -56,7 +58,7 @@ const roleError = ref('')
 const role = ref<Aomiao | null>(null)
 const owner = ref('')
 const aomiao = computed(() => session.value?.uid === owner.value ? role.value : null)
-onShow(() => { if (session.value != null) loadAomiao(); refreshReviewNotices() })
+onShow(() => { if (session.value != null) loadAomiao(); refreshReviewNotices(); refreshNotificationsSummary() })
 
 async function updateAomiao(action: string): Promise<void> {
   if (busy.value) return
@@ -87,7 +89,7 @@ async function signIn(): Promise<void> {
       ? '微信登录服务配置异常，请联系维护人员' : '微信登录未完成，请重试'
     uni.showToast({ title: message, icon: 'none' })
   } finally { busy.value = false }
-  if (session.value != null) { await loadAomiao(); await refreshReviewNotices() }
+  if (session.value != null) { await loadAomiao(); await refreshReviewNotices(); await refreshNotificationsSummary() }
 }
 function showPrivacy(): void {
   // #ifdef MP-WEIXIN
