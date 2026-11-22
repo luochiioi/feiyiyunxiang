@@ -1,3 +1,4 @@
+const { writeFriendNotification, friendResponseId } = require('./friend-notification-events')
 const { createHash } = require('node:crypto')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const fail = code => { throw new Error(code) }
@@ -123,11 +124,15 @@ function createPartnershipService({ repo, now = Date.now }) {
         const current = await db.get('fy-friends', friendId)
         if (current && current.status === 'accepted') return { id: friendId }
         if (current && current.status === 'pending' && current.expiresAt > now()) fail('CONFLICT')
-        await db.put('fy-friends', friendId, {
-          from: u.uid, to: target.uid, status: 'pending', requestId: p.requestId, createdAt: now(), expiresAt: now() + 24 * HOUR
-        })
+        const at = now()
+        const row = { _id: friendId, from: u.uid, to: target.uid, status: 'pending', requestId: p.requestId, createdAt: at, expiresAt: at + 24 * HOUR }
+        row.responseId = friendResponseId(row)
+        await db.put('fy-friends', friendId, row)
+        await writeFriendNotification(db, row, 'friend.request.received', at)
         await db.put('fy-requests', requestKey, { friendId, role: 'from' })
-        await db.put('fy-requests', key(target.uid, 'friend-in', p.requestId), { friendId, role: 'to' })
+        const incomingKey = key(target.uid, 'friend-in', p.requestId)
+        if (!await db.get('fy-requests', incomingKey)) await db.put('fy-requests', incomingKey, { friendId, role: 'to' })
+        await db.put('fy-requests', key(target.uid, 'friend-in', row.responseId), { friendId, role: 'to' })
         return { id: friendId }
       })
     },
@@ -138,14 +143,18 @@ function createPartnershipService({ repo, now = Date.now }) {
       const friendId = await friendIdFor(repo, u, p.requestId) ?? await pendingFriendId(repo, u, p.requestId)
       return repo.tx(async db => {
         const row = await db.get('fy-friends', friendId)
-        if (!row || row.to !== u.uid) fail('NOT_FOUND')
+        if (!row || row.to !== u.uid || (row.requestId !== p.requestId && row.responseId !== p.requestId)) fail('NOT_FOUND')
+        const next = p.accept ? 'accepted' : 'rejected'
+        if (row.status === next) return { id: friendId, status: next }
         if (row.status !== 'pending') fail('NOT_PENDING')
         if (row.expiresAt <= now()) {
           await db.put('fy-friends', friendId, { ...row, status: 'expired' })
           fail('EXPIRED')
         }
-        await db.put('fy-friends', friendId, { ...row, status: p.accept ? 'accepted' : 'rejected', decidedAt: now() })
-        return { id: friendId, status: p.accept ? 'accepted' : 'rejected' }
+        const at = now()
+        await db.put('fy-friends', friendId, { ...row, status: next, decidedAt: at })
+        if (p.accept) await writeFriendNotification(db, row, 'friend.request.accepted', at)
+        return { id: friendId, status: next }
       })
     },
 
@@ -155,7 +164,8 @@ function createPartnershipService({ repo, now = Date.now }) {
       const friendId = await friendIdFor(repo, u, p.requestId)
       return repo.tx(async db => {
         const row = await db.get('fy-friends', friendId)
-        if (!row || row.from !== u.uid) fail('NOT_FOUND')
+        if (!row || row.from !== u.uid || row.requestId !== p.requestId) fail('NOT_FOUND')
+        if (row.status === 'withdrawn') return { id: friendId }
         if (row.status !== 'pending') fail('NOT_PENDING')
         await db.put('fy-friends', friendId, { ...row, status: 'withdrawn' })
         return { id: friendId }
@@ -173,7 +183,7 @@ function createPartnershipService({ repo, now = Date.now }) {
         const profile = (await repo.list('fy-profiles', { uid: other }))[0]
         if (!profile) continue
         const item = card(profile)
-        if (row.status === 'pending') { item.kind = 'incoming'; item.id = row.requestId }
+        if (row.status === 'pending') { item.kind = 'incoming'; item.id = row.responseId ?? row.requestId }
         cards.push(item)
       }
       return cards

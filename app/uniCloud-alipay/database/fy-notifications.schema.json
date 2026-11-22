@@ -47,6 +47,15 @@
     },
     "readAt": {
       "bsonType": "long"
+    },
+    "friendId": {
+      "bsonType": "string"
+    },
+    "friendEventKey": {
+      "bsonType": "string"
+    },
+    "actorNickname": {
+      "bsonType": "string"
     }
   }
 }

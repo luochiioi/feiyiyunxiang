@@ -1,3 +1,4 @@
+const { friendTitles, friendNotificationContext } = require('./friend-notification-events')
 const { key } = require('./service')
 const { fail, identifier } = require('./community-policy')
 const { validateCursor } = require('./community-review-queue')
@@ -26,7 +27,7 @@ async function markNotificationRead(db, uid, id, at) {
   if (version?.uid === uid && version.postId === row.postId && version.status === 'rejected' && version.reviewSeen !== true) await db.put('fy-community-versions',version._id,{...version,reviewSeen:true})
  }
 }
-const view = row => ({id:row._id,kind:row.kind,title:titles[row.kind],preview:row.reason.slice(0,60),createdAt:row.createdAt,read:row.readAt>0})
+const view = row => ({id:row._id,kind:row.kind,title:titles[row.kind] ?? friendTitles[row.kind],preview:Object.hasOwn(friendTitles,row.kind) ? (row.actorNickname || '旅伴') : row.reason.slice(0,60),createdAt:row.createdAt,read:row.readAt>0})
 function createNotificationService({repo,now=Date.now}) {
  async function own(u,id) {
   member(u);if(!identifier(id)) fail('NOT_FOUND')
@@ -50,7 +51,7 @@ function createNotificationService({repo,now=Date.now}) {
  return {
   async notificationsList(u,p={}) { member(u);validateCursor(p.cursor);const rows=await repo.page(collection,{recipientUid:u.uid},{field:'order',before:p.cursor||null,size:21});return {items:rows.slice(0,20).map(view),next:rows.length>20?rows[19].order:''} },
   async notificationsSummary(u) { member(u);return {unread:await repo.count(collection,{recipientUid:u.uid,readAt:0})} },
-  async notificationDetail(u,p) { const row=await own(u,p.id);return {...view(row),reason:row.reason,target:await target(row)} },
+  async notificationDetail(u,p) { const row=await own(u,p.id);if(Object.hasOwn(friendTitles,row.kind)) return {...view(row),reason:'',target:null,friend:await friendNotificationContext(repo,row,u.uid,now())};return {...view(row),reason:row.reason,target:await target(row)} },
   async notificationRead(u,p) { member(u);return repo.tx(async db=>{await markNotificationRead(db,u.uid,p.id,now());return {}}) }
  }
 }
