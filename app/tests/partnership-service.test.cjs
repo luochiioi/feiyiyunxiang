@@ -403,6 +403,32 @@ test('a route without eggs falls back to its first node', async () => {
   assert.equal((await f.p.assignment(loser)).nodeId, 'n1')
 })
 
+test('a failure task can be cleared by answering the published culture quiz', async () => {
+  const f = await pkStarted()
+  await f.p.forfeitPk(f.a, { matchId: f.match.id })
+  const task = await f.p.assignment(f.a)
+  assert.equal(task.quizAvailable, true)
+  const quiz = await f.p.assignmentQuiz(f.a, { assignmentId: task.id })
+  assert.equal(quiz.prompt, '哪一幅是湘绣？')
+  assert.equal(quiz.answer, undefined)
+  assert.deepEqual(quiz.options.map(option => option.id), ['a', 'b'])
+  await assert.rejects(f.p.assignmentQuiz(f.b, { assignmentId: task.id }), /NOT_FOUND/)
+  // 错答保留任务并允许重试
+  const wrong = await f.p.answerAssignment(f.a, { assignmentId: task.id, optionId: 'b' })
+  assert.equal(wrong.correct, false)
+  assert.equal(wrong.attempts, 1)
+  assert.equal((await f.p.assignment(f.a)).status, 'pending')
+  // 答对即完成，解除下一场限制
+  const right = await f.p.answerAssignment(f.a, { assignmentId: task.id, optionId: 'a' })
+  assert.equal(right.correct, true)
+  assert.equal(await f.p.assignment(f.a), null)
+  const again = await f.p.answerAssignment(f.a, { assignmentId: task.id, optionId: 'a' })
+  assert.equal(again.correct, true)
+  assert.equal(again.alreadyDone, true)
+  const next = await f.p.invitePk(f.a, { code: f.codes.b, routeId: 'combined', requestId: 'pk-2' })
+  assert.ok(next.id)
+})
+
 test('an unfinished match expires after 24 hours without an assignment', async () => {
   const f = await pkStarted()
   f.advance(24 * 3600 * 1000 + 1)

@@ -10,11 +10,19 @@
         </view>
         <view class="card">
           <text class="heading">处理方式</text>
-          <text class="body">这是 PK 胜者为你挑选的彩蛋任务，确认完成后即可参加下一场。</text>
+          <text class="body">这是 PK 胜者为你挑选的彩蛋任务。完成实地打卡，或答对一道海丝非遗题，任一方式都能解除下一场限制。</text>
           <text class="body">分配满 72 小时后，也可以主动拒绝。</text>
           <text class="muted">{{ rejectHint }}</text>
         </view>
-        <button class="primary" :disabled="busy" @click="finish">确认完成</button>
+        <button class="primary" :disabled="busy" @click="finish">确认完成实地打卡</button>
+        <button v-if="quizAvailable && quiz == null" class="secondary" :disabled="busy" @click="openQuiz">改为答题</button>
+        <view v-if="quiz != null" class="card">
+          <text class="heading">海丝非遗题</text>
+          <text class="body">{{ quiz.prompt }}</text>
+          <text v-if="quiz.hint != null" class="muted">{{ quiz.hint }}</text>
+          <text v-if="wrongHint.length > 0" class="wrong">{{ wrongHint }}</text>
+          <button v-for="option in quiz.options" :key="option.id" class="secondary" :disabled="busy" @click="answer(option.id)">{{ option.label }}</button>
+        </view>
         <button v-if="rejectEnabled" class="secondary" :disabled="busy" @click="decline">拒绝任务</button>
       </template>
       <view v-else class="card">
@@ -28,14 +36,20 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 
 import { computed, ref } from 'vue'
-import { openPage, decodePageId } from '@/features/navigation.uts'
+import { decodePageId } from '@/features/navigation.uts'
 import { showError } from '@/features/api.uts'
-import { loadAssignment, finishAssignment, declineAssignment, partnerView } from '@/features/partner/partner.uts'
+import { loadAssignment, finishAssignment, declineAssignment, partnerView, loadAssignmentQuiz, answerAssignmentQuiz } from '@/features/partner/partner.uts'
+import type { AssignmentQuiz } from '@/features/partner/partner.uts'
 
-type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string, title: string, description: string }
+type AssignmentCard = {
+  id: string, status: string, rejectAvailableAt: number, nodeTitle: string,
+  title: string, description: string, quizAvailable: boolean
+}
 
 const assignmentId = ref<string | null>(null)
 const task = ref<AssignmentCard | null>(null)
+const quiz = ref<AssignmentQuiz | null>(null)
+const wrongHint = ref('')
 const busy = ref(false)
 
 onLoad(query => { assignmentId.value = decodePageId(query['assignmentId'] ?? null) })
@@ -43,12 +57,15 @@ onLoad(query => { assignmentId.value = decodePageId(query['assignmentId'] ?? nul
 const view = computed(() => partnerView({ assignment: task.value, now: Date.now() }))
 const rejectEnabled = computed(() => view.value.rejectEnabled)
 const taskTitle = computed(() => task.value?.title ?? task.value?.nodeTitle ?? '失败任务')
+const quizAvailable = computed(() => task.value?.quizAvailable === true)
 const rejectHint = computed(() => rejectEnabled.value ? '已满 72 小时，可以主动拒绝。' : '未满 72 小时，暂时只能完成，不能拒绝。')
 
 onShow(async () => {
   try {
     const value = await loadAssignment() as AssignmentCard | null
     task.value = value != null && (assignmentId.value == null || value.id === assignmentId.value) ? value : null
+    quiz.value = null
+    wrongHint.value = ''
   } catch (_) { showError() }
 })
 
@@ -57,6 +74,27 @@ async function finish(): Promise<void> {
   busy.value = true
   try { await finishAssignment(task.value!.id); task.value = null; uni.showToast({ title: '任务已完成', icon: 'success' }) }
   catch (_) { showError() } finally { busy.value = false }
+}
+async function openQuiz(): Promise<void> {
+  if (busy.value || task.value == null) return
+  busy.value = true
+  try {
+    quiz.value = await loadAssignmentQuiz(task.value!.id)
+    wrongHint.value = ''
+  } catch (_) { showError() } finally { busy.value = false }
+}
+async function answer(optionId: string): Promise<void> {
+  if (busy.value || task.value == null) return
+  busy.value = true
+  try {
+    const result = await answerAssignmentQuiz(task.value!.id, optionId)
+    if (result.correct) {
+      task.value = null
+      uni.showToast({ title: '答对了，失败任务已完成', icon: 'success' })
+    } else {
+      wrongHint.value = '答错了，可以再试一次（已答 ' + (result.attempts ?? 1) + ' 次）。'
+    }
+  } catch (_) { showError() } finally { busy.value = false }
 }
 async function decline(): Promise<void> {
   if (busy.value || task.value == null || !rejectEnabled.value) return
@@ -68,4 +106,5 @@ async function decline(): Promise<void> {
 
 <style scoped>
 @import '@/styles/page.css';
+.wrong { color: #a33a2a; font-size: 13px; }
 </style>

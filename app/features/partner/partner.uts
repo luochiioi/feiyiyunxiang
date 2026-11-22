@@ -13,6 +13,9 @@ export type CoopView = {
   myTasks: CoopTask[], partnerTasks: CoopTask[], myTaskOptions: CoopTask[]
 }
 export type PkEgg = { id: string, title: string, description: string, nodeId: string, nodeTitle: string }
+export type QuizOption = { id: string, label: string }
+export type AssignmentQuiz = { id: string, title: string, prompt: string, hint: string | null, options: QuizOption[] }
+export type QuizAnswer = { correct: boolean, alreadyDone: boolean, attempts?: number }
 export type PkView = {
   id: string, status: string, routeId: string, invitedBy: string, ready: string[],
   startedAt: number | null, expiresAt: number, myRunId: string | null,
@@ -63,4 +66,10 @@ export function finishAssignment(assignmentId: string): Promise<UTSJSONObject> {
 }
 export function declineAssignment(assignmentId: string): Promise<UTSJSONObject> {
   return secured<UTSJSONObject>('rejectAssignment', { assignmentId })
+}
+export function loadAssignmentQuiz(assignmentId: string): Promise<AssignmentQuiz> {
+  return secured<AssignmentQuiz>('assignmentQuiz', { assignmentId })
+}
+export function answerAssignmentQuiz(assignmentId: string, optionId: string): Promise<QuizAnswer> {
+  return secured<QuizAnswer>('answerAssignment', { assignmentId, optionId })
 }
