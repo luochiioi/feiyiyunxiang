@@ -59,3 +59,13 @@ test('member renewal A to null to A reloads list and detail without displaying a
  listCalls[1]({items:[{id:'fresh'}],next:''});detailCalls[1]({id:'fresh',read:true});await new Promise(r=>setImmediate(r))
  assert.equal(l.run('items.value[0].id'),'fresh');assert.equal(d.run('detail.value.id'),'fresh')
 })
+
+test('an old account cloud response cannot clear the current session or retry under another account',async()=>{
+ const pending=deferred();let calls=0
+ const s=script('features/api.uts',{uni:{getStorageSync:()=>'',removeStorageSync(){throw Error('must not clear B')},setStorageSync(){}},uniCloud:{callFunction:async()=>{calls++;return pending.promise}}})
+ s.run("session.value={uid:'A',token:'A-token',expiresAt:Date.now()+100000}")
+ const old=s.run("secured('notificationRead',{id:'A-notice'})")
+ s.run("session.value={uid:'B',token:'B-token',expiresAt:Date.now()+100000}")
+ pending.resolve({result:{code:'AUTH_REQUIRED',data:null}})
+ await assert.rejects(old,/SESSION_CHANGED/);assert.equal(s.run('session.value.uid'),'B');assert.equal(calls,1)
+})
