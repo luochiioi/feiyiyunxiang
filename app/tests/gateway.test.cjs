@@ -156,6 +156,8 @@ test('PK egg actions are routed and admin cancellation needs an admin session', 
   const call = (action, token, payload) => g.main({ action, token, payload })
   assert.equal((await call('chooseEgg', 'fixture-token', { matchId: 'unknown' })).code, 'INVALID_REQUEST')
   assert.equal((await call('pkEggs', 'fixture-token', { matchId: 'unknown' })).code, 'NOT_FOUND')
+  assert.equal((await call('assignmentQuiz', 'fixture-token', { assignmentId: 'unknown' })).code, 'NOT_FOUND')
+  assert.equal((await call('answerAssignment', 'fixture-token', { assignmentId: 'unknown' })).code, 'INVALID_REQUEST')
   assert.equal((await call('cancelPk', 'fixture-token', { matchId: 'unknown' })).code, 'AUTH_REQUIRED')
 })
 

@@ -60,6 +60,7 @@
       <view v-if="assignment != null" class="card">
         <text class="heading">失败任务</text>
         <text class="body">{{ assignmentTitle }}</text>
+        <text class="muted">实地打卡或答对一道海丝非遗题都能解除下一场限制。</text>
         <text class="muted">{{ rejectHint }}</text>
         <button class="secondary" @click="openPage('/packages/partner/assignment/assignment?assignmentId=' + assignmentId)">查看任务</button>
       </view>

@@ -36,6 +36,16 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
   function nodeTitleOf(snapshot, nodeId, fallback) {
     return (snapshot?.nodes ?? []).find(node => node.id === nodeId)?.title ?? fallback
   }
+  // 文化替代题复用路线已发布的文化题，答题不改变原对局结果。
+  function quizOf(snapshot) {
+    const culture = snapshot?.culture ?? {}
+    return culture.quiz ?? culture.tileQuiz ?? null
+  }
+  async function quizForRow(db, row) {
+    const match = await db.get('fy-matches', row.matchId)
+    if (!match) fail('NOT_FOUND')
+    return quizOf(await db.get('fy-versions', match.version))
+  }
   // 败者未被确认前，胜者最长 24 小时内可以补选彩蛋。
   async function pendingEgg(db, uid) {
     const rows = await db.list('fy-matches', { winner: uid })
@@ -233,13 +243,50 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
       member(u)
       const rows = await repo.list('fy-assignments', { uid: u.uid })
       const open = rows.find(row => row.status === 'pending' || row.status === 'doing')
-      return open
-        ? {
-            id: open._id, status: open.status, assignedAt: open.assignedAt, rejectAvailableAt: open.rejectAvailableAt,
-            eggId: open.eggId ?? null, nodeId: open.nodeId, nodeTitle: open.nodeTitle,
-            title: open.title ?? open.nodeTitle, description: open.description ?? ''
-          }
-        : null
+      if (!open) return null
+      const quiz = await quizForRow(repo, open).catch(() => null)
+      return {
+        id: open._id, status: open.status, assignedAt: open.assignedAt, rejectAvailableAt: open.rejectAvailableAt,
+        eggId: open.eggId ?? null, nodeId: open.nodeId, nodeTitle: open.nodeTitle,
+        title: open.title ?? open.nodeTitle, description: open.description ?? '',
+        quizAvailable: quiz != null
+      }
+    },
+
+    async assignmentQuiz(u, p) {
+      member(u)
+      if (!requestOf(p.assignmentId)) fail('INVALID_REQUEST')
+      const row = await repo.get('fy-assignments', p.assignmentId)
+      if (!row || row.uid !== u.uid) fail('NOT_FOUND')
+      if (row.status !== 'pending' && row.status !== 'doing') fail('NOT_PENDING')
+      const quiz = await quizForRow(repo, row)
+      if (!quiz) fail('NOT_FOUND')
+      return {
+        id: row._id, title: row.title ?? row.nodeTitle, prompt: quiz.prompt,
+        hint: quiz.hint ?? null, options: quiz.options.map(option => ({ id: option.id, label: option.label }))
+      }
+    },
+
+    async answerAssignment(u, p) {
+      member(u)
+      if (!requestOf(p.assignmentId) || typeof p.optionId !== 'string') fail('INVALID_REQUEST')
+      return repo.tx(async db => {
+        const row = await db.get('fy-assignments', p.assignmentId)
+        if (!row || row.uid !== u.uid) fail('NOT_FOUND')
+        if (row.status === 'done') return { id: p.assignmentId, correct: true, alreadyDone: true }
+        if (row.status !== 'pending' && row.status !== 'doing') fail('NOT_PENDING')
+        const quiz = await quizForRow(db, row)
+        if (!quiz) fail('NOT_FOUND')
+        if (!quiz.options.some(option => option.id === p.optionId) || p.optionId !== quiz.answer) {
+          const attempts = (row.quizAttempts ?? 0) + 1
+          await db.put('fy-assignments', p.assignmentId, { ...row, quizAttempts: attempts, lastQuizAt: now() })
+          return { id: p.assignmentId, correct: false, attempts }
+        }
+        await db.put('fy-assignments', p.assignmentId, {
+          ...row, status: 'done', method: 'quiz', completedAt: now()
+        })
+        return { id: p.assignmentId, correct: true, alreadyDone: false }
+      })
     },
 
     async completeAssignment(u, p) {
@@ -248,7 +295,7 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
         const row = await db.get('fy-assignments', p.assignmentId)
         if (!row || row.uid !== u.uid) fail('NOT_FOUND')
         if (row.status !== 'pending' && row.status !== 'doing') fail('NOT_PENDING')
-        await db.put('fy-assignments', p.assignmentId, { ...row, status: 'done', completedAt: now() })
+        await db.put('fy-assignments', p.assignmentId, { ...row, status: 'done', method: 'checkin', completedAt: now() })
         return { id: p.assignmentId }
       })
     },
