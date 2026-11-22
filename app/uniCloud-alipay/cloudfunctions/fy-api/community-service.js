@@ -1,3 +1,4 @@
+const { writeNotification, markNotificationRead, notificationId } = require('./notification-service')
 const { pendingRevisions, validateCursor } = require('./community-review-queue')
 const { key } = require('./service')
 const { createPartnershipService } = require('./partnership-service')
@@ -379,6 +380,8 @@ function createCommunityService({ repo, media, now = Date.now }) {
         if (version.status === 'rejected' && version.reviewSeen !== true) {
           await db.put(versions, version._id, { ...version, reviewSeen: true })
         }
+        const id = notificationId({ recipientUid: u.uid, kind: 'community.post.rejected', postId: post._id, revisionId: version._id, commentId: '' })
+        if (await db.get('fy-notifications', id)) await markNotificationRead(db, u.uid, id, now())
         return {}
       })
     },
@@ -616,6 +619,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
           await db.put(versions, version._id, { ...version, status: approved ? 'approved' : 'rejected', reason, reviewSeen: false })
           if (approved) await db.put(posts, post._id, { ...post, status: 'public', publicRevision: version._id })
         }
+        await writeNotification(db, { recipientUid: post.uid, kind: 'community.post.' + { approve: 'approved', reject: 'rejected', remove: 'removed' }[action], postId: post._id, revisionId: version._id, commentId: '', reason, createdAt: at })
         await log(db, u, 'post.' + action, post._id, { revisionId: version._id, reason, targetUid: post.uid }, at)
         return {}
       })
@@ -636,6 +640,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
         await db.put(comments, comment._id, { ...comment, status: next, reason })
         const delta = next === 'public' ? 1 : before === 'public' ? -1 : 0
         if (delta) await db.put(posts, post._id, { ...post, commentCount: post.commentCount + delta })
+        await writeNotification(db, { recipientUid: comment.uid, kind: 'community.comment.' + { approve: 'approved', reject: 'rejected', remove: 'removed' }[p.decision], postId: post._id, revisionId: comment.revisionId ?? '', commentId: comment._id, reason, createdAt: now() })
         await log(db, u, 'comment.' + p.decision, comment._id, { revisionId: comment.revisionId ?? '', reason, targetUid: comment.uid }, now())
         return {}
       })
