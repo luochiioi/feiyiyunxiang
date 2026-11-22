@@ -76,6 +76,9 @@
           "path": "reader/reader"
         },
         {
+          "path": "coop-story/coop-story"
+        },
+        {
           "path": "activity/activity"
         },
         {

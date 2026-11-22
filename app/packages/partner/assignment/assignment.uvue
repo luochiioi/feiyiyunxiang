@@ -13,6 +13,7 @@
           <text class="body">这是 PK 胜者为你挑选的彩蛋任务。完成实地打卡，或答对一道海丝非遗题，任一方式都能解除下一场限制。</text>
           <text class="body">分配满 72 小时后，也可以主动拒绝。</text>
           <text class="muted">{{ rejectHint }}</text>
+          <text class="body">答对好友发来的 AI 非遗猜图，也可免除一项待处理的失败任务。</text>
         </view>
         <button class="primary" :disabled="busy" @click="finish">确认完成实地打卡</button>
         <button v-if="quizAvailable && quiz == null" class="secondary" :disabled="busy" @click="openQuiz">改为答题</button>
@@ -23,6 +24,7 @@
           <text v-if="wrongHint.length > 0" class="wrong">{{ wrongHint }}</text>
           <button v-for="option in quiz.options" :key="option.id" class="secondary" :disabled="busy" @click="answer(option.id)">{{ option.label }}</button>
         </view>
+        <button class="secondary" :disabled="busy" @click="openPage('/packages/story/guess/guess')">查看好友的 AI 猜图</button>
         <button v-if="rejectEnabled" class="secondary" :disabled="busy" @click="decline">拒绝任务</button>
       </template>
       <view v-else class="card">
@@ -36,7 +38,7 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 
 import { computed, ref } from 'vue'
-import { decodePageId } from '@/features/navigation.uts'
+import { decodePageId, openPage } from '@/features/navigation.uts'
 import { showError } from '@/features/api.uts'
 import { loadAssignment, finishAssignment, declineAssignment, partnerView, loadAssignmentQuiz, answerAssignmentQuiz } from '@/features/partner/partner.uts'
 import type { AssignmentQuiz } from '@/features/partner/partner.uts'

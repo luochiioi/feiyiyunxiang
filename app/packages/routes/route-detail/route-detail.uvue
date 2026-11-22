@@ -19,9 +19,10 @@
             <text class="body">{{ node.title }}</text><text class="muted">{{ node.checked ? '查看我的打卡' : node.locked ? '待解锁' : '去打卡' }} ›</text>
           </view>
         </view>
-        <view v-if="progress?.snapshot.exhibit != null" class="card">
-          <text class="heading">展品彩蛋</text>
-          <button class="secondary" @click="openExhibit">{{ progress?.exhibitCompleted === true ? '回看展品观察' : '开始展品观察' }}</button>
+        <view v-if="exhibitTitle != null" class="card">
+          <text class="heading">{{ exhibitTitle }}</text>
+          <text v-if="!exhibitReady" class="body">完成本馆的定位照片打卡后，进馆观察展品，提交线索和照片。</text>
+          <button v-else class="secondary" @click="openExhibit">{{ progress?.exhibitCompleted === true ? '回看展品观察' : '开始展品观察' }}</button>
         </view>
         <view v-if="activities.length > 0" class="card">
           <text class="heading">文化任务</text>
@@ -30,7 +31,7 @@
             <text class="muted">{{ progress?.activities?.includes(item.id) === true ? '已完成' : '查看任务' }} ›</text>
           </view>
         </view>
-        <button v-if="runId == null" class="secondary" @click="openStory">查看剧情章节</button>
+        <button v-if="runId == null || progress?.purpose === 'coop'" class="secondary" @click="openStory">查看剧情章节</button>
         <button v-if="runId == null" class="secondary" @click="showOnMap">在地图查看路线</button>
         <!-- #ifdef MP-WEIXIN -->
         <button class="secondary" @click="openPage('/packages/ar/ar/ar')">奥喵 AR</button>
@@ -59,7 +60,7 @@ import { activeRun, findRoute, listNodes, loadRun, published, refreshCatalog, st
 import type { RunProgress } from '@/features/exploration/catalog.uts'
 import { api, session, showError } from '@/features/api.uts'
 import { dispatchMapEvent } from '@/features/exploration/map-store.uts'
-import { decodePageId, openCheckin, openCultureActivity, openPage, returnToMap } from '@/features/navigation.uts'
+import { decodePageId, openCheckin, openCoopStory, openCultureActivity, openPage, returnToMap } from '@/features/navigation.uts'
 const id = ref<string | null>(null)
 const runId = ref<string | null>(null)
 const progress = ref<RunProgress | null>(null)
@@ -76,6 +77,9 @@ const route = computed(() => {
 })
 const routeSections = computed(() => (route.value?.description ?? '').split('\n\n'))
 const activities = computed(() => content.value?.activities ?? [])
+const exhibit = computed(() => runId.value == null ? content.value?.exhibit ?? null : null)
+const exhibitTitle = computed(() => runId.value == null ? content.value?.exhibitTitle ?? exhibit.value?.title ?? null : null)
+const exhibitReady = computed(() => progress.value != null && exhibit.value != null)
 const nodes = computed(() => {
   const snapshot = content.value
   if (snapshot == null) return listNodes(id.value).map(node => ({ id: node.id, title: node.title, checked: node.checked, locked: false }))
@@ -122,15 +126,17 @@ async function openPoint(nodeId: string): Promise<void> {
 }
 function openExhibit(): void {
   const run = progress.value
-  const exhibit = run?.snapshot.exhibit
-  if (run != null && exhibit != null) openCheckin(run.routeId + ':' + exhibit.id, run.runId)
+  const point = exhibit.value
+  if (exhibitReady.value && run != null && point != null) openCheckin(run.routeId + ':' + point.id, run.runId)
 }
 function openActivity(activityId: string): void {
   if (id.value == null) return
   openCultureActivity(id.value!, activityId, runId.value)
 }
 function openStory(): void {
-  if (id.value != null) openPage('/packages/story/story/story?routeId=' + encodeURIComponent(id.value!))
+  const run = progress.value
+  if (run?.purpose === 'coop') openCoopStory(run.runId)
+  else if (id.value != null) openPage('/packages/story/story/story?routeId=' + encodeURIComponent(id.value!))
 }
 async function showOnMap(): Promise<void> {
   const item = route.value

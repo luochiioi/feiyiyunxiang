@@ -34,6 +34,7 @@
           <text class="body">旅伴的{{ (team.partnerSeat ?? (team.mySeat === 'macau' ? 'hunan' : 'macau')) === 'macau' ? '澳门' : '湖南' }}席位 {{ team.partnerProgress?.done ?? 0 }} / {{ team.partnerProgress?.total ?? 0 }}</text>
         </view>
         <button v-if="status === 'active' && team.myRunId != null" class="primary" :disabled="busy" @click="explore">开始探索</button>
+        <button v-if="(status === 'active' || status === 'done') && team.myRunId != null" class="secondary" @click="openCurrentStory">查看合作剧情</button>
         <button v-if="canSettle" class="primary" :disabled="busy" @click="settle">结算成果</button>
         <button v-if="canAnswer" class="primary" :disabled="busy" @click="answer(true)">接受邀请</button>
         <button v-if="canAnswer" class="secondary" :disabled="busy" @click="answer(false)">拒绝邀请</button>
@@ -41,6 +42,14 @@
         <button v-else class="secondary" :disabled="busy" @click="load">发起新合作</button>
       </template>
       <PartnerInviteForm v-else :coop="true" :friends="friends" :busy="busy" :enabled="true" @invite="invite" />
+      <view v-if="history.length > 0 || historyFailed" class="card">
+        <text class="heading">已完成的合作</text>
+        <button v-if="historyFailed" class="secondary" @click="loadHistory">重试读取合作记录</button>
+        <view v-for="entry in history" :key="entry.id" class="row spread divider menu-row" @click="openCoopStory(entry.runId)">
+          <text class="body">{{ completionDate(entry.completedAt) }}</text>
+          <text class="muted">查看合作剧情 ›</text>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -49,12 +58,17 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import PartnerInviteForm from '../components/PartnerInviteForm.uvue'
 import { computed, ref } from 'vue'
-import { openRouteDetail } from '@/features/navigation.uts'
-import { showError, secured } from '@/features/api.uts'
+import { openCoopStory, openRouteDetail } from '@/features/navigation.uts'
+import { showError, secured, session } from '@/features/api.uts'
 import { answerCoop, loadCoop, loadInviteFriends, loadMyCoop, startCoop } from '@/features/partner/partner.uts'
 import type { CoopTask, CoopView, PartnerFriend } from '@/features/partner/partner.uts'
 
+type CoopStoryEntry = { id: string, runId: string, completedAt: number }
+
 const team = ref<CoopView | null>(null)
+const history = ref<CoopStoryEntry[]>([])
+const historyFailed = ref(false)
+const historyLoading = ref(false)
 const friends = ref<PartnerFriend[]>([])
 const busy = ref(false)
 const loading = ref(false)
@@ -78,7 +92,33 @@ function toggleTask(id: string): void {
   chosen.value = base.includes(id) ? base.filter(item => item !== id) : [...base, id]
 }
 
-onShow(() => { if (!busy.value) load() })
+onShow(() => {
+  if (!busy.value) load()
+  loadHistory()
+})
+
+async function loadHistory(): Promise<void> {
+  if (historyLoading.value) return
+  historyLoading.value = true
+  history.value = []
+  historyFailed.value = false
+  const uid = session.value?.uid
+  try {
+    const entries = await secured<CoopStoryEntry[]>('coopStoryHistory')
+    if (uid == null || session.value?.uid === uid) history.value = entries
+  } catch (_) { historyFailed.value = true }
+  finally { historyLoading.value = false }
+}
+
+function completionDate(value: number): string {
+  const date = new Date(value)
+  return date.getFullYear() + '年' + (date.getMonth() + 1) + '月' + date.getDate() + '日'
+}
+
+function openCurrentStory(): void {
+  const runId = team.value?.myRunId
+  if (runId != null) openCoopStory(runId)
+}
 
 async function load(): Promise<void> {
   if (loading.value) return
@@ -117,6 +157,7 @@ async function settle(): Promise<void> {
   try {
     await secured<UTSJSONObject>('settleCoop', { teamId: id })
     team.value = await loadCoop(id)
+    await loadHistory()
   } catch (error) {
     if ((error as Error).message === 'NOT_READY') uni.showToast({ title: '双方完成席位任务后可结算', icon: 'none' })
     else showError()

@@ -4,7 +4,7 @@
     <view v-if="scene != null" class="game-page" :class="{ 'warm-scene': act >= 5 }">
       <view class="game-stage">
         <view class="game-top">
-          <text class="marker-caption">{{ '第 ' + act + ' 幕 · ' + chapter?.title }}</text>
+          <text class="marker-caption">{{ act === 7 ? chapter?.title : '第 ' + act + ' 幕 · ' + chapter?.title }}</text>
           <view class="game-icon-actions">
             <button v-if="path.length > 1" class="game-icon-control" :disabled="busy" @click="previous">上一段</button>
             <button class="game-icon-control" :disabled="busy" @click="restart">重读</button>
@@ -30,7 +30,7 @@
           <button class="continue-control" :disabled="busy" @click="advance(scene.nextSceneId ?? '')">{{ busy ? '正在保存…' : '继续' }}</button>
         </view>
         <view v-else class="ending-panel">
-          <text class="ending-title">本幕结束</text>
+          <text class="ending-title">{{ act === 7 ? '双城故事完结' : '本幕结束' }}</text>
           <text class="ending-text">{{ scene.text }}</text>
           <button class="ending-action" @click="leave">返回章节目录</button>
         </view>
@@ -69,7 +69,8 @@ const art = computed((): string => {
   if (act.value === 1) return '/packages/story/static/opening-map.jpg'
   if (act.value === 2) return '/packages/story/static/storm-at-sea.jpg'
   if (act.value === 4) return '/packages/story/static/macau-shore.jpg'
-  const chapterArt = chapter.value?.scenes[0]?.asset
+  const chapterArt = act.value === 7 ? scene.value?.asset : chapter.value?.scenes[0]?.asset
+  if (act.value === 7 && chapterArt === 'aomiao') return '/packages/story/static/opening-map.jpg'
   if (chapterArt === 'tile-workshop') return '/packages/story/static/tile-workshop.jpg'
   if (chapterArt === 'embroidery-stall') return '/packages/story/static/embroidery-stall.jpg'
   if (chapterArt === 'embroidery-room') return '/packages/story/static/embroidery-room.jpg'
@@ -97,7 +98,7 @@ async function load(): Promise<void> {
     loadLocal(key === openingStorageKey ? opening : scriptedOpening, key)
     return
   }
-  if (runId.value.length === 0 || act.value < 2 || act.value > 6) {
+  if (runId.value.length === 0 || act.value < 2 || act.value > 7) {
     message.value = '请从章节目录打开剧情。'
     return
   }

@@ -161,6 +161,20 @@ test('PK egg actions are routed and admin cancellation needs an admin session', 
   assert.equal((await call('cancelPk', 'fixture-token', { matchId: 'unknown' })).code, 'AUTH_REQUIRED')
 })
 
+test('cooperative story actions require a member session and reject a different exploration owner', async () => {
+  const g = gateway()
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: [] })
+  g.rows.set('fy-runsanother-run', { uid: 'another-member', purpose: 'coop' })
+  const call = (action, token, payload) => g.main({ action, token, payload })
+  for (const action of ['coopStory', 'coopStoryHistory']) {
+    assert.equal((await call(action, '', { uid: 'member', runId: 'another-run' })).code, 'AUTH_REQUIRED')
+  }
+  assert.equal((await call('coopStory', 'fixture-token', { runId: 'another-run' })).code, 'NOT_FOUND')
+  const history = await call('coopStoryHistory', 'fixture-token', { uid: 'another-member' })
+  assert.equal(history.code, 'OK')
+  assert.equal(history.data.length, 0)
+})
+
 test('community gateway separates guest reads, author previews and reviewer privileges', async () => {
   const g = gateway()
   const { hashPassword } = nativeRequire('./security')

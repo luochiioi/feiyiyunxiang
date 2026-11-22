@@ -7,7 +7,7 @@ import type { ExhibitClue, RouteNode, RouteSummary, MapViewport } from './types.
 export type PublishedNode = { id: string, title: string, description: string, latitude: number, longitude: number, radius: number, clue?: ExhibitClue, afterClue?: string, alternate?: string, reward?: string }
 export type ActivitySummary = { id: string, title: string, after?: string[] }
 export type ChapterGuide = { act: number, title: string, activityId?: string | null, gateText: string }
-export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], exhibit?: PublishedNode, activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean, cultureSourceRoutes?: string[] }
+export type PublishedRoute = { id: string, version: string, name: string, region: string, description: string, testOnly: boolean, viewport: MapViewport, nodes: PublishedNode[], exhibit?: PublishedNode, exhibitTitle?: string, activities?: ActivitySummary[], chapters?: ChapterGuide[], cultureUpgrade?: boolean, cultureSourceRoutes?: string[] }
 export type RunProgress = { runId: string, routeId: string, version: string, purpose?: string, done: number, total: number, completed: string[], snapshot: PublishedRoute, exhibitCompleted?: boolean, activities?: string[] }
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)
