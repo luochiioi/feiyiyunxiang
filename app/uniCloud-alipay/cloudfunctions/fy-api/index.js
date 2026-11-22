@@ -20,7 +20,7 @@ const communityActions = new Set([...guestActions, ...reviewActions, 'communityS
   'communityReport', 'communityRanking', 'communityRemoveOwn', 'communityReviewNotices', 'communityReadReview'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
   'aomiaoStatus', 'claimAomiao', 'selectAomiao', 'explorationArchive',
-  'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading',
+  'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading', 'coopStory', 'coopStoryHistory',
   'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends',
   'bottleStatus', 'joinBottle', 'respondBottle', 'cancelBottle',
   'inviteCoop', 'respondCoop', 'withdrawCoop', 'leaveCoop', 'coopStatus', 'myCoop', 'settleCoop',

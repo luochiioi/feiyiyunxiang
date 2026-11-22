@@ -74,7 +74,8 @@ function routeView(v, version, checked = [], includeClues = true) {
   })
   return {id:v.id,name:v.name,region:v.region,description:v.description,museum:v.museum,testOnly:v.testOnly,viewport:v.viewport,nodes,version,
     activities:cultureSummary(v.culture), chapters:(v.culture?.chapters ?? []).map(chapter => chapterGuide(v.culture, chapter)),
-    cultureUpgrade:Array.isArray(v.cultureUpgrade), cultureSourceRoutes:v.cultureUpgrade ?? []}
+    cultureUpgrade:Array.isArray(v.cultureUpgrade), cultureSourceRoutes:v.cultureUpgrade ?? [],
+    ...(includeClues && v.exhibit != null ? { exhibitTitle: v.exhibit.title } : {})}
 }
 function createService({repo,now=Date.now,allowTestContent=true}) {
   const attachCulture = createCultureUpgrade({ repo, allowTestContent })
@@ -134,6 +135,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       snapshot.nodes = snapshot.nodes.filter(node => nodes.includes(node.id))
       snapshot.activities = snapshot.activities.filter(activity => activities.includes(activity.id))
     }
+    if (purpose !== 'solo') delete snapshot.exhibitTitle
     if (purpose === 'pk') snapshot.activities = []
     const completed = checked.filter(id => snapshot.nodes.some(node => node.id === id))
     const exhibit = purpose === 'solo' ? run.snapshot.exhibit : null

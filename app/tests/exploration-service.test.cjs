@@ -477,13 +477,16 @@ test('both formal museum routes preserve task gates, private work and reading ch
     assert.equal(published.name, route.name)
     assert.equal(published.nodes[0].clue.answer, undefined)
     assert.equal(published.exhibit, undefined)
+    assert.equal(published.exhibitTitle, route.exhibit.title)
     const { id: runId } = await s.start(a, { routeId: route.id, requestId: 'start-' + route.id })
     assert.equal((await s.activityStatus(a, { runId, activityId })).unlocked, false)
     const exhibit = route.exhibit
     const exhibitPhoto = 'photo-' + exhibit.id
     const exhibitPayload = { runId, nodeId: exhibit.id, requestId: 'visit-' + exhibit.id }
     await assert.rejects(s.mediaBinding(a, exhibitPayload), /CLUE_LOCKED/)
-    assert.equal((await s.progress(a, { runId })).snapshot.exhibit, undefined)
+    const locked = (await s.progress(a, { runId })).snapshot
+    assert.equal(locked.exhibit, undefined)
+    assert.equal(locked.exhibitTitle, exhibit.title)
     for (const act of acts) await assert.rejects(s.storyChapter(a, { runId, act }), /ACTIVITY_LOCKED/)
     const payload = { runId, nodeId: node.id, requestId: 'visit-' + node.id, latitude: node.latitude, longitude: node.longitude, clueAnswer: node.clue.answer }
     const mediaId = 'media-' + node.id

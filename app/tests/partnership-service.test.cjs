@@ -496,14 +496,25 @@ test('cross-region bottles require both users and create separate private museum
   assert.equal((await f.repo.list('fy-runs', {})).length, 2)
   assert.equal((await f.p.friends(f.a)).length, 0)
   await assert.rejects(f.p.coopStatus(f.c, { teamId: accepted.teamId }), /NOT_FOUND/)
+  const runs = {}
   for (const [user, region] of [[f.a, 'macau'], [f.b, 'hunan']]) {
     const route = f.routes[region]
     const team = await f.p.myCoop(user)
     assert.equal(team.routeId, route.id)
     assert.equal(team.version, f.versions[region])
+    const ownStory = { runId: team.myRunId }
+    runs[region] = ownStory
+    const story = await f.service.coopStory(user, ownStory)
+    assert.equal(story.pending, true)
+    assert.equal(story.full, false)
+    assert.deepEqual(story.chapters.map(chapter => chapter.act), route.culture.chapters.map(chapter => chapter.act))
+    assert.ok(story.chapters.every(chapter => !chapter.unlocked))
+    await assert.rejects(f.service.coopStory(f.c, ownStory), /NOT_FOUND/)
+    await assert.rejects(f.service.storyChapter(user, { ...ownStory, act: 7 }), /NOT_FOUND/)
     const progress = await f.service.progress(user, { runId: team.myRunId })
     const node = progress.snapshot.nodes[0]
     assert.equal(node.clue.answer, undefined)
+    assert.equal(progress.snapshot.exhibitTitle, undefined)
     assert.ok(node.clue.question)
     assert.equal(await f.service.routeProgress(user, { routeId: route.id }), null)
     await assert.rejects(f.service.progress(f.c, { runId: team.myRunId }), /NOT_FOUND/)
@@ -516,6 +527,10 @@ test('cross-region bottles require both users and create separate private museum
     if (region === 'macau') {
       await f.service.saveTile(user, { runId: team.myRunId, pattern: 'sail', palette: 'cobalt' })
       await f.service.answerQuiz(user, { runId: team.myRunId, activityId: 'tileQuiz', option: route.culture.tileQuiz.answer })
+      const localStory = await f.service.coopStory(user, ownStory)
+      assert.ok(localStory.chapters.every(chapter => chapter.unlocked))
+      await assert.rejects(f.service.storyChapter(user, { ...ownStory, act: 5 }), /NOT_FOUND/)
+      await assert.rejects(f.p.settleCoop(user, { teamId: accepted.teamId }), /NOT_READY/)
     } else {
       await f.service.answerQuiz(user, { runId: team.myRunId, option: route.culture.quiz.answer })
       for (const card of route.culture.learning.cards) await f.service.readCard(user, { runId: team.myRunId, cardId: card.id })
@@ -524,6 +539,31 @@ test('cross-region bottles require both users and create separate private museum
   assert.equal((await f.p.settleCoop(f.a, { teamId: accepted.teamId })).alreadySettled, false)
   assert.equal((await f.p.settleCoop(f.b, { teamId: accepted.teamId })).alreadySettled, true)
   assert.equal(await f.p.bottleStatus(f.a), null)
+  assert.deepEqual(await f.service.coopStoryHistory(f.c), [])
+  const newHunan = { ...f.routes.hunan, revision: 1, name: '新湖南路线' }
+  newHunan.culture = { ...newHunan.culture, chapters: newHunan.culture.chapters.map(chapter => ({ ...chapter, title: '新版 ' + chapter.title })) }
+  await f.service.saveDraft(f.admin, newHunan)
+  const savedDraft = await f.repo.get('fy-drafts', newHunan.id)
+  await f.repo.put('fy-drafts', newHunan.id, { ...savedDraft, contentVerified: true })
+  const newVersion = await f.service.publish(f.admin, { id: newHunan.id, revision: 2 })
+  assert.notEqual(newVersion.version, f.versions.hunan)
+  for (const [user, region] of [[f.a, 'macau'], [f.b, 'hunan']]) {
+    const own = runs[region]
+    const story = await f.service.coopStory(user, own)
+    assert.equal(story.pending, false)
+    assert.equal(story.full, true)
+    assert.deepEqual(story.chapters.filter(chapter => chapter.unlocked).map(chapter => chapter.act), [2, 3, 4, 5, 6, 7])
+    assert.equal(story.chapters.find(chapter => chapter.act === 5).title, f.routes.hunan.culture.chapters[0].title)
+    assert.deepEqual(await f.service.coopStoryHistory(user), [{ id: accepted.teamId, ...own, completedAt: f.now() }])
+  }
+  const macauFinale = { ...runs.macau, act: 7 }
+  const hunanFinale = { ...runs.hunan, act: 7 }
+  assert.deepEqual((await f.service.storyChapter(f.a, macauFinale)).checkpoint.path, ['museum'])
+  await assert.rejects(f.service.saveReading(f.a, { ...macauFinale, revision: 0, path: ['museum', 'together'] }), /INVALID_READING_PATH/)
+  const checkpoint = await f.service.saveReading(f.a, { ...macauFinale, revision: 0, path: ['museum', 'macau'] })
+  assert.deepEqual((await f.service.storyChapter(f.a, macauFinale)).checkpoint, checkpoint)
+  assert.deepEqual((await f.service.storyChapter(f.b, hunanFinale)).checkpoint.path, ['museum'])
+  await assert.rejects(f.service.storyChapter(f.b, macauFinale), /NOT_FOUND/)
 })
 
 test('same-region bottles keep both seats on the same route and decline releases both users', async () => {
@@ -544,8 +584,37 @@ test('same-region bottles keep both seats on the same route and decline releases
   assert.equal(local.partnerSeat, 'hunan')
   assert.equal(local.routeId, remote.routeId)
   assert.notEqual(local.myRunId, remote.myRunId)
+  const story = await f.service.coopStory(f.a, { runId: local.myRunId })
+  assert.equal(story.pending, false)
+  assert.equal(story.full, false)
+  assert.deepEqual(story.chapters.map(chapter => chapter.act), f.routes.hunan.culture.chapters.map(chapter => chapter.act))
   await f.p.leaveCoop(f.a, { teamId: local.id })
   assert.equal(await f.p.bottleStatus(f.b), null)
+})
+
+test('settling a same-region team unlocks only its local chapters', async () => {
+  const f = await bottleReady()
+  const route = f.routes.hunan
+  await f.p.joinBottle(f.a, { mode: 'same', region: 'hunan', requestId: 'local-a' })
+  const match = await f.p.joinBottle(f.b, { mode: 'same', region: 'hunan', requestId: 'local-b' })
+  await f.p.respondBottle(f.a, { matchId: match.matchId, accept: true })
+  const paired = await f.p.respondBottle(f.b, { matchId: match.matchId, accept: true })
+  for (const user of [f.a, f.b]) {
+    const { myRunId: runId } = await f.p.myCoop(user)
+    const node = route.nodes[0]
+    const visit = { runId, nodeId: node.id, requestId: 'local-visit', latitude: node.latitude, longitude: node.longitude }
+    const mediaId = 'local-' + user.uid
+    await f.service.registerMedia(user, { ...visit, id: mediaId, fileID: 'private' })
+    await f.service.checkin(user, { ...visit, mediaId, clueAnswer: node.clue.answer })
+    await f.service.answerQuiz(user, { runId, option: route.culture.quiz.answer })
+    for (const card of route.culture.learning.cards) await f.service.readCard(user, { runId, cardId: card.id })
+  }
+  await f.p.settleCoop(f.a, { teamId: paired.teamId })
+  const [{ runId }] = await f.service.coopStoryHistory(f.a)
+  const story = await f.service.coopStory(f.a, { runId })
+  assert.equal(story.full, false)
+  assert.deepEqual(story.chapters.map(chapter => [chapter.act, chapter.unlocked]), [[5, true], [6, true]])
+  await assert.rejects(f.service.storyChapter(f.a, { runId, act: 7 }), /NOT_FOUND/)
 })
 
 test('withdrawn and expired bottles cannot be matched by delayed requests', async () => {

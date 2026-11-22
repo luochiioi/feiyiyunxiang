@@ -26,6 +26,10 @@ export function openCultureActivity(routeId: string, activityId: string, runId: 
   openPage('/packages/story/activity/activity?routeId=' + encodeURIComponent(routeId) + '&activityId=' + encodeURIComponent(activityId) + runQuery(runId))
 }
 
+export function openCoopStory(runId: string): void {
+  openPage('/packages/story/coop-story/coop-story?runId=' + encodeURIComponent(runId))
+}
+
 export function returnToMap(): void {
   const pages = getCurrentPages()
   const home = pages.findIndex(page => page.route === 'pages/index/index')

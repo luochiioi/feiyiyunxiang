@@ -1,4 +1,5 @@
 const { activityIds, quizIds, chapterGuide, completedActivities, requireValue, tileWork, validPath } = require('./culture')
+const { coopChapters } = require('./coop-story')
 
 function createCultureService({ repo, owned, key, now, attachCulture, checkinWindow }) {
   async function checkinsMet(db, runId, after, mode = 'all') {
@@ -41,11 +42,17 @@ function createCultureService({ repo, owned, key, now, attachCulture, checkinWin
     return run.story?.[chapter.act] ?? { path: [chapter.start], revision: 0 }
   }
 
+  async function hasChapterProgress(db, run, runId, chapter) {
+    return (chapter.activity == null || completedActivities(run).includes(chapter.activity)) &&
+      await checkinsMet(db, runId, chapter.after, chapter.checkinMode)
+  }
+
   async function unlockedChapter(db, run, p) {
-    const chapter = run.snapshot.culture?.chapters?.find(item => item.act === p.act)
+    const access = run.purpose === 'coop' ? await coopChapters(db, run, p.runId, key) : null
+    const chapters = access?.chapters ?? run.snapshot.culture?.chapters ?? []
+    const chapter = chapters.find(item => item.act === p.act)
     requireValue(chapter, 'NOT_FOUND')
-    requireValue((chapter.activity == null || completedActivities(run).includes(chapter.activity)) &&
-      await checkinsMet(db, p.runId, chapter.after, chapter.checkinMode), 'ACTIVITY_LOCKED')
+    requireValue(access?.full || await hasChapterProgress(db, run, p.runId, chapter), 'ACTIVITY_LOCKED')
     return chapter
   }
 
@@ -141,6 +148,28 @@ function createCultureService({ repo, owned, key, now, attachCulture, checkinWin
         })
       }))
       return items.flat()
+    },
+    async coopStory(u, p) {
+      const run = await owned(repo, u, p.runId)
+      requireValue(run.purpose === 'coop', 'NOT_FOUND')
+      const access = await coopChapters(repo, run, p.runId, key)
+      const chapters = await Promise.all(access.chapters.map(async chapter => {
+        const unlocked = access.full || await hasChapterProgress(repo, run, p.runId, chapter)
+        const guide = unlocked ? { act: chapter.act, title: chapter.title, gateText: '' } : chapterGuide(run.snapshot.culture, chapter)
+        return { ...guide, unlocked, started: !!run.story?.[chapter.act] }
+      }))
+      return { full: access.full, pending: access.pending === true, routeName: run.snapshot.name, chapters }
+    },
+    async coopStoryHistory(u) {
+      requireValue(u?.uid, 'AUTH_REQUIRED')
+      const histories = await Promise.all(['a', 'b'].map(field =>
+        repo.list('fy-teams', { [field]: u.uid, status: 'done' })))
+      const teams = new Map(histories.flat().map(team => [team._id, team]))
+      const entries = [...teams.values()].filter(team => team.members?.includes(u.uid) &&
+        typeof team.runs?.[u.uid] === 'string')
+      return entries.sort((a, b) => b.completedAt - a.completedAt).map(team => ({
+        id: team._id, runId: team.runs[u.uid], completedAt: team.completedAt
+      }))
     },
     async storyChapter(u, p) {
       const run = await attachCulture(await owned(repo, u, p.runId), p.runId)
