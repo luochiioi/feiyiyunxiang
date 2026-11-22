@@ -5,9 +5,9 @@ const {createNotificationService}=require('../uniCloud-alipay/cloudfunctions/fy-
 const a={uid:'A'},b={uid:'B'},c={uid:'C'}
 async function fixture(){const f=transactionFixture();let at=1784000000000;f.p=createPartnershipService({repo:f.repo,now:()=>at});f.n=createNotificationService({repo:f.repo,now:()=>at});f.advance=ms=>at+=ms;f.code={};for(const u of[a,b,c]){await f.repo.put('uni-id-users',u.uid,{status:0});f.code[u.uid]=(await f.p.ensureProfile(u)).code}f.request=(requestId='first')=>f.p.requestFriend(a,{code:f.code.B,requestId});f.list=u=>f.n.notificationsList(u,{});f.detail=(u,id)=>f.n.notificationDetail(u,{id});return f}
 test('friend request and acceptance notify only verified recipients and preserve community DTO compatibility',async()=>{
- const f=await fixture();await f.request();let inbox=await f.list(b);assert.equal(inbox.items.length,1);assert.equal(inbox.items[0].kind,'friend.request.received');assert.equal((await f.list(a)).items.length,0)
+ const f=await fixture();await f.request();let inbox=await f.list(b);assert.equal(inbox.items.length,1);assert.equal(inbox.items[0].kind,'friend.request.received');assert.equal((await f.list(a)).items.length,0);assert.equal((await f.n.notificationsSummary(b)).unread,1)
  const detail=await f.detail(b,inbox.items[0].id);assert.equal(detail.friend.status,'pending');assert.equal(detail.friend.nickname,'旅伴A');assert.equal(detail.target,null);assert.doesNotMatch(JSON.stringify(detail),/"uid"|friendId|requestId|recipientUid|actorUid/)
- await f.n.notificationRead(b,{id:detail.id});assert.equal((await f.repo.list('fy-friends',{}))[0].status,'pending')
+ await f.n.notificationRead(b,{id:detail.id});assert.equal((await f.repo.list('fy-friends',{}))[0].status,'pending');assert.equal((await f.n.notificationsSummary(b)).unread,0)
  await f.p.respondFriend(b,{requestId:'first',accept:true});const accepted=(await f.list(a)).items[0];assert.equal(accepted.kind,'friend.request.accepted');assert.equal((await f.detail(a,accepted.id)).friend.nickname,'旅伴B');assert.equal((await f.detail(b,detail.id)).friend.status,'accepted');assert.equal((await f.list(c)).items.length,0)
  for(const method of['notificationDetail','notificationRead'])await assert.rejects(f.n[method](c,{id:detail.id,recipientUid:'B'}),/NOT_FOUND/)
 })
@@ -32,7 +32,7 @@ test('withdrawn/rejected/expired and replaced requests retain snapshots without 
 })
 test('equal client requestIds from different senders never mix messages; missing/disabled targets are unavailable',async()=>{
  const f=await fixture();await f.request('same');await f.p.requestFriend(c,{code:f.code.B,requestId:'same'});const list=await f.list(b);assert.equal(list.items.length,2);assert.notEqual(list.items[0].id,list.items[1].id)
- await f.repo.put('uni-id-users','A',{status:1});const states=await Promise.all(list.items.map(x=>f.detail(b,x.id)));assert.equal(states.find(x=>x.friend.nickname==='旅伴A').friend.status,'unavailable');assert.equal(states.find(x=>x.friend.nickname==='旅伴C').friend.status,'pending')
+ await f.repo.put('uni-id-users','A',{status:1});const states=await Promise.all(list.items.map(x=>f.detail(b,x.id)));assert.equal(states.find(x=>x.friend.nickname==='旅伴A').friend.status,'unavailable');assert.equal(states.find(x=>x.friend.nickname==='旅伴C').friend.status,'pending');const fromC=(await f.repo.list('fy-friends',{from:'C'}))[0];f.rows.delete('fy-friends/'+fromC._id);assert.equal((await f.detail(b,states.find(x=>x.friend.nickname==='旅伴C').id)).friend.status,'unavailable')
 })
 
 test('separate incoming handles answer the intended sender even when raw requestIds collide',async()=>{
