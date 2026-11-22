@@ -26,3 +26,16 @@ test('a decision succeeds locally even if refresh fails and cannot be accidental
  s.run("incoming.value=[{id:'request',code:'ABCDEFGH',nickname:'旅伴'}]");await s.run("answer('request',true)");assert.equal(writes,1);assert.equal(s.run('incoming.value.length'),0);assert.equal(s.run('friends.value.length'),1)
  fail=false;await s.run('loadPartner()');assert.equal(writes,1)
 })
+
+test('returning from companion handling reloads current friend status without repeating an acknowledged receipt',async()=>{
+ let show=null,status='pending',read=false,receipts=0
+ const s=clientScript('packages/profile/message-detail/message-detail.uvue',{session:{value:{uid:'B'}},onShow:fn=>show=fn,loadNotification:async()=>({id:'notice',kind:'friend.request.received',read,target:null,reason:'',friend:{nickname:'Alice',status}}),readNotification:async()=>{read=true;receipts++},refreshReviewNotices:async()=>{}})
+ await s.run('loadDetail()');assert.equal(s.run('detail.value.friend.status'),'pending');status='accepted';assert.notEqual(show,null);await show();assert.equal(s.run('detail.value.friend.status'),'accepted');assert.equal(receipts,1)
+})
+
+test('same-account renewal preserves an unconfirmed send id while a different account clears it',async()=>{
+ const session={value:{uid:'A'}},calls=[];let fail=true
+ const s=partner({session,sendFriendRequest:async(code,id)=>{calls.push(id);if(fail)throw Error('RESPONSE_LOST');return{}}})
+ s.run("code.value='ABCDEFGH'");await s.run('addFriend()');session.value=null;s.change();session.value={uid:'A'};s.change();await new Promise(r=>setImmediate(r));assert.equal(s.run('code.value'),'ABCDEFGH');fail=false;await s.run('addFriend()');assert.equal(calls[0],calls[1])
+ fail=true;s.run("code.value='BCDEFGH2'");await s.run('addFriend()');session.value=null;s.change();session.value={uid:'B'};s.change();assert.equal(s.run('code.value'),'');assert.equal(s.run('pendingRequest.value'),'')
+})

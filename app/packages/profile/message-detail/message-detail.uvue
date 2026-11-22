@@ -29,6 +29,7 @@ const error = ref(''), readError = ref(''), loading = ref(false), reading = ref(
 let sequence = 0
 watch(() => session.value?.uid, () => { sequence++; detail.value = null; error.value = ''; readError.value = ''; loading.value = false; reading.value = false; if (session.value != null) loadDetail() }, { flush: 'sync' })
 onLoad((options) => { id.value = options['id'] ?? ''; loadDetail() })
+onShow(async () => { if (detail.value?.friend != null) await loadDetail() })
 async function loadDetail(): Promise<void> {
   const uid = session.value?.uid
   if (uid == null || loading.value) return
