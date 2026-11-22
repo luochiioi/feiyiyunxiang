@@ -1,0 +1,36 @@
+Friend request notifications — local acceptance
+Date: 2026-11-23, Asia/Macau
+Source: C:/Users/Raymond/.codex/worktrees/friend-notifications/feiyiyunxiang
+Branch: codex/friend-notifications
+Baseline: 36dac2c956460b0beb6b4f8c8245cafc9a121929
+Runtime implementation: 2539dac. Later schema/test/browser declarations: 5d15d86.
+Command (app): node --test 'tests/*.test.cjs'
+ℹ tests 176
+ℹ suites 0
+ℹ pass 176
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3280.6194
+Command (root): ./scripts/build-local.ps1 -Target WeixinDev (exit 0)
+Restored source AppID from public app/config/weixin.json
+00:47:45.792 项目 app 编译成功。 前端运行日志，请另行在小程序开发工具的控制台查看。如需在 HBuilderX 查看日志输出，可开启运行日志回显，详情：https://uniapp.dcloud.net.cn/tutorial/run/mp-log.html
+Source and compiled WeChat AppID agree
+Command (root): ./scripts/build-local.ps1 -Target Admin (exit 0)
+00:45:00.745 项目 admin 编译成功。
+00:45:00.906 [33m项目 admin 导出Web成功，路径为：C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\admin\unpackage\dist\build\web[39m
+Auxiliary app Web export:
+00:48:43.008 项目 app 编译成功。
+00:48:43.356 [33m项目 app 导出Web成功，路径为：C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\app\unpackage\dist\build\web[39m
+Chrome fixtures: validate-friend-notifications-browser.js and validate-community-notifications-browser.js completed as Ran Playwright code with no Error in clean, separate sessions. Actual current Web exports served on loopback 8421/8422. Cloud call boundary replaced by local fixture; no real cloud evidence.
+Screenshot: friend-accepted-browser.png, 16890 bytes
+Screenshot: friend-companion-browser.png, 52486 bytes
+Screenshot: friend-received-browser.png, 18708 bytes
+Artifact SHA256:
+D3AE96565E6F931F7A0B1BCA1B900E0B417BE57A02D6ED0F5FB4355FA0C05C70 C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\app\unpackage\dist\dev\mp-weixin\project.config.json
+9286B625EDAA718E596B8890ED14962F6AC5A2E49C7C3E46CB4B682A7A78612F C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\app\unpackage\dist\dev\mp-weixin\packages\profile\message-detail\message-detail.js
+251FBEEA8975ADB2A052A3FCD6FE13078A23B9C3BCF4C852880E5561655E3C5C C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\app\unpackage\dist\dev\mp-weixin\packages\partner\partner\partner.js
+2CAFCC98AB47862657AD1E84908A4911E3EFCEC1DA20FB1369FB12B6FB9EF22E C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\app\unpackage\dist\build\web\index.html
+AD0D9B02FB5002F909E26EEC885A27EC9770B7F50451EEE4ECE7A157146D40BE C:\Users\Raymond\.codex\worktrees\friend-notifications\feiyiyunxiang\admin\unpackage\dist\build\web\index.html
+No deployment or real account/WeChat device tests this stage. Prior-stage user acceptance is recorded separately.
