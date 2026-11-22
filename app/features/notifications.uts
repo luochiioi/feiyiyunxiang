@@ -3,7 +3,8 @@ import { secured, session } from '@/features/api.uts'
 
 export type NotificationItem = { id: string, kind: string, title: string, preview: string, createdAt: number, read: boolean }
 export type NotificationTarget = { postId: string, revisionId: string, commentId: string, preview: boolean }
-export type NotificationDetail = { id: string, kind: string, title: string, preview: string, createdAt: number, read: boolean, reason: string, target: NotificationTarget | null }
+export type FriendNotification = { nickname: string, status: string }
+export type NotificationDetail = { id: string, kind: string, title: string, preview: string, createdAt: number, read: boolean, reason: string, target: NotificationTarget | null, friend?: FriendNotification | null }
 export type NotificationPage = { items: NotificationItem[], next: string }
 const owner = ref(''), unread = ref(0)
 let sequence = 0

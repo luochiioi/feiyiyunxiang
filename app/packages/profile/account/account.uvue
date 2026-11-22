@@ -30,7 +30,7 @@
       </view>
       <view class="card">
         <text class="heading">社区记录</text>
-        <view class="row spread menu-row" @click="openPage('/packages/profile/messages/messages')"><view class="my-posts-label"><text class="body">消息</text><view v-if="hasUnreadNotifications" class="review-dot" aria-label="有未读审核消息" /></view><text class="muted">审核消息 ›</text></view>
+        <view class="row spread menu-row" @click="openPage('/packages/profile/messages/messages')"><view class="my-posts-label"><text class="body">消息</text><view v-if="hasUnreadNotifications" class="review-dot" aria-label="有未读消息" /></view><text class="muted">消息 ›</text></view>
         <view class="row spread menu-row" @click="openPage(communityPath + '?tab=mine')"><view class="my-posts-label"><text class="body">我的帖子</text><view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></view><text class="muted">审核进度 ›</text></view>
         <view class="row spread divider menu-row" @click="openPage(communityPath)"><text class="body">社区</text><text class="muted">›</text></view>
         <!-- #ifdef MP-WEIXIN -->

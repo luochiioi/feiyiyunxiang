@@ -1,15 +1,16 @@
 <template>
   <view class="screen">
-    <AppPageHeader title="审核消息" :show-back="true" />
+    <AppPageHeader title="消息详情" :show-back="true" />
     <view class="content">
       <view v-if="session == null" class="card"><text class="body">请从「我的」登录后查看本人的消息。</text></view>
       <text v-if="loading" class="muted">正在读取消息…</text>
       <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="loadDetail">重试读取消息</button></view>
       <view v-if="detail != null" class="card">
         <text class="heading">{{ detail?.title ?? '' }}</text><text class="muted">{{ formatTime(detail?.createdAt ?? 0) }}</text>
+        <view v-if="detail?.friend != null" class="reason"><text class="title">{{ detail?.friend?.nickname ?? '旅伴' }}</text><text class="body">{{ friendStatusText(detail?.friend?.status ?? 'unavailable') }}</text><button class="primary" @click="openFriend">{{ detail?.friend?.status === 'pending' ? '前往旅伴处理申请' : '查看旅伴' }}</button></view>
         <view v-if="(detail?.reason ?? '').length > 0" class="reason"><text class="title">审核员处理原因</text><text class="body">{{ detail?.reason ?? '' }}</text></view>
         <button v-if="detail?.target != null" class="primary" @click="openTarget">查看对应帖子／版本</button>
-        <text v-else class="muted">对应内容当前不可打开，审核结果仍保留在此。</text>
+        <text v-else-if="detail?.friend == null" class="muted">对应内容当前不可打开，审核结果仍保留在此。</text>
       </view>
       <view v-if="readError.length > 0" class="card"><text class="body">{{ readError }}</text><button class="secondary" :disabled="reading" @click="markRead">重试标为已读</button></view>
       <button class="secondary" @click="backToList">返回消息列表</button>
@@ -59,6 +60,18 @@ function openTarget(): void {
   const target = detail.value?.target
   if (target == null) return
   openPage('/packages/community/community-post/community-post?postId=' + encodeURIComponent(target.postId) + (target.preview ? '&revisionId=' + encodeURIComponent(target.revisionId) : ''))
+}
+function openFriend(): void {
+  if (detail.value?.friend == null || !detail.value!.kind.startsWith('friend.')) return
+  openPage('/packages/partner/partner/partner')
+}
+function friendStatusText(status: string): string {
+  if (status === 'pending') return '这条好友申请等待你处理，请前往旅伴选择接受或拒绝。'
+  if (status === 'accepted') return '好友关系已建立，可以前往旅伴查看。'
+  if (status === 'rejected') return '你已拒绝这条好友申请。'
+  if (status === 'withdrawn') return '对方已撤回这条好友申请。'
+  if (status === 'expired') return '这条好友申请已过期。'
+  return '这条申请已失效，或相关账号当前不可用，请到旅伴查看当前状态。'
 }
 function backToList(): void { uni.redirectTo({ url: '/packages/profile/messages/messages' }) }
 function formatTime(at: number): string { return new Date(at).toLocaleString() }

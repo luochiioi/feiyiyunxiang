@@ -7,13 +7,17 @@
         <text class="body">澳门与湖南的探索者先添加好友，再组队完成各自的本地任务，共同解锁成果。</text>
       </view>
 
+      <view v-if="session == null" class="card"><text class="body">微信登录后查看好友申请和旅伴记录。</text><button class="primary" :disabled="busy" @click="signIn">微信登录</button></view>
+      <template v-else>
       <view class="card">
         <text class="heading">我的好友</text>
         <view class="row">
           <text class="muted">我的邀请码 {{ myCode.length > 0 ? myCode : '获取中…' }}</text>
           <button v-if="myCode.length > 0" class="secondary inline" @click="copyCode">复制</button>
         </view>
-        <text v-if="loadError.length > 0" class="muted">读取失败：{{ loadError }}</text>
+        <text v-if="actionMessage.length > 0" class="body">{{ actionMessage }}</text>
+        <text v-if="loadError.length > 0" class="muted">{{ loadError }}</text>
+        <button v-if="loadError.length > 0" class="secondary" :disabled="loading" @click="loadPartner">重试读取旅伴</button>
         <view class="row">
           <input class="code-input" v-model="code" maxlength="8" placeholder="输入对方邀请码" />
           <button class="primary inline" :disabled="busy" @click="addFriend">添加</button>
@@ -64,6 +68,7 @@
         <text class="muted">{{ rejectHint }}</text>
         <button class="secondary" @click="openPage('/packages/partner/assignment/assignment?assignmentId=' + assignmentId)">查看任务</button>
       </view>
+      </template>
     </view>
   </view>
 </template>
@@ -71,9 +76,10 @@
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { openPage } from '@/features/navigation.uts'
-import { showError, requestId, secured } from '@/features/api.uts'
+import { showError, requestId, secured, session, login } from '@/features/api.uts'
+import { refreshNotificationsSummary } from '@/features/notifications.uts'
 import { loadFriends, loadAssignment, sendFriendRequest, answerFriendRequest, partnerView } from '@/features/partner/partner.uts'
 
 type FriendCard = { code: string, nickname: string }
@@ -86,7 +92,9 @@ const incoming = ref<IncomingRequest[]>([])
 const myCode = ref('')
 const code = ref('')
 const busy = ref(false)
-const loadError = ref('')
+const loadError = ref(''), actionMessage = ref(''), loading = ref(false)
+const pendingCode = ref(''), pendingRequest = ref('')
+let sequence = 0, actionSequence = 0
 const assignment = ref<AssignmentCard | null>(null)
 
 const view = computed(() => partnerView({ assignment: assignment.value, now: Date.now() }))
@@ -95,44 +103,68 @@ const assignmentId = computed(() => assignment.value?.id ?? '')
 const assignmentTitle = computed(() => assignment.value?.title ?? assignment.value?.nodeTitle ?? '失败任务')
 const rejectHint = computed(() => view.value.rejectEnabled ? '已满 72 小时，可以主动拒绝。' : '分配满 72 小时后可主动拒绝，此前只能完成。')
 
-onShow(async () => {
-  loadError.value = ''
+function resetPartner(): void {
+  sequence++; actionSequence++; friends.value = []; incoming.value = []; myCode.value = ''; assignment.value = null
+  code.value = ''; pendingCode.value = ''; pendingRequest.value = ''; loadError.value = ''; actionMessage.value = ''; busy.value = false; loading.value = false
+}
+watch(() => session.value?.uid, () => { resetPartner(); if (session.value != null) loadPartner() }, { flush: 'sync' })
+onShow(() => { loadPartner() })
+async function loadPartner(): Promise<void> {
+  const uid = session.value?.uid
+  if (uid == null) { resetPartner(); return }
+  const request = ++sequence
+  loading.value = true; loadError.value = ''
   try {
-    myCode.value = (await secured<UTSJSONObject>('ensureProfile', {}) as UTSJSONObject)['code'] as string
-  } catch (e) { loadError.value = '邀请码 ' + (e as Error).message; return }
-  try {
-    const rows = await loadFriends()
+    const [profile, rows, task] = await Promise.all([secured<UTSJSONObject>('ensureProfile', {}), loadFriends(), loadAssignment()])
+    if (request !== sequence || uid !== session.value?.uid) return
+    myCode.value = profile['code'] as string
     friends.value = rows.filter(row => row['kind'] !== 'incoming').map(row => ({ code: row['code'] as string, nickname: row['nickname'] as string }))
     incoming.value = rows.filter(row => row['kind'] === 'incoming').map(row => ({ id: row['id'] as string, code: row['code'] as string, nickname: row['nickname'] as string }))
-  } catch (e) { loadError.value = '好友列表 ' + (e as Error).message; return }
-  try {
-    assignment.value = await loadAssignment() as AssignmentCard | null
-  } catch (e) { loadError.value = '失败任务 ' + (e as Error).message }
-})
+    assignment.value = task as AssignmentCard | null
+  } catch (_) { if (request === sequence && uid === session.value?.uid) loadError.value = '旅伴信息暂时无法读取，请重试。' }
+  finally { if (request === sequence && uid === session.value?.uid) loading.value = false }
+}
+async function signIn(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try { await login(); await loadPartner() } catch (_) { showError() } finally { busy.value = false }
+}
 
 function copyCode(): void {
   if (myCode.value.length > 0) uni.setClipboardData({ data: myCode.value, fail: () => showError() })
 }
 
 async function addFriend(): Promise<void> {
-  if (busy.value || code.value.trim().length === 0) return
-  busy.value = true
+  const uid = session.value?.uid, normalized = code.value.trim().toUpperCase()
+  if (busy.value || uid == null || normalized.length === 0) return
+  if (pendingCode.value !== normalized || pendingRequest.value.length === 0) { pendingCode.value = normalized; pendingRequest.value = requestId() }
+  const operation = ++actionSequence, id = pendingRequest.value
+  busy.value = true; actionMessage.value = ''
   try {
-    await sendFriendRequest(code.value.trim().toUpperCase(), requestId())
-    code.value = ''
-    uni.showToast({ title: '好友请求已发送', icon: 'success' })
-  } catch (_) { showError() } finally { busy.value = false }
+    await sendFriendRequest(normalized, id)
+    if (operation !== actionSequence || uid !== session.value?.uid) return
+    code.value = ''; pendingCode.value = ''; pendingRequest.value = ''
+    actionMessage.value = '好友请求已发送。'
+    await loadPartner(); await refreshNotificationsSummary()
+  } catch (_) { if (operation === actionSequence && uid === session.value?.uid) showError() }
+  finally { if (operation === actionSequence && uid === session.value?.uid) busy.value = false }
 }
 
 async function answer(requestId: string, accept: boolean): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+  const uid = session.value?.uid
+  if (busy.value || uid == null) return
+  const operation = ++actionSequence
+  busy.value = true; actionMessage.value = ''
   try {
     await answerFriendRequest(requestId, accept)
+    if (operation !== actionSequence || uid !== session.value?.uid) return
     const accepted = incoming.value.find(item => item.id === requestId)
     incoming.value = incoming.value.filter(item => item.id !== requestId)
-    if (accept && accepted != null) friends.value = friends.value.concat([{ code: accepted.code, nickname: accepted.nickname }])
-  } catch (_) { showError() } finally { busy.value = false }
+    if (accept && accepted != null && !friends.value.some(item => item.code === accepted.code)) friends.value = friends.value.concat([{ code: accepted.code, nickname: accepted.nickname }])
+    actionMessage.value = accept ? '已接受好友申请。' : '已拒绝好友申请。'
+    await loadPartner(); await refreshNotificationsSummary()
+  } catch (_) { if (operation === actionSequence && uid === session.value?.uid) showError() }
+  finally { if (operation === actionSequence && uid === session.value?.uid) busy.value = false }
 }
 </script>
 
