@@ -1,0 +1,36 @@
+Community review notifications — local evidence
+Timezone: Asia/Macau, 2026-11-22 to 2026-11-23
+Source: C:/Users/Raymond/.codex/worktrees/community-review-notifications/feiyiyunxiang
+Branch: codex/community-review-notifications
+Baseline: eb519652b6d39f0debdaf2118c26772543933b23
+Implementation commit: 731d2c3
+app: node --test 'tests/*.test.cjs'
+ℹ tests 163
+ℹ suites 0
+ℹ pass 163
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3161.2225
+root: ./scripts/build-local.ps1 -Target WeixinDev (exit 0)
+Restored source AppID from public app/config/weixin.json
+00:01:03.954 项目 app 编译成功。 前端运行日志，请另行在小程序开发工具的控制台查看。如需在 HBuilderX 查看日志输出，可开启运行日志回显，详情：https://uniapp.dcloud.net.cn/tutorial/run/mp-log.html
+Source and compiled WeChat AppID agree
+root: ./scripts/build-local.ps1 -Target Admin (exit 0)
+23:59:04.876 项目 admin 编译成功。
+23:59:05.025 [33m项目 admin 导出Web成功，路径为：C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\admin\unpackage\dist\build\web[39m
+root: HBuilderX publish web --project <new worktree>/app (auxiliary browser build only)
+00:01:53.955 项目 app 编译成功。
+00:01:54.278 [33m项目 app 导出Web成功，路径为：C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\app\unpackage\dist\build\web[39m
+Chrome / Playwright CLI: run-code --filename scripts/validate-community-notifications-browser.js completed with Ran Playwright code and no Error. Local fixture intercepts compiled cloud call boundary. Not cloud evidence.
+Screenshot: admin-nine-images-browser.png, 66175 bytes
+Screenshot: message-detail-browser.png, 20517 bytes
+Screenshot: messages-browser.png, 22696 bytes
+Artifact SHA256:
+D3AE96565E6F931F7A0B1BCA1B900E0B417BE57A02D6ED0F5FB4355FA0C05C70 C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\app\unpackage\dist\dev\mp-weixin\project.config.json
+D09D7168BC4DA1FF4E254037CF9F0B493779265A2DBF439CC7630AD08202113C C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\app\unpackage\dist\dev\mp-weixin\packages\profile\messages\messages.js
+CA23864652E9163DEE385D4C61570799EDB427E896FA64E4718F7EF0A24CB29B C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\app\unpackage\dist\dev\mp-weixin\packages\profile\message-detail\message-detail.js
+AD0D9B02FB5002F909E26EEC885A27EC9770B7F50451EEE4ECE7A157146D40BE C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\admin\unpackage\dist\build\web\index.html
+8B603BB2DE64630927F3916EA70D06F51ADCDB6D15C6CE73F71A3E1979A524A0 C:\Users\Raymond\.codex\worktrees\community-review-notifications\feiyiyunxiang\app\unpackage\dist\build\web\index.html
+Read-only cloud CLI: absolute project path and ordinal rejected; --prj app reports no service space. Actual remote fy-api/schema/index versions NOT VERIFIED. No cloud writes. WeChat devices NOT TESTED.
