@@ -25,15 +25,16 @@ function text(value, min, max, code) {
 function submission(p) {
   if (!identifier(p.requestId) || !Number.isSafeInteger(p.baseRevision) || p.baseRevision < 0 ||
       (p.avatarUploadId != null && !identifier(p.avatarUploadId)) ||
+      (p.avatarRevisionId != null && !identifier(p.avatarRevisionId)) ||
       (p.resetAvatar != null && typeof p.resetAvatar !== 'boolean') ||
-      (p.resetAvatar && p.avatarUploadId)) fail('INVALID_REQUEST')
+      [p.resetAvatar, p.avatarUploadId, p.avatarRevisionId].filter(Boolean).length > 1) fail('INVALID_REQUEST')
   const interests = p.interests ?? []
   if (!Array.isArray(interests) || interests.length > 3 || new Set(interests).size !== interests.length ||
       interests.some(item => !interestsAllowed.has(item))) fail('INVALID_INTERESTS')
   return {
     baseRevision: p.baseRevision, nickname: text(p.nickname, 2, 20, 'INVALID_NICKNAME'),
     bio: text(p.bio, 0, 80, 'INVALID_BIO'), displayCity: text(p.displayCity, 0, 20, 'INVALID_CITY'),
-    interests, avatarUploadId: p.avatarUploadId ?? '', resetAvatar: p.resetAvatar === true
+    interests, avatarUploadId: p.avatarUploadId ?? '', avatarRevisionId: p.avatarRevisionId ?? '', resetAvatar: p.resetAvatar === true
   }
 }
 
@@ -139,7 +140,7 @@ function createProfileService({ repo, media, now = Date.now }) {
     async profileSubmit(user, p) {
       const uid = await own(repo, user)
       const values = submission(p)
-      const { baseRevision, avatarUploadId, resetAvatar, ...fields } = values
+      const { baseRevision, avatarUploadId, avatarRevisionId, resetAvatar, ...fields } = values
       const id = key('profile-revision', uid, p.requestId)
       const digest = key(values)
       const original = await loadProfile(user)
@@ -158,13 +159,20 @@ function createProfileService({ repo, media, now = Date.now }) {
         if (recent.length >= 10) fail('RATE_LIMITED')
         let avatarMedia = profile.avatarMedia ?? null
         let avatarVersion = profile.avatarVersion ?? ''
-        const avatar = resetAvatar || avatarUploadId ? '' : legacyAvatar(profile)
+        let avatar = resetAvatar || avatarUploadId ? '' : legacyAvatar(profile)
         if (resetAvatar) { avatarMedia = null; avatarVersion = '' }
         if (avatarUploadId) {
           const upload = await db.get(uploads, avatarUploadId)
           if (upload?.uid !== uid || upload.expiresAt <= at) fail('UPLOAD_NOT_AVAILABLE')
           avatarMedia = upload.media
           avatarVersion = id
+        }
+        if (avatarRevisionId) {
+          const source = await db.get(revisions, avatarRevisionId)
+          if (source?.uid !== uid || !source.snapshot.avatarMedia) fail('NOT_FOUND')
+          avatarMedia = source.snapshot.avatarMedia
+          avatarVersion = avatarMedia.fileID === profile.avatarMedia?.fileID ? profile.avatarVersion : id
+          avatar = ''
         }
         if (profile.pendingRevisionId) {
           const pending = await db.get(revisions, profile.pendingRevisionId)

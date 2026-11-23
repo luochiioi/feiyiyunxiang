@@ -1,0 +1,317 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="编辑资料" :show-back="true" />
+    <view class="content">
+      <view v-if="session == null" class="card">
+        <text class="body">微信登录后可编辑资料或查看审核结果。</text>
+        <button class="primary" :disabled="busy" @click="signIn">微信登录</button>
+      </view>
+      <template v-else>
+        <view v-if="myProfile != null" class="card">
+          <text class="label">当前公开资料</text>
+          <view class="row">
+            <ProfileAvatar :code="myProfile?.code ?? ''" :version="myProfile?.avatarVersion ?? ''" :legacy="myProfile?.avatar ?? ''" :diameter="48" />
+            <view class="stack">
+              <text class="heading wrap">{{ myProfile?.nickname }}</text>
+              <text v-if="myProfile?.bio" class="body wrap">{{ myProfile?.bio }}</text>
+              <text v-if="publicTags.length > 0" class="muted wrap">{{ publicTags }}</text>
+            </view>
+          </view>
+        </view>
+        <view v-if="resultView != null" class="card" :class="{ rejected: resultView?.status === 'rejected' }">
+          <text class="heading">{{ statusLabel(resultView?.status ?? '') }}</text>
+          <view class="row">
+            <image class="avatar" :src="resultPhoto || '/static/ip/aomiao-wave.png'" :mode="resultPhoto.length > 0 ? 'aspectFill' : 'aspectFit'" @error="photoFailed" />
+            <view class="stack">
+              <text class="body wrap">{{ resultView?.nickname }}</text>
+              <text v-if="resultView?.bio" class="muted wrap">{{ resultView?.bio }}</text>
+              <text v-if="resultTags.length > 0" class="muted wrap">{{ resultTags }}</text>
+            </view>
+          </view>
+          <text v-if="resultView?.reason" class="body wrap">{{ resultView?.reason }}</text>
+          <text v-if="resultView?.status === 'pending'" class="muted">审核期间继续展示当前公开资料。</text>
+          <button v-if="resultPhotoFailed" class="secondary" @click="refreshResultPhoto">重试审核头像</button>
+          <button v-if="historyMode && historyView != null" class="secondary" :disabled="busy || myProfile == null" @click="editHistory">以此修改</button>
+        </view>
+
+        <view v-if="draft != null && !historyMode && !saved" class="card">
+          <text class="heading">提交新资料</text>
+          <view class="row">
+            <image v-if="photoPath.length > 0 || draft.resetAvatar || draft.avatarRevisionId.length > 0" class="avatar" :src="draftPhoto" mode="aspectFill" />
+            <ProfileAvatar v-else :code="myProfile?.code ?? ''" :version="myProfile?.avatarVersion ?? ''" :legacy="myProfile?.avatar ?? ''" :diameter="60" />
+            <view class="stack">
+              <button class="secondary" :disabled="busy || selecting" @click="choosePhoto">选择头像</button>
+              <button class="secondary" :disabled="busy || selecting" @click="resetPhoto">使用默认澳喵</button>
+            </view>
+          </view>
+          <text class="muted">JPG 或 PNG，压缩后最多 1 MiB</text>
+          <text class="label">昵称</text>
+          <input v-model="draft.nickname" class="field" :maxlength="-1" :disabled="busy" placeholder="2–20 字" />
+          <text class="label">一句话简介（可选）</text>
+          <textarea v-model="draft.bio" class="field bio" :maxlength="-1" :disabled="busy" placeholder="最多 80 字" />
+          <text class="label">城市标签（可选）</text>
+          <input v-model="draft.displayCity" class="field" :maxlength="-1" :disabled="busy" placeholder="最多 20 字" />
+          <text class="label">文化兴趣（最多 3 项）</text>
+          <view class="interests">
+            <button v-for="interest in profileInterests" :key="interest" class="interest" :class="{ selected: draft.interests.includes(interest) }" :disabled="busy" @click="toggleInterest(interest)">{{ interest }}</button>
+          </view>
+          <button class="primary" :disabled="busy || selecting || needsRead" @click="save">{{ busy ? '正在提交…' : '提交审核' }}</button>
+        </view>
+        <button v-if="saved && !needsRead" class="secondary" :disabled="busy" @click="editAgain">继续编辑</button>
+      </template>
+      <text v-if="message.length > 0" role="status" class="body feedback">{{ message }}</text>
+      <button v-if="needsRead && session != null" class="secondary" :disabled="busy" @click="refresh">重新读取资料</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
+import { login, requestId, session } from '@/features/api.uts'
+import { myProfile, profileError, profileInterests, profileRequest, refreshMyProfile, submitMyProfile } from '@/features/profile/profile.uts'
+import type { ProfileRevision } from '@/features/profile/profile.uts'
+import { removeAvatarPreview, saveAvatarPreview } from '@/features/profile/profile-avatar.uts'
+import { statusLabel } from '@/features/community/community.uts'
+
+type Draft = { nickname: string, bio: string, displayCity: string, interests: string[], baseRevision: number, resetAvatar: boolean, avatarRevisionId: string }
+const draft = ref<Draft | null>(null)
+const history = ref<ProfileRevision | null>(null), historyId = ref('')
+const editingHistory = ref<ProfileRevision | null>(null)
+const busy = ref(false), selecting = ref(false), saved = ref(false), needsRead = ref(false)
+const message = ref(''), photoPath = ref(''), resultPhoto = ref('')
+const resultPhotoFailed = ref(false), owner = ref('')
+let generation = 0, reading = 0, photoReading = 0
+let uploadRequest = '', uploadId = ''
+let rebase = false
+const historyMode = computed(() => historyId.value.length > 0)
+const historyView = computed(() => owner.value === session.value?.uid ? history.value : null)
+const resultView = computed(() => historyMode.value ? historyView.value : editingHistory.value ?? myProfile.value?.pending ?? myProfile.value?.latest ?? null)
+const publicTags = computed(() => [myProfile.value?.displayCity ?? '', ...(myProfile.value?.interests ?? [])].filter(item => item.length > 0).join(' · '))
+const resultTags = computed(() => [resultView.value?.displayCity ?? '', ...(resultView.value?.interests ?? [])].filter(item => item.length > 0).join(' · '))
+const draftPhoto = computed(() => photoPath.value || (draft.value?.avatarRevisionId === resultView.value?.revisionId ? resultPhoto.value : '') || '/static/ip/aomiao-wave.png')
+onLoad(query => { historyId.value = query['revisionId'] ?? '' })
+onShow(refresh)
+
+function clearResultPhoto(): void {
+  photoReading++
+  removeAvatarPreview(resultPhoto.value)
+  resultPhoto.value = ''
+  resultPhotoFailed.value = false
+}
+onBeforeUnmount(() => { generation++; reading++; clearResultPhoto() })
+watch(() => session.value?.uid, () => {
+  reading++
+  clearResultPhoto()
+  const uid = session.value?.uid
+  if (uid == null || uid === owner.value) return
+  generation++
+  owner.value = uid
+  draft.value = null; history.value = null; editingHistory.value = null; saved.value = false; rebase = false
+  photoPath.value = ''; uploadId = ''; uploadRequest = ''; message.value = ''
+  busy.value = false; selecting.value = false; needsRead.value = true
+}, { flush: 'sync' })
+
+function populate(source: ProfileRevision | null): void {
+  const current = myProfile.value
+  if (current == null) return
+  const edited = source ?? current
+  draft.value = {
+    nickname: edited.nickname, bio: edited.bio, displayCity: edited.displayCity,
+    interests: [...edited.interests], baseRevision: current.revision,
+    avatarRevisionId: source?.hasAvatar === true ? source.revisionId : '',
+    resetAvatar: source != null && !source.hasAvatar && !(source.avatar ?? '').length
+  }
+}
+async function refresh(): Promise<void> {
+  const uid = session.value?.uid
+  if (uid == null) return
+  if (owner.value.length === 0) owner.value = uid
+  const ticket = ++reading
+  try {
+    await refreshMyProfile()
+    if (ticket !== reading || uid !== session.value?.uid) return
+    if (historyMode.value) {
+      const value = await profileRequest<ProfileRevision>(uid, 'profileRevision', { revisionId: historyId.value })
+      if (ticket !== reading || uid !== session.value?.uid) return
+      history.value = value
+    } else if (draft.value == null && !saved.value) populate(myProfile.value?.pending ?? null)
+    else if (rebase && draft.value != null && myProfile.value != null) {
+      draft.value!.baseRevision = myProfile.value!.revision
+      rebase = false
+    }
+    needsRead.value = false
+    message.value = saved.value ? '资料已提交审核。' : ''
+    refreshResultPhoto()
+  } catch (error) {
+    if (ticket !== reading || uid !== session.value?.uid) return
+    needsRead.value = true
+    message.value = saved.value ? '资料已提交，暂时无法刷新。请重新读取。' : profileError(error)
+  }
+}
+async function refreshResultPhoto(): Promise<void> {
+  clearResultPhoto()
+  const value = resultView.value
+  const uid = session.value?.uid
+  if (uid == null || value == null) return
+  if (!value.hasAvatar) { resultPhoto.value = value.avatar ?? ''; return }
+  const ticket = photoReading
+  try {
+    const response = await profileRequest<{ src: string }>(uid, 'profileRevision', { revisionId: value.revisionId, avatar: true })
+    const path = await saveAvatarPreview(response.src)
+    if (ticket !== photoReading || uid !== session.value?.uid) { removeAvatarPreview(path); return }
+    resultPhoto.value = path
+  } catch (_) {
+    if (ticket === photoReading && uid === session.value?.uid) resultPhotoFailed.value = true
+  }
+}
+function photoFailed(): void {
+  if (resultPhoto.value.length === 0) return
+  clearResultPhoto()
+  resultPhotoFailed.value = true
+}
+async function signIn(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try { await login(); await refresh() }
+  catch (error) { message.value = profileError(error) }
+  finally { busy.value = false }
+}
+function editHistory(): void {
+  const value = historyView.value
+  if (value == null) return
+  populate(value)
+  editingHistory.value = value
+  historyId.value = ''
+  history.value = null
+}
+function editAgain(): void {
+  photoPath.value = ''; uploadId = ''; uploadRequest = ''
+  editingHistory.value = null
+  populate(myProfile.value?.pending ?? null)
+  saved.value = false
+  message.value = ''
+}
+function toggleInterest(value: string): void {
+  const current = draft.value
+  if (current == null) return
+  if (current.interests.includes(value)) current.interests = current.interests.filter(item => item !== value)
+  else if (current.interests.length < 3) current.interests = [...current.interests, value]
+  else message.value = '最多选择 3 项文化兴趣。'
+}
+function resetPhoto(): void {
+  const current = draft.value
+  if (current == null || busy.value) return
+  photoPath.value = ''; uploadId = ''; uploadRequest = ''
+  current.avatarRevisionId = ''; current.resetAvatar = true
+}
+function choosePhoto(): void {
+  const uid = session.value?.uid, ticket = generation
+  if (uid == null || busy.value || selecting.value) return
+  selecting.value = true
+  uni.chooseImage({ count: 1, sourceType: ['album'], sizeType: ['compressed'],
+    success: result => {
+      const current = draft.value, selected = result.tempFilePaths[0]
+      if (ticket !== generation || uid !== session.value?.uid || current == null || !selected) return
+      photoPath.value = selected
+      uploadId = ''; uploadRequest = requestId()
+      current.avatarRevisionId = ''; current.resetAvatar = false
+      message.value = ''
+    },
+    fail: error => {
+      if (ticket === generation && uid === session.value?.uid && !error.errMsg.toLowerCase().includes('cancel')) {
+        message.value = '无法打开相册，请检查照片权限后重试。'
+      }
+    },
+    complete: () => { if (ticket === generation) selecting.value = false }
+  })
+}
+function readPhoto(path: string): Promise<string> {
+  // #ifdef MP-WEIXIN
+  if (typeof uni.getFileSystemManager === 'function') {
+    return new Promise<string>((resolve, reject) => {
+      uni.getFileSystemManager().readFile({ filePath: path, encoding: 'base64',
+        success: value => resolve(value.data as string), fail: () => reject(new Error('INVALID_IMAGE')) })
+    })
+  }
+  // #endif
+  // #ifdef WEB
+  return fetch(path).then(response => response.blob()).then(blob => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '')
+    reader.onerror = () => reject(new Error('INVALID_IMAGE'))
+    reader.readAsDataURL(blob)
+  }))
+  // #endif
+  // #ifndef WEB
+  return Promise.reject(new Error('INVALID_IMAGE'))
+  // #endif
+}
+async function photoBase64(path: string): Promise<string> {
+  const limit = 1398104
+  const data = await readPhoto(path)
+  if (data.length > 0 && data.length <= limit) return data
+  const compressed = await new Promise<string>((resolve, reject) => {
+    uni.compressImage({ src: path, quality: 72, compressedWidth: 800,
+      success: result => resolve(result.tempFilePath), fail: () => reject(new Error('INVALID_IMAGE')) })
+  })
+  const smaller = await readPhoto(compressed)
+  if (smaller.length === 0 || smaller.length > limit) throw new Error('INVALID_IMAGE')
+  return smaller
+}
+function checked(value: string, min: number, max: number, code: string): string {
+  const plain = value.trim(), size = Array.from(plain).length
+  if (size < min || size > max || /[\u0000-\u001f\u007f-\u009f]/.test(value)) throw new Error(code)
+  return plain
+}
+async function save(): Promise<void> {
+  const uid = session.value?.uid, current = draft.value
+  const ticket = generation
+  if (uid == null || current == null || busy.value || selecting.value || saved.value || historyMode.value || needsRead.value) return
+  busy.value = true
+  message.value = ''
+  try {
+    const nickname = checked(current.nickname, 2, 20, 'INVALID_NICKNAME')
+    const bio = checked(current.bio, 0, 80, 'INVALID_BIO')
+    const displayCity = checked(current.displayCity, 0, 20, 'INVALID_CITY')
+    if (current.interests.length > 3 || current.interests.some(item => !profileInterests.includes(item))) throw new Error('INVALID_INTERESTS')
+    if (photoPath.value.length > 0 && uploadId.length === 0) {
+      const base64 = await photoBase64(photoPath.value)
+      if (ticket !== generation || uid !== session.value?.uid) return
+      const upload = await profileRequest<{ uploadId: string }>(uid, 'profileStageAvatar', { requestId: uploadRequest, base64 })
+      if (ticket !== generation || uid !== session.value?.uid) return
+      uploadId = upload.uploadId
+    }
+    const values: UTSJSONObject = { baseRevision: current.baseRevision, nickname, bio, displayCity, interests: [...current.interests] }
+    if (uploadId.length > 0) values['avatarUploadId'] = uploadId
+    else if (current.avatarRevisionId.length > 0) values['avatarRevisionId'] = current.avatarRevisionId
+    else if (current.resetAvatar) values['resetAvatar'] = true
+    await submitMyProfile(values)
+    if (ticket !== generation || uid !== session.value?.uid) return
+    saved.value = true
+    editingHistory.value = null
+    message.value = '资料已提交审核。'
+    await refresh()
+  } catch (error) {
+    if (ticket !== generation || (session.value != null && uid !== session.value?.uid)) return
+    const code = (error as Error).message
+    if (code === 'UPLOAD_NOT_AVAILABLE') { uploadId = ''; uploadRequest = requestId() }
+    if (code === 'STALE_VERSION') { needsRead.value = true; rebase = true }
+    message.value = profileError(error)
+  } finally { if (ticket === generation) busy.value = false }
+}
+</script>
+
+<style scoped>
+@import '@/styles/page.css';
+.label { color: #614d39; font-size: 13px; font-weight: 700; }
+.field { box-sizing: border-box; width: 100%; min-height: 42px; padding: 10px 12px; border-radius: 10px; border: 1px solid #e8dbc9; background: #fffaf4; }
+.bio { min-height: 80px; }
+.interests { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.interest { margin: 0; padding: 4px 12px; color: #5b4732; border: 1px solid #e8dbc9; border-radius: 18px; font-size: 13px; line-height: 26px; }
+.interest.selected { color: #36512f; border-color: #6f8c61; background: #edf3e3; font-weight: 700; }
+.wrap { word-break: break-word; }
+.rejected { border-color: #e9a6a6; background: #fff1ee; }
+.feedback { color: #874235; }
+</style>

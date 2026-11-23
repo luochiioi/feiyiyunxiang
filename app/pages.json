@@ -51,6 +51,9 @@
           "path": "account/account"
         },
         {
+          "path": "profile-edit/profile-edit"
+        },
+        {
           "path": "my-checkins/my-checkins"
         }
       ]
