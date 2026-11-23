@@ -1,0 +1,38 @@
+Development cloud notification deployment — 2026-11-23 Asia/Macau
+Source: C:/Users/Raymond/Desktop/feinibuke/feiyiyunxiang
+Cloud: alipay env-00jy72i6ol3c
+Base source: 56f8d6e plus retained local partnership timestamp fix.
+[支付宝云:feiyiyunxiang]上传数据集合Schema(fy-notifications.schema.json)
+[支付宝云:feiyiyunxiang]上传数据集合Schema(fy-notifications.schema.json)成功
+[支付宝云:feiyiyunxiang]上传初始索引(fy-notifications.index.json)
+[支付宝云:feiyiyunxiang]上传初始索引(fy-notifications.index.json)成功
+[支付宝云:feiyiyunxiang]初始化云数据库完成
+0:cloud functions:OK
+
+[支付宝云:feiyiyunxiang]开始运行上传数据集合Schema(fy-friends.schema.json)
+[支付宝云:feiyiyunxiang]上传数据集合Schema(fy-friends.schema.json)成功
+0:cloud functions:OK
+
+[支付宝云:feiyiyunxiang] 本地node版本是18.20.0，云端node版本是18.18.2，请注意兼容问题。调整云端node版本参考
+[支付宝云:feiyiyunxiang] 正在上传云函数fy-api...
+[支付宝云:feiyiyunxiang] 云函数fy-api上传完成
+0:cloud functions:OK
+
+API_AND_RAW {"aomiaoStatus":{"code":"OK"},"notificationsSummary":{"code":"OK","unread":0},"notificationsList":{"code":"OK","count":0},"friends":{"code":"OK"},"rawSummary":{"code":"OK","unread":0}}
+DEPLOYED_GATEWAY_PERMISSION_PROBE {"notificationDetail":"NOT_FOUND","notificationRead":"NOT_FOUND","forgedRecipientSummary":{"code":"OK","unread":0},"guest":"AUTH_REQUIRED","adminToken":"AUTH_REQUIRED"}
+[本地调试][云函数：fy-notification-acceptance-local]，执行结果： {"cleanup":true,"removed":13,"remaining":0} 
+0:cloud functions:OK
+
+ℹ tests 177
+ℹ suites 0
+ℹ pass 177
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3051.0401
+Production source readback matched all listed files; current remote private config preserved exactly.
+035B37B412B42F1C0A54EAD7680B63A9D73BF451A51D0513E65476BB31A6C9C6 C:\Users\Raymond\Desktop\feinibuke\feiyiyunxiang\app\uniCloud-alipay\cloudfunctions\fy-api\index.js
+A834E23AB978B53B4522DC46669794F6079FFB0A46A480418AB7444D66C3AB23 C:\Users\Raymond\Desktop\feinibuke\feiyiyunxiang\app\uniCloud-alipay\cloudfunctions\fy-api\notification-service.js
+FB84A7F1569E2AA9F5AE57FD7976E138EF5601A59C0B63AB1B1FA932E5871FD6 C:\Users\Raymond\Desktop\feinibuke\feiyiyunxiang\app\uniCloud-alipay\cloudfunctions\fy-api\friend-notification-events.js
+A20A9F59CDBB85503EA2E965178299BC9B031FEBB9F0DB4832F28BCA817B2BC5 C:\Users\Raymond\Desktop\feinibuke\feiyiyunxiang\app\uniCloud-alipay\cloudfunctions\fy-api\partnership-service.js
