@@ -20,6 +20,8 @@
 - 仓库根：`./scripts/build-local.ps1 -Target Admin` 成功。实际产物是该目录 admin/unpackage/dist/build/web/index.html，保留 Browserslist 数据过旧提示。
 - 构建保留了项目方原有未提交的素材／地图样式；验证记录不声称这些原有改动属于本 PR。
 - 本轮服务端下架目标调整尚未部署开发云；本轮新入口没有微信真机验收。此前好友／审核消息与旧图恢复的开发云证据分别见 development-cloud-notifications.md、community-image-recovery.md，不能替代本轮新增行为的云端验证。
+- 辅助桌面 app Web 产物重新编译成功，保留现有可空类型等告警。使用该产物在 Edge 390×844、独立浏览器上下文执行 validate-notification-entrypoints-browser.js 与更新后的 validate-friend-notifications-browser.js，全部通过：游客无红点、登录红点、30 秒刷新消点、退出隔离、唯一好友按钮、进入旅伴处理、读取失败重试不重复决定和返回详情状态刷新。接口全部为本地固定响应，未联系开发云。
+- 模拟截图：[首页红点](evidence/notification-entrypoints/home-unread-browser.png)、[好友详情相关入口](evidence/notification-entrypoints/friend-related-action-browser.png)。仅使用 Alice／Bob 本地测试资料。
 
 ## 部署与复查
 
