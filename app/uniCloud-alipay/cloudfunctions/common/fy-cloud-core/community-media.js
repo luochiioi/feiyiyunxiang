@@ -78,12 +78,30 @@ function createCommunityMedia({ cloud, cfg, service, limited, namespace = 'commu
   }
 
   async function bytesOf(media) {
-    const key = encryptionKey()
-    try {
-      const { fileContent } = await cloud.downloadFile({ fileID: media.fileID })
-      if (!Buffer.isBuffer(fileContent) || fileContent.length < 28) fail('PHOTO_UNAVAILABLE')
-      return decrypt(fileContent, key)
-    } catch (_) { fail('PHOTO_UNAVAILABLE') }
+    const keys = [encryptionKey()]
+    // Old ciphertext keeps its original key. New writes always use encryptionKey().
+    for (const value of Array.isArray(cfg.mediaLegacyDecryptionKeys) ? cfg.mediaLegacyDecryptionKeys : []) {
+      if (typeof value !== 'string') fail('CONFIG_REQUIRED')
+      const key = Buffer.from(value, 'base64')
+      if (key.length !== 32) fail('CONFIG_REQUIRED')
+      keys.push(key)
+    }
+    let fileContent
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await cloud.downloadFile({ fileID: media.fileID })
+        if (result?.statusCode >= 400 || !Buffer.isBuffer(result?.fileContent) || result.fileContent.length < 28) fail('PHOTO_UNAVAILABLE')
+        fileContent = result.fileContent
+        break
+      } catch (_) {
+        if (attempt === 1) fail('PHOTO_UNAVAILABLE')
+      }
+    }
+    for (const key of keys) {
+      try { return decrypt(fileContent, key) }
+      catch (_) { /* Try only explicitly configured legacy keys. */ }
+    }
+    fail('PHOTO_UNAVAILABLE')
   }
 
   return {

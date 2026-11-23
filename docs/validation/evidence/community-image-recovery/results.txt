@@ -1,0 +1,12 @@
+2026-11-23, desktop project, development cloud env-00jy72i6ol3c
+Local: node --test 'tests/*.test.cjs' => 182 passed, 0 failed.
+Real storage, read-only diagnostic: current key could not decrypt historical files; backed-up desktop key decrypted them.
+Production reader against real storage: 9 gallery images + 1 older image succeeded.
+Final deployed WeChat runtime:
+  latest: 11/11 image reads and local preview writes succeeded on first attempt.
+  mine: 19/19 image reads and local preview writes succeeded on first attempt.
+  manual retry calls: 0; remaining image failures: 0.
+Deployed readback: final shared module matches local source.
+Private configuration: current upload key preserved; all other previous settings preserved; one verified legacy read key configured.
+Diagnostic helper: local only, read-only, archived outside cloudfunctions; no test posts or files created in cloud.
+Browser and physical WeChat devices: not executed in this change.
