@@ -16,7 +16,7 @@
       <text v-if="message.length > 0" class="step-message" role="status">{{ message }}</text>
       <button class="primary" :disabled="syncing" @click="sync(false)">{{ syncing ? '正在同步…' : session == null ? '微信登录并同步步数' : '同步微信步数' }}</button>
       <button v-if="message.length > 0 && session != null" class="secondary" :disabled="loading || syncing" @click="refresh()">重新读取记录</button>
-      <template v-if="details && session != null">
+      <template v-if="session != null">
         <button class="secondary step-preference" :disabled="syncing" @click="toggleAutoSync">{{ autoEnabled ? '关闭自动同步' : '开启自动同步' }}</button>
         <text class="muted">{{ autoEnabled ? '自动同步已开启，打开首页、社区或步数中心时更新今天的步数。' : '开启后，打开首页、社区或步数中心会同步今天的步数，已接受的好友可在榜单查看。' }}</text>
       </template>
@@ -32,9 +32,8 @@
         <text class="muted">仅本人和已接受的好友可见，按今日已同步步数排名。</text>
       </template>
       <text v-if="loading" class="muted">正在读取记录…</text>
-      <button v-if="!details" class="secondary" @click="openPage(stepsPath)">历史与每日里程碑</button>
     </view>
-    <template v-if="details && status != null">
+    <template v-if="status != null">
       <view class="card">
         <text class="heading">每日里程碑</text>
         <text class="body">{{ status.nextMilestone == null ? '今天的三个里程碑已全部达成。' : '距离下一里程碑还差 ' + (status.nextMilestone - (status.steps ?? 0)).toLocaleString() + ' 步' }}</text>
@@ -60,18 +59,17 @@
 import { computed, ref, watch } from 'vue'
 import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import { session, login, secured } from '@/features/api.uts'
-import { openPage } from '@/features/navigation.uts'
-import { stepError, stepsPath, stepAutoSyncEnabled, setStepAutoSync } from '@/features/steps.uts'
+import { stepError, stepAutoSyncEnabled, setStepAutoSync } from '@/features/steps.uts'
 import { syncWechatSteps } from '@/features/step-sync.uts'
 import type { StepStatus, StepRanking, StepHistory } from '@/features/steps.uts'
 
-const props = defineProps<{ visible: boolean, details: boolean }>()
+const props = defineProps<{ visible: boolean }>()
 const status = ref<StepStatus | null>(null)
 const ranking = ref<StepRanking | null>(null)
 const history = ref<StepHistory | null>(null)
 const message = ref(''), loading = ref(false), syncing = ref(false), autoEnabled = ref(false)
 let sequence = 0
-const visibleRanks = computed(() => props.details ? ranking.value?.rows ?? [] : (ranking.value?.rows ?? []).filter((row, index) => index < 3 || row.mine))
+const visibleRanks = computed(() => ranking.value?.rows ?? [])
 
 function clear(): void {
   sequence++
@@ -114,9 +112,9 @@ async function refresh(preserveMessage: boolean = false): Promise<void> {
   try {
     const tasks: Promise<void>[] = [
       secured<StepStatus>('stepStatus').then(value => { if (call === sequence && session.value?.uid === uid) status.value = value }),
-      secured<StepRanking>('stepRanking').then(value => { if (call === sequence && session.value?.uid === uid) ranking.value = value })
+      secured<StepRanking>('stepRanking').then(value => { if (call === sequence && session.value?.uid === uid) ranking.value = value }),
+      secured<StepHistory>('stepHistory').then(value => { if (call === sequence && session.value?.uid === uid) history.value = value })
     ]
-    if (props.details) tasks.push(secured<StepHistory>('stepHistory').then(value => { if (call === sequence && session.value?.uid === uid) history.value = value }))
     await Promise.all(tasks)
   } catch (error) { if (call === sequence && session.value?.uid === uid && !preserveMessage) message.value = stepError(error) }
   finally { if (call === sequence) loading.value = false }

@@ -2,13 +2,12 @@
   <view class="screen">
     <AppPageHeader :title="tab === 'mine' ? '我的帖子' : '社区'" :show-back="true" />
     <view class="content">
-      <StepPanel :visible="visible" :details="false" />
-      <view class="row filters">
+      <view v-if="!mineOnly" class="row filters">
         <button class="secondary" :class="{ active: tab === 'latest' }" @click="select('latest')">最新</button>
         <button class="secondary" :class="{ active: tab === 'friends' }" @click="select('friends')">好友</button>
         <button class="secondary" :class="{ active: tab === 'ranking' }" @click="select('ranking')">好友排行</button>
       </view>
-      <view class="row filters">
+      <view v-if="!mineOnly" class="row filters">
         <button class="secondary" :class="{ active: tab === 'mine' }" @click="select('mine')">我的帖子<view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></button>
         <button class="secondary" :class="{ active: tab === 'saved' }" @click="select('saved')">我的收藏</button>
       </view>
@@ -22,6 +21,7 @@
             <view class="row"><ProfileAvatar :code="row.code" :version="row.avatarVersion ?? ''" :diameter="30" /><text class="body">{{ row.rank }}. {{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text></view>
             <text class="tag">{{ row.count }} 条</text>
           </view>
+          <button class="secondary" @click="openPage(stepsPath)">查看好友步数榜</button>
         </view>
       </template>
       <template v-else>
@@ -36,25 +36,42 @@
 </template>
 
 <script setup lang="uts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PostCard from '../components/PostCard.uvue'
-import StepPanel from '../components/StepPanel.uvue'
 import { secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
+import { stepsPath } from '@/features/steps.uts'
+import { syncWechatSteps } from '@/features/step-sync.uts'
 import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { publicRead, communityError, postPath, composePath } from '@/features/community/community.uts'
 import type { Post, PostPage, Ranking } from '@/features/community/community.uts'
 const posts = ref<Post[]>([]), ranks = ref<Ranking[]>([]), tab = ref('latest')
 const next = ref(''), message = ref(''), busy = ref(false), visible = ref(false)
+const mineOnly = ref(false)
 const owner = ref(''), retryMore = ref(false)
 const visiblePosts = computed(() => tab.value === 'latest' || owner.value === session.value?.uid ? posts.value : [])
 const visibleRanks = computed(() => owner.value === session.value?.uid ? ranks.value : [])
 let sequence = 0
-onLoad(query => { if (query['tab'] === 'mine') tab.value = 'mine' })
-onShow(() => { visible.value = true; load(false); refreshReviewNotices() })
+onLoad(query => {
+  mineOnly.value = query['tab'] === 'mine'
+  if (mineOnly.value) tab.value = 'mine'
+})
+onShow(() => {
+  visible.value = true
+  refreshReviewNotices()
+  syncCommunitySteps()
+  return load(false)
+})
 onHide(() => { visible.value = false; sequence++ })
+watch(() => session.value?.uid, () => { syncCommunitySteps() })
+function syncCommunitySteps(): void {
+  const uid = session.value?.uid
+  if (uid != null && visible.value && !mineOnly.value) {
+    syncWechatSteps(uid, true, () => visible.value && !mineOnly.value).catch(() => {})
+  }
+}
 function select(value: string): void { if (tab.value !== value) { tab.value = value; load(false) } }
 async function load(append: boolean): Promise<void> {
   const call = ++sequence, active = tab.value

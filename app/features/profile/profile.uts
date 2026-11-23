@@ -70,7 +70,7 @@ export async function submitMyProfile(input: UTSJSONObject): Promise<ProfileRece
   return receipt
 }
 
-export function profileError(error: any): string {
+export function profileError(error: any, phase: string = 'read'): string {
   switch ((error as Error).message) {
     case 'INVALID_NICKNAME': return '昵称须为 2–20 字，且不能包含控制字符。'
     case 'INVALID_BIO': return '简介最多 80 字，且不能包含控制字符。'
@@ -79,12 +79,21 @@ export function profileError(error: any): string {
     case 'INVALID_IMAGE': return '请选择 JPG 或 PNG，压缩后须在 1 MiB 以内。'
     case 'UPLOAD_NOT_AVAILABLE': return '头像暂存已过期，请重新上传。'
     case 'MEDIA_UPLOAD_FAILED': return '头像上传失败，草稿已保留，可重试。'
+    case 'PROFILE_STORAGE_UNAVAILABLE': return '资料存储暂未配置完成，草稿已保留。请联系维护人员。'
+    case 'CONFIG_REQUIRED': return phase === 'avatar'
+      ? '头像服务配置异常，草稿已保留。请联系维护人员。'
+      : '资料服务配置异常，请联系维护人员。'
+    case 'INVALID_REQUEST': return '提交内容无法识别，草稿已保留。请重新读取资料后重试。'
+    case 'REQUEST_CONFLICT': return '本次修改与之前的请求不一致，草稿已保留。请重新读取资料。'
     case 'STALE_VERSION': return '公开资料已更新。请重新读取，再确认草稿。'
     case 'RATE_LIMITED': return '提交太频繁，请稍后重试。'
     case 'ACCOUNT_CHANGED': return '微信账号已切换，请重新打开资料。'
     case 'ACCOUNT_DISABLED': return '账号已停用，请联系运营人员。'
     case 'AUTH_REQUIRED': return '请先微信登录。'
     case 'NOT_FOUND': return '这份资料暂时无法查看。'
-    default: return '未收到服务确认，请检查网络后重试。'
+    default:
+      if (phase === 'avatar') return '头像上传未收到确认，草稿已保留。可重试，或使用默认澳喵后提交。'
+      if (phase === 'submit') return '提交审核未收到确认，草稿已保留。可重试同一次提交。'
+      return '暂时无法读取资料，请重试。'
   }
 }

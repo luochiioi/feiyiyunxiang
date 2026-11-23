@@ -67,6 +67,20 @@ async function guardAccount(db, uid) {
   await active(db, uid)
 }
 
+async function profileStorage(operation) {
+  try {
+    return await operation()
+  } catch (error) {
+    const code = error?.code ?? error?.errCode
+    const message = String(error?.message ?? error?.errMsg ?? '')
+    if (['DATABASE_COLLECTION_NOT_EXIST', 'DATABASE_COLLECTION_NOT_FOUND'].includes(code) ||
+        /(?:collection|集合|数据表).{0,120}(?:not found|not exist|missing|不存在)|NamespaceNotFound/i.test(message)) {
+      fail('PROFILE_STORAGE_UNAVAILABLE')
+    }
+    throw error
+  }
+}
+
 function createProfileService({ repo, media, now = Date.now }) {
   const { ensureProfile } = createPartnershipService({ repo, now })
 
@@ -121,17 +135,17 @@ function createProfileService({ repo, media, now = Date.now }) {
       if (!['image/jpeg', 'image/png'].includes(image.mime) || image.bytes.length > 1024 * 1024) fail('INVALID_IMAGE')
       const digest = createHash('sha256').update(image.mime).update(image.bytes).digest('hex')
       const id = key('profile-upload', uid, p.requestId)
-      const existing = await repo.get(uploads, id)
+      const existing = await profileStorage(() => repo.get(uploads, id))
       if (existing) return replay(existing, digest)
       const stored = await media.store(image, uid)
-      const result = await repo.tx(async db => {
+      const result = await profileStorage(() => repo.tx(async db => {
         const raced = await db.get(uploads, id)
         if (raced) return raced
         await guardAccount(db, uid)
         const row = { _id: id, uid, requestId: p.requestId, digest, media: stored, expiresAt: now() + 24 * hour }
         await db.put(uploads, id, row)
         return row
-      })
+      }))
       // A thrown commit may already have persisted the file reference. Only discard a known loser.
       if (result.media.fileID !== stored.fileID) await media.discard(stored)
       return replay(result, digest)
@@ -144,7 +158,7 @@ function createProfileService({ repo, media, now = Date.now }) {
       const id = key('profile-revision', uid, p.requestId)
       const digest = key(values)
       const original = await loadProfile(user)
-      return repo.tx(async db => {
+      return profileStorage(() => repo.tx(async db => {
         const existing = await db.get(revisions, id)
         if (existing) {
           if (existing.digest !== digest) fail('REQUEST_CONFLICT')
@@ -188,7 +202,7 @@ function createProfileService({ repo, media, now = Date.now }) {
           ...profile, pendingRevisionId: id, latestProfileRevisionId: id, profileSubmittedAt: [...recent, at]
         })
         return { revisionId: id, status: 'pending' }
-      })
+      }))
     },
 
     async profileAvatar(_user, p) {

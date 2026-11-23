@@ -38,8 +38,17 @@ async (page) => {
       return canvas.toDataURL('image/png')
     }
     const png = testAvatar('#60937f', '#fff0ce'), proposedPng = testAvatar('#745176', '#fbd5a4')
+    const nativeInputClick = HTMLInputElement.prototype.click
+    HTMLInputElement.prototype.click = function () {
+      if (this.type !== 'file') return nativeInputClick.call(this)
+      const fixtureFile = Uint8Array.from(atob(proposedPng.split(',')[1]), char => char.charCodeAt(0))
+      const transfer = new DataTransfer()
+      transfer.items.add(new File([fixtureFile], 'test-avatar.png', { type: 'image/png' }))
+      this.files = transfer.files
+      queueMicrotask(() => this.dispatchEvent(new Event('change', { bubbles: true })))
+    }
     const candidate = { ...rejected, revisionId: 'admin-case', nickname: '申请审核昵称', status: 'pending', hasAvatar: true, reason: '', createdAt: Date.now() }
-    window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [],
+    window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [],
       adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0 }
     window.__mockCloud = async ({ data }) => {
       const { action, token, payload = {} } = data, fixture = window.__profileFixture
@@ -67,18 +76,27 @@ async (page) => {
         case 'profileAvatar':
           if (fixture.failAvatar) { fixture.failAvatar = false; return fail('PHOTO_UNAVAILABLE') }
           return ok({ src: png })
+        case 'profileStageAvatar':
+          if (typeof payload.base64 !== 'string' || !payload.base64.startsWith('iVBOR')) return fail('INVALID_IMAGE')
+          fixture.uploads.push(payload.requestId)
+          if (fixture.uploads.length === 1) return fail('SERVICE_UNAVAILABLE')
+          return ok({ uploadId: 'fixture-avatar' })
         case 'profileSubmit':
+          if (payload.avatarUploadId !== 'fixture-avatar') return fail('INVALID_REQUEST')
           fixture.writes.push(payload.requestId)
-          fixture.pending = { ...payload, revisionId: 'pending-revision', hasAvatar: false, status: 'pending', reason: '' }
+          fixture.pending = { ...payload, revisionId: 'pending-revision', hasAvatar: true, status: 'pending', reason: '' }
           if (fixture.lost) { fixture.lost = false; throw Error('RESPONSE_LOST') }
           return ok({ revisionId: 'pending-revision', status: 'pending' })
-        case 'profileRevision': return payload.revisionId === 'older' && token === 'local-profile' ? ok(rejected) : fail('NOT_FOUND')
+        case 'profileRevision':
+          if (token !== 'local-profile') return fail('NOT_FOUND')
+          if (payload.avatar && payload.revisionId === 'pending-revision') return ok({ src: proposedPng })
+          return payload.revisionId === 'older' ? ok(rejected) : fail('NOT_FOUND')
         case 'notificationsSummary': return ok({ unread: fixture.read ? 0 : 1 })
         case 'notificationsList': return ok({ items: [{ ...item, read: fixture.read }], next: '' })
         case 'notificationDetail': return ok({ ...item, read: fixture.read, reason: rejected.reason, target: null, profileTarget: { revisionId: 'older' } })
         case 'notificationRead': fixture.read = true; return ok({})
         case 'communityReviewNotices': return ok({ unread: 1 })
-        case 'communityFeed': return ok({ items: [post], next: '' })
+        case 'communityFeed': return ok({ items: payload.tab === 'mine' ? [{ ...post, title: '我的测试帖子', owner: true }] : [post], next: '' })
         case 'communityPost': return ok(post)
         case 'communityComments': return ok({ items: [{ id: 'comment', parentId: '', author: name, authorCode: code, authorAvatarVersion: avatarVersion, body: '测试评论', status: 'public' }], next: '', mine: [] })
         case 'communityRanking': return ok([rank])
@@ -129,15 +147,18 @@ async (page) => {
   await visible('编辑资料').click()
   await visible('提交新资料').waitFor()
   await page.locator('input').first().fill('申请测试昵称')
-  await visible('使用默认澳喵').click()
+  await visible('选择头像').click()
   await visible('提交审核').click()
-  await visible('未收到服务确认，请检查网络后重试。').waitFor()
+  await visible('头像上传未收到确认，草稿已保留。可重试，或使用默认澳喵后提交。').waitFor()
+  await visible('提交审核').click()
+  await visible('提交审核未收到确认，草稿已保留。可重试同一次提交。').waitFor()
   await visible('提交审核').click()
   await visible('资料已提交审核。').waitFor()
   await visible('审核期间继续展示当前公开资料。').waitFor()
   const name = await page.evaluate(() => window.__profileFixture.name)
   await visible(name).waitFor()
-  const writes = await page.evaluate(() => window.__profileFixture.writes)
+  const { writes, uploads } = await page.evaluate(() => window.__profileFixture)
+  if (uploads.length !== 2 || uploads[0] !== uploads[1]) throw Error('Avatar retry changed its staging request')
   if (writes.length !== 2 || writes[0] !== writes[1]) throw Error('Uncertain write was not replayed')
   await screenshot('pending')
   await back()
@@ -158,6 +179,11 @@ async (page) => {
   await back()
   await visible('步数中心').waitFor()
   if (await page.locator('.review-dot[aria-label="有未读消息"]').count()) throw Error('Read badge did not clear')
+  if (await visible('社区').count()) throw Error('My duplicates community entry')
+  await visible('我的帖子').click()
+  await visible('我的测试帖子').waitFor()
+  if (await visible('今日好友步数榜').count() || await visible('好友排行').count()) throw Error('Personal feed leaks community controls')
+  await back()
   await visible('探索档案').click()
   await page.waitForURL('**/packages/profile/my-checkins/my-checkins')
   await back()
@@ -171,7 +197,7 @@ async (page) => {
   await visible(name).waitFor()
   await approvedAvatar(page).waitFor()
   await back()
-  await visible('社区').click()
+  await go('/packages/community/community/community')
   await visible('测试帖子').click()
   await visible('测试评论').waitFor()
   await approvedAvatar(page.locator('.post-card')).waitFor()
@@ -179,6 +205,8 @@ async (page) => {
   await back()
   await visible('好友排行').click()
   await page.getByText('1. ' + name + '（我）', { exact: true }).waitFor()
+  await visible('查看好友步数榜').waitFor()
+  if (await visible('今日好友步数榜').count()) throw Error('Community duplicates the steps screen')
   await approvedAvatar(page).waitFor()
   await page.goto(adminOrigin + '/')
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -201,5 +229,5 @@ async (page) => {
   if (await page.evaluate(() => window.__profileFixture.adminWrites) !== 1) throw Error('Queue refresh repeated a review')
   await visible('退出登录').waitFor()
   if (uncaught.length > 0) throw Error(uncaught.join('; '))
-  return 'Verified 375/390/430 layout, avatar retry, pending and rejected history, notifications, current attribution, and Admin review and read retry'
+  return 'Verified avatar selection and retry, same-request submission, distinct My routes, 375/390/430 layout, and Admin review'
 }

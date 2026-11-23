@@ -3,6 +3,14 @@ const assert = require('node:assert/strict')
 const { clientScript } = require('./helpers/client-script.cjs')
 const { fixture, alice, input } = require('./helpers/profile-fixture.cjs')
 
+test('profile error copy distinguishes the failed stage and missing server configuration', () => {
+  const script = clientScript('features/profile/profile.uts', { session: { value: null } })
+  assert.match(script.run('profileError(new Error("SERVICE_UNAVAILABLE"), "avatar")'), /头像.*草稿/)
+  assert.match(script.run('profileError(new Error("CONFIG_REQUIRED"), "avatar")'), /头像服务.*配置/)
+  assert.match(script.run('profileError(new Error("PROFILE_STORAGE_UNAVAILABLE"), "submit")'), /资料存储.*配置/)
+  assert.match(script.run('profileError(new Error("SERVICE_UNAVAILABLE"), "submit")'), /提交审核.*草稿/)
+})
+
 test('public avatar requires the exact approved version and rechecks status after media reads', async () => {
   const { service, rows, media } = await fixture()
   const staged = await service.profileStageAvatar(alice, { requestId: 'photo', base64: 'picture' })

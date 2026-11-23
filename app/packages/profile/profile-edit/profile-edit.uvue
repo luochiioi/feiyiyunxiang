@@ -271,18 +271,21 @@ async function save(): Promise<void> {
   if (uid == null || current == null || busy.value || selecting.value || saved.value || historyMode.value || needsRead.value) return
   busy.value = true
   message.value = ''
+  let phase = 'submit'
   try {
     const nickname = checked(current.nickname, 2, 20, 'INVALID_NICKNAME')
     const bio = checked(current.bio, 0, 80, 'INVALID_BIO')
     const displayCity = checked(current.displayCity, 0, 20, 'INVALID_CITY')
     if (current.interests.length > 3 || current.interests.some(item => !profileInterests.includes(item))) throw new Error('INVALID_INTERESTS')
     if (photoPath.value.length > 0 && uploadId.length === 0) {
+      phase = 'avatar'
       const base64 = await photoBase64(photoPath.value)
       if (ticket !== generation || uid !== session.value?.uid) return
       const upload = await profileRequest<{ uploadId: string }>(uid, 'profileStageAvatar', { requestId: uploadRequest, base64 })
       if (ticket !== generation || uid !== session.value?.uid) return
       uploadId = upload.uploadId
     }
+    phase = 'submit'
     const values: UTSJSONObject = { baseRevision: current.baseRevision, nickname, bio, displayCity, interests: [...current.interests] }
     if (uploadId.length > 0) values['avatarUploadId'] = uploadId
     else if (current.avatarRevisionId.length > 0) values['avatarRevisionId'] = current.avatarRevisionId
@@ -298,7 +301,7 @@ async function save(): Promise<void> {
     const code = (error as Error).message
     if (code === 'UPLOAD_NOT_AVAILABLE') { uploadId = ''; uploadRequest = requestId() }
     if (code === 'STALE_VERSION') { needsRead.value = true; rebase = true }
-    message.value = profileError(error)
+    message.value = profileError(error, phase)
   } finally { if (ticket === generation) busy.value = false }
 }
 </script>

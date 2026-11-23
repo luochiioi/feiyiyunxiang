@@ -55,3 +55,24 @@ test('submission limits are transactional, and a replay does not consume a slot'
   advance(3600000)
   await service.profileSubmit(alice, { ...input, requestId: 'limit' })
 })
+
+test('profile storage missing a collection reports an actionable error without trying an avatar upload', async () => {
+  const { repo, service, stores } = await fixture()
+  const get = repo.get
+  repo.get = (name, id) => {
+    if (name === 'fy-profile-uploads') throw Object.assign(Error('Collection does not exist'), { code: 'DATABASE_COLLECTION_NOT_EXIST' })
+    return get(name, id)
+  }
+  const tx = repo.tx
+  repo.tx = callback => tx(transaction => callback({
+    ...transaction,
+    get(name, id) {
+      if (name === 'fy-profile-revisions') throw Error('collection not found')
+      return transaction.get(name, id)
+    }
+  }))
+  await assert.rejects(service.profileStageAvatar(alice, { requestId: 'photo', base64: 'image' }), /PROFILE_STORAGE_UNAVAILABLE/)
+  assert.equal(stores(), 0)
+  await assert.rejects(service.profileSubmit(alice, input), /PROFILE_STORAGE_UNAVAILABLE/)
+  assert.equal((await service.getMyProfile(alice)).pending, null)
+})

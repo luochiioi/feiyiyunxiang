@@ -12,6 +12,7 @@ export type CommentPage = { items: Comment[], next: string, mine: Comment[] }
 export type Ranking = { code: string, nickname: string, count: number, rank: number, mine: boolean, avatarVersion?: string }
 export type DiaryPhoto = { _id: string, title: string, createdAt: number, mediaId: string }
 export const communityPath = '/packages/community/community/community'
+export const myPostsPath = communityPath + '?tab=mine'
 export const postPath = '/packages/community/community-post/community-post'
 export const composePath = '/packages/community/community-compose/community-compose'
 export function imageCount(post: Post): number { return post.imageCount ?? (post.hasImage ? 1 : 0) }
