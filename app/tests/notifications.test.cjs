@@ -35,12 +35,16 @@ test('only recipient can read; repeated writes and receipts preserve readAt; DTO
  const detail=await f.service.notificationDetail(A,{id});assert.equal(detail.read,true);assert.equal(detail.target,null);assert.deepEqual(Object.keys(detail).sort(),['createdAt','id','kind','preview','read','reason','target','title'])
  for(const extra of [{kind:'unknown'},{recipientUid:''},{reason:'a'.repeat(301)}]) await assert.rejects(writeNotification(f.repo,event(1,extra)),/INVALID_NOTIFICATION/)
 })
-test('targets are revalidated; removed posts retain snapshot without link; only matching rejected version is marked',async()=>{
+test('targets are revalidated; removed owner versions stay private and deleted posts have no link',async()=>{
  const f=fixture(),id=await writeNotification(f.repo,event())
  await f.repo.put('fy-community-posts','post0',{uid:'A',latestRevision:'new',status:'unpublished'})
  await f.repo.put('fy-community-versions','version0',{uid:'A',postId:'post0',status:'rejected'})
  await f.repo.put('fy-community-versions','new',{uid:'A',postId:'post0',status:'rejected',reviewSeen:false})
  assert.deepEqual((await f.service.notificationDetail(A,{id})).target,{postId:'post0',revisionId:'version0',commentId:'',preview:true})
  await f.service.notificationRead(A,{id});assert.equal((await f.repo.get('fy-community-versions','version0')).reviewSeen,true);assert.equal((await f.repo.get('fy-community-versions','new')).reviewSeen,false)
- await f.repo.put('fy-community-posts','post0',{uid:'A',status:'removed'});assert.equal((await f.service.notificationDetail(A,{id})).target,null)
+ await f.repo.put('fy-community-posts','post0',{uid:'A',status:'removed'})
+ assert.deepEqual((await f.service.notificationDetail(A,{id})).target,{postId:'post0',revisionId:'version0',commentId:'',preview:true})
+ await assert.rejects(f.service.notificationDetail(B,{id}),/NOT_FOUND/)
+ await f.repo.put('fy-community-posts','post0',{uid:'B',status:'removed'});assert.equal((await f.service.notificationDetail(A,{id})).target,null)
+ await f.repo.put('fy-community-posts','post0',{uid:'A',status:'deleted'});assert.equal((await f.service.notificationDetail(A,{id})).target,null)
 })

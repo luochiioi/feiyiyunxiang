@@ -1,0 +1,32 @@
+# 首页未读与消息详情入口收尾
+
+2026-11-23，桌面目录 `C:/Users/Raymond/Desktop/feinibuke/feiyiyunxiang`，本地分支 codex/desktop-development。沿用已有 codex/friend-notifications → main 的 PR #10，未合并 main。
+
+## 项目方验收反馈
+
+项目方确认社区图片已正常显示，好友申请／接受、帖子审核通过及下架消息均能发送。「我的」消息红点正常，但首页看不到；详情底部返回列表与左上返回重复。本轮补齐这两个入口问题。反馈没有附设备及账号清单，不将其扩写为本轮自动化真机证据。
+
+## 改动
+
+- 首页左侧「我的」右上显示私有消息未读红点，复用账号绑定的 notificationsSummary。进入首页立即刷新，前台每 30 秒检查，离开／卸载清理定时器；不重叠慢请求。访客不会读取本人消息。已读后共用状态消点，账号切换仍清理旧状态。
+- 详情只保留一个相关内容主按钮。好友申请进入旅伴，其他好友结果查看旅伴；帖子结果打开具体版本，评论结果打开当前可见帖子。左上仍仅箭头返回。查看消息不会接受申请，也不重新提交审核。
+- notificationDetail 允许帖子作者打开本人的下架版本，与现有 communityPost 的本人 preview 权限一致；不会恢复公开访问。删除帖子、错配作者／版本、不可见评论仍不提供目标。内容不可访问时禁用按钮并保留结果快照。
+- 保留澳喵、原有地图侧栏样式、步数自动同步、路线／双城终章、九图重试、后台缩略图和侧栏退出。未提交的素材、地图样式、gateway 测试、partnership 原有改动保持原样，不纳入本轮提交。
+
+## 实际验证
+
+- app：`node --test 'tests/*.test.cjs'`，185/185。新增真实首页脚本生命周期测试、慢请求不重叠、好友／作者版本／评论跳转、不可用目标；服务端实测作者可查看下架版本而其他账号不可读，删除后没有链接。既有分页、已读、续期、并发及响应丢失用例均通过。
+- 仓库根：`./scripts/build-local.ps1 -Target WeixinDev` 成功。源码是桌面目录，产物是该目录的 app/unpackage/dist/dev/mp-weixin，AppID 与支付宝空间配置检查通过。保留 AR 两项鸿蒙兼容告警。
+- 仓库根：`./scripts/build-local.ps1 -Target Admin` 成功。实际产物是该目录 admin/unpackage/dist/build/web/index.html，保留 Browserslist 数据过旧提示。
+- 构建保留了项目方原有未提交的素材／地图样式；验证记录不声称这些原有改动属于本 PR。
+- 本轮服务端下架目标调整尚未部署开发云；本轮新入口没有微信真机验收。此前好友／审核消息与旧图恢复的开发云证据分别见 development-cloud-notifications.md、community-image-recovery.md，不能替代本轮新增行为的云端验证。
+- 辅助桌面 app Web 产物重新编译成功，保留现有可空类型等告警。使用该产物在 Edge 390×844、独立浏览器上下文执行 validate-notification-entrypoints-browser.js 与更新后的 validate-friend-notifications-browser.js，全部通过：游客无红点、登录红点、30 秒刷新消点、退出隔离、唯一好友按钮、进入旅伴处理、读取失败重试不重复决定和返回详情状态刷新。接口全部为本地固定响应，未联系开发云。
+- 模拟截图：[首页红点](evidence/notification-entrypoints/home-unread-browser.png)、[好友详情相关入口](evidence/notification-entrypoints/friend-related-action-browser.png)。仅使用 Alice／Bob 本地测试资料。
+
+## 部署与复查
+
+本轮没有新增 Schema、索引或通知类型。已有好友消息分支的可选字段和两项通知索引部署顺序仍适用。
+
+先备份并保留开发云完整 fy 私密配置（包含当前上传密钥与 mediaLegacyDecryptionKeys），再更新包含本轮 notification-service.js 的 fy-api，最后重新编译小程序。不能拿版本库中的空配置覆盖现有私密配置。本轮只提交／推送 PR，不自动再次部署云端。
+
+待复查：A 在首页停留，B 发申请，A 最迟下一次 30 秒检查看到「我的」红点；A 打开详情标读后回首页消点；好友按钮进入旅伴。作者打开通过／驳回／下架的准确版本；评论消息只去可见帖子；删除后按钮禁用。期间切账号、模拟读取失败与慢请求，不能串账号或无限轮询后台。

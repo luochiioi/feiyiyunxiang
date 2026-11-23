@@ -1,5 +1,5 @@
 // Playwright CLI: run-code --filename scripts/validate-community-notifications-browser.js
-// Serve app and admin Web build directories on loopback ports 8411 and 8412.
+// Serve app and admin Web build directories on loopback ports 8421 and 8422.
 // Local fixture only: intercept compiled cloud call boundary; never contact development cloud.
 async (page) => {
  await page.route('**/assets/*.js',async route=>{
@@ -24,8 +24,8 @@ async (page) => {
   };
  });
  await page.setViewportSize({width:390,height:844});
- await page.goto('http://127.0.0.1:8411/#/packages/profile/messages/messages');
- await page.getByText('微信登录后查看本人的社区审核消息。',{exact:true}).waitFor();
+ await page.goto('http://127.0.0.1:8421/#/packages/profile/messages/messages');
+ await page.getByText('微信登录后查看本人的消息。',{exact:true}).waitFor();
  await page.evaluate(async()=>{const entry=performance.getEntriesByType('resource').find(x=>/\/api\.[^/]+\.js/.test(x.name));const api=await import(entry.name);api.s.value={uid:'local-A',token:'local-only',expiresAt:Date.now()+3600000};});
  await page.getByText('帖子审核未通过',{exact:true}).first().waitFor();
  await page.getByText('加载更多',{exact:true}).click();await page.getByText('消息暂时无法读取，请重试。',{exact:true}).waitFor();
@@ -37,7 +37,7 @@ async (page) => {
  await page.getByText('重试标为已读',{exact:true}).click();await page.getByText('重试标为已读',{exact:true}).waitFor({state:'hidden'});
  if(await page.evaluate(()=>window.__calls.filter(x=>x.action==='notificationDetail').length)!==loads)throw Error('receipt reloads detail');
  await page.screenshot({path:'.superpowers/message-detail-browser.png',fullPage:true});
- await page.goto('http://127.0.0.1:8412/');
+ await page.goto('http://127.0.0.1:8422/');
  await page.getByRole('textbox').nth(0).fill('local-reviewer');await page.getByRole('textbox').nth(1).fill('local-only-password');await page.getByText('登录工作台',{exact:true}).click();
  await page.getByText('退出登录',{exact:true}).waitFor();await page.getByText('社区审核与治理',{exact:true}).click();
  await page.getByText('查看详情',{exact:true}).click();

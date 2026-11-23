@@ -9,7 +9,11 @@ test('lost source AppID fails preflight and public config repairs it; tourist ou
  const compiled=path.join(root,'app/unpackage/dist/dev/mp-weixin/project.config.json');fs.writeFileSync(compiled,JSON.stringify({appid:'touristappid'}))
  const run=(...args)=>spawnSync(process.execPath,[script,...args],{cwd:root,encoding:'utf8'}).status
  assert.notEqual(run(),0);assert.equal(run('--repair'),0);assert.notEqual(run(),0)
- fs.writeFileSync(compiled,JSON.stringify({appid}));assert.equal(run(),0)
+ fs.writeFileSync(compiled,JSON.stringify({appid}));assert.notEqual(run(),0)
+ const vendor=path.join(root,'app/unpackage/dist/dev/mp-weixin/common/vendor.js')
+ fs.mkdirSync(path.dirname(vendor),{recursive:true})
+ fs.writeFileSync(vendor,'const spaces=[]');assert.notEqual(run(),0)
+ fs.writeFileSync(vendor,'const spaces=[{"provider":"alipay","spaceId":"env-test123456"}]');assert.equal(run(),0)
  // Keep temp fixture for OS temp cleanup; never recursively delete a computed path.
 })
 
