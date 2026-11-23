@@ -45,3 +45,16 @@ test('review, history audit and notification commit together; competing decision
   assert.equal(audits[0].previous.nickname, '旧昵称')
   assert.equal(audits[0].submitted.nickname, '新昵称')
 })
+
+test('revision-owned photos survive staging expiry and can seed a new draft only for the owner', async () => {
+  const { service, advance } = await fixture()
+  const staged = await service.profileStageAvatar(alice, { requestId: 'photo', base64: 'picture' })
+  const original = await service.profileSubmit(alice, { ...input, avatarUploadId: staged.uploadId })
+  await service.profileReview(reviewer, { ...original, decision: 'reject', reason: '请修改昵称' })
+  advance(24 * 3600000)
+  await assert.rejects(service.profileSubmit(bob, { ...input, avatarRevisionId: original.revisionId }), /NOT_FOUND/)
+  const draft = await service.profileSubmit(alice, { ...input, requestId: 'copy', avatarRevisionId: original.revisionId })
+  await service.profileReview(reviewer, { ...draft, decision: 'approve' })
+  assert.equal((await service.getMyProfile(alice)).avatarVersion, draft.revisionId)
+  assert.match((await service.profileRevision(alice, { ...draft, avatar: true })).src, /^data:image\/png/)
+})

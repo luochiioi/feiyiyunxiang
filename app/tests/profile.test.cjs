@@ -45,3 +45,13 @@ test('lost submit response replays and concurrent submissions supersede exactly 
   const statuses = await Promise.all(revisions.map(row => service.profileRevision(alice, row)))
   assert.deepEqual(statuses.map(row => row.status).sort(), ['pending', 'superseded'])
 })
+
+test('submission limits are transactional, and a replay does not consume a slot', async () => {
+  const { service, advance } = await fixture()
+  const first = await service.profileSubmit(alice, input)
+  for (let i = 0; i < 9; i++) await service.profileSubmit(alice, { ...input, requestId: 'more-' + i })
+  await assert.rejects(service.profileSubmit(alice, { ...input, requestId: 'limit' }), /RATE_LIMITED/)
+  assert.deepEqual(await service.profileSubmit(alice, input), first)
+  advance(3600000)
+  await service.profileSubmit(alice, { ...input, requestId: 'limit' })
+})

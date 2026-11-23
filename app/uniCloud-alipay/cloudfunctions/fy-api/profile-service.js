@@ -63,7 +63,7 @@ async function guardAccount(db, uid) {
   // Serialize with operations' suspend/restore without touching login tokens.
   const collection = 'fy-community-limits'
   const guard = await db.get(collection, uid)
-  await db.put(collection, uid, { ...guard })
+  await db.put(collection, uid, { ...guard, profileWrites: (guard?.profileWrites ?? 0) + 1 })
   await active(db, uid)
 }
 

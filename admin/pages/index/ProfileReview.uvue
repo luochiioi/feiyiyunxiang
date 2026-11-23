@@ -49,7 +49,7 @@
 
 <script setup lang="uts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { api, session } from '@/features/api.uts'
+import { api, scheduleProfileImage, session } from '@/features/api.uts'
 import type { ProfileReviewPage, ProfileReviewDetail, ProfileReviewItem } from '@/features/api.uts'
 
 const defaultAvatar = '/static/aomiao-wave.png'
@@ -62,7 +62,6 @@ const attempted = ref<string | null>(null), decided = ref(false), busy = ref(fal
 const canDecide = computed(() => detail.value?.accountActive === true && detail.value?.selected.status === 'pending' && !decided.value)
 let generation = 0
 let closed = false
-let imageTail: Promise<void> = Promise.resolve()
 onMounted(() => { load(false) })
 onBeforeUnmount(() => { closed = true; generation++ })
 
@@ -109,7 +108,7 @@ function imageFailed(current: boolean): void {
 function loadAvatar(current: boolean): void {
   const ticket = generation
   const uid = session.value?.uid
-  imageTail = imageTail.then(async () => {
+  scheduleProfileImage(async () => {
     const value = detail.value
     if (closed || ticket !== generation || uid !== session.value?.uid || value == null) return
     const source = current ? currentSrc : selectedSrc

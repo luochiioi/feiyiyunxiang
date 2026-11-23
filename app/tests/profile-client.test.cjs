@@ -80,3 +80,25 @@ test('avatar loader deduplicates, bounds concurrency, and evicts old previews', 
   await script.run('loadProfileAvatar("owner", "same")')
   assert.equal(calls, 46)
 })
+
+test('an avatar component discards a delayed response after its identity and version change', async () => {
+  const props = { code: 'A', version: 'v1', legacy: '' }
+  const reads = new Map()
+  const released = []
+  const script = clientScript('components/ProfileAvatar.uvue', {
+    withDefaults: value => value, defineProps: () => props, onBeforeUnmount() {},
+    retainProfileAvatar() {}, invalidateProfileAvatar() {},
+    releaseProfileAvatar: key => released.push(key),
+    avatarKey: (code, version) => code + '/' + version,
+    loadProfileAvatar: code => new Promise(resolve => reads.set(code, resolve))
+  })
+  const first = script.run('load()')
+  Object.assign(props, { code: 'B', version: 'v2' })
+  const second = script.run('load()')
+  reads.get('B')('new.jpg')
+  await second
+  reads.get('A')('old.jpg')
+  await first
+  assert.equal(script.run('source.value'), 'new.jpg')
+  assert.deepEqual(released, ['A/v1'])
+})

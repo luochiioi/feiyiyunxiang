@@ -50,3 +50,25 @@ test('current profiles resolve by identity across paginated community, friends, 
   assert.equal((await steps.stepRanking(bob)).rows.find(row => row.code === 'ALICE234').nickname, '同名旅伴')
   assert.equal(rows.get('fy-community-comments/comment-1').author, '评论快照')
 })
+
+test('friend cards load both directions past the first database page with unique profile batches', async () => {
+  const { rows, repo } = transactionFixture()
+  const partners = createPartnershipService({ repo, now: () => 1700000000000 })
+  const basePage = repo.page
+  const batches = []
+  repo.page = (collection, query, options) => {
+    if (collection === 'fy-profiles') batches.push(query.uid)
+    return basePage(collection, query, options)
+  }
+  for (let i = 0; i < 105; i++) {
+    const uid = 'friend-' + String(i).padStart(3, '0')
+    rows.set('uni-id-users/' + uid, { status: 0 })
+    rows.set('fy-profiles/' + uid, { uid, code: uid, nickname: '旅伴' })
+    rows.set('fy-friends/' + uid, { from: 'alice', to: uid, status: 'accepted' })
+  }
+  rows.set('fy-friends/incoming', { from: 'friend-104', to: 'alice', status: 'pending', expiresAt: 1800000000000, requestId: 'incoming' })
+  const cards = await partners.friends({ uid: 'alice' })
+  assert.equal(cards.length, 106)
+  assert.equal(cards.at(-1).kind, 'incoming')
+  assert.deepEqual(batches.map(group => group.length), [50, 50, 5])
+})

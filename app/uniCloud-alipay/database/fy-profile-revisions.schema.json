@@ -26,7 +26,7 @@
       "bsonType": "object"
     },
     "createdAt": {
-      "bsonType": "number"
+      "bsonType": "long"
     },
     "order": {
       "bsonType": "string"
@@ -35,7 +35,7 @@
       "bsonType": "string"
     },
     "decidedAt": {
-      "bsonType": "number"
+      "bsonType": "long"
     },
     "reviewerUid": {
       "bsonType": "string"

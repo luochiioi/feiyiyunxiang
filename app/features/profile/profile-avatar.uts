@@ -7,6 +7,7 @@ const pins = new Map<string, number>()
 const pending = new Map<string, Promise<string>>()
 const queue: (() => void)[] = []
 let inFlight = 0
+let cleanup: Promise<void> | null = null
 
 export function avatarKey(code: string, version: string): string { return code + '/' + version }
 export function retainProfileAvatar(key: string): void { pins.set(key, (pins.get(key) ?? 0) + 1) }
@@ -18,6 +19,13 @@ export function releaseProfileAvatar(key: string): void {
   if (path != null) { held.delete(key); removeAvatarPreview(path) }
 }
 
+export function invalidateProfileAvatar(key: string): void {
+  const path = cache.get(key) ?? held.get(key)
+  cache.delete(key)
+  held.delete(key)
+  if (path != null) removeAvatarPreview(path)
+}
+
 export function saveAvatarPreview(src: string): Promise<string> {
   const png = 'data:image/png;base64,'
   const jpg = 'data:image/jpeg;base64,'
@@ -25,11 +33,21 @@ export function saveAvatarPreview(src: string): Promise<string> {
   if (!src.startsWith(prefix)) return Promise.reject(new Error('PHOTO_UNAVAILABLE'))
   // #ifdef MP-WEIXIN
   if (typeof uni.getFileSystemManager === 'function') {
-    const path = uni.env.USER_DATA_PATH + '/fy-profile-preview-' + requestId() + (prefix === png ? '.png' : '.jpg')
-    return new Promise<string>((resolve, reject) => {
-      uni.getFileSystemManager().writeFile({ filePath: path, data: src.slice(prefix.length), encoding: 'base64',
-        success: () => resolve(path), fail: () => reject(new Error('PHOTO_UNAVAILABLE')) })
+    const directory = uni.env.USER_DATA_PATH
+    const fs = uni.getFileSystemManager()
+    if (cleanup == null) cleanup = new Promise<void>(resolve => {
+      fs.readdir({ dirPath: directory, success: result => {
+        const prior = result.files.filter(name => name.startsWith('fy-profile-preview-'))
+        Promise.all(prior.map(name => new Promise<void>(done => {
+          fs.unlink({ filePath: directory + '/' + name, complete: () => done() })
+        }))).then(() => resolve())
+      }, fail: () => resolve() })
     })
+    const path = directory + '/fy-profile-preview-' + requestId() + (prefix === png ? '.png' : '.jpg')
+    return cleanup!.then(() => new Promise<string>((resolve, reject) => {
+      fs.writeFile({ filePath: path, data: src.slice(prefix.length), encoding: 'base64',
+        success: () => resolve(path), fail: () => reject(new Error('PHOTO_UNAVAILABLE')) })
+    }))
   }
   // #endif
   return Promise.resolve(src)

@@ -23,7 +23,7 @@
       "bsonType": "object"
     },
     "expiresAt": {
-      "bsonType": "number"
+      "bsonType": "long"
     }
   }
 }
