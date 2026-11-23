@@ -49,3 +49,19 @@
 ## 随后获得授权并完成开发云同步
 
 项目方明确“确认授权”后已完成消息 Schema、两项索引、好友可选字段及完整 fy-api 同步。真实消息接口由 NOT_FOUND 恢复为 OK，隔离账号事务／权限验证与清理完成。详见[开发云部署证据](development-cloud-notifications.md)。两台手机的真实账号交互仍需项目方实测。
+
+## 11 月 23 日下午：已关联仍提示未关联
+
+项目方截图时间 14:48。现场检查确认 app/admin 的 launch.json 均选择支付宝云端模式，HBuilderX 关联元数据及 CLI 回读均指向 env-00jy72i6ol3c；但 14:53 的微信开发产物 common/vendor.js **没有该空间配置**。工程树的关联状态与当前编译进程、产物并未保持同步。
+
+重新指定两端既有空间、停止旧 mp-weixin 编译进程后，14:56 全量编译恢复空间配置。微信运行时登录返回 OK，澳喵、好友列表、消息汇总和列表均返回 OK。未重新部署云函数，也没有更换空间。
+
+普通运行入口仍能复现 IDE 的 `Cannot read properties of undefined (reading 'startServer')`，因此仅重新编译不足以消除 IDE 插件异常。正常退出 HBuilderX 时还出现其自身内存读取错误；关闭错误提示并重新启动现有 HBuilderX 后，15:02 普通运行入口编译成功、uniCloud 调试服务进程启动，现场截图没有再出现 startServer 报错。插件异常的内部原因未进一步修改或断言；未升级 IDE 或插件。重启时提示 uniappx-vapor-launcher 缺失／不匹配，本轮跳过修复，现有项目微信编译仍成功。
+
+构建保护与验证：
+
+- check-weixin-config.cjs 增加支付宝云空间配置存在性检查，避免只校验 AppID 就误报可运行。使用内存替换 vendor 的缺少空间样本确认会拒绝，当前产物通过。此检查验证配置存在，不替代目标空间人工核对。
+- build-local.ps1 使用同一安装目录正在运行的 HBuilderX 路径大小写，修复重启后 CLI 对 D:/HBuilderX 与 D:/hbuilderx 的错误不匹配判断。仍尊重显式指定的其他安装目录。
+- 15:04 在桌面源码执行 `./scripts/build-local.ps1 -Target WeixinDev` 完整成功，输出 AppID 与云空间检查通过。AR 组件现有两项鸿蒙兼容警告仍保留，不标为已解决。
+- 最终产物重新打开微信实际运行时：login=OK，重开「我的」loggedIn=true；aomiaoStatus=OK/claimed=true，friends=OK/count=1，notificationsSummary=OK/unread=0，notificationsList=OK/count=0/next=false。消息当前为空，所以这轮接口检查不代表两账号发送／接受已重新验收。
+- 本轮只修改构建保护与本文档；未重新执行完整业务单测、后台构建或微信真机双账号验收，不能将之前证据当成本轮重新执行。

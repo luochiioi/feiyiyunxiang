@@ -16,5 +16,8 @@ assert.equal(source.match(pattern)[0].match(/(?:"[^"]*"|null)$/)[0], JSON.string
 for (const mode of process.argv.includes('--release') ? ['build'] : ['dev']) {
   const file = `app/unpackage/dist/${mode}/mp-weixin/project.config.json`
   assert.equal(JSON.parse(fs.readFileSync(file)).appid, appid, 'Recompile with the source WeChat AppID')
+  const vendor = fs.readFileSync(`app/unpackage/dist/${mode}/mp-weixin/common/vendor.js`, 'utf8')
+  assert.match(vendor, /(?:["']spaceId["']|spaceId)\s*:\s*["']env-[a-z0-9]{6,}["']/,
+    'Compiled WeChat bundle has no Alipay cloud space. Stop the existing run, reselect the app cloud space in HBuilderX, then rebuild.')
 }
-console.log('Source and compiled WeChat AppID agree')
+console.log('Source and compiled WeChat AppID agree; Alipay cloud space is present')

@@ -4,6 +4,14 @@
   [string]$NodeExe = 'node'
 )
 $ErrorActionPreference = 'Stop'
+# HBuilderX compares its CLI path with the running editor using case-sensitive text.
+$runningEditor = Get-Process -Name HBuilderX -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($runningEditor -and $runningEditor.Path) {
+  $runningCli = Join-Path (Split-Path $runningEditor.Path -Parent) 'cli.exe'
+  if ([string]::Equals([IO.Path]::GetFullPath($HBuilderCli), $runningCli, [StringComparison]::OrdinalIgnoreCase)) {
+    $HBuilderCli = $runningCli
+  }
+}
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Push-Location $projectRoot
 try {
