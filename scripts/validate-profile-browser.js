@@ -62,7 +62,11 @@ async (page) => {
         case 'adminLogin': return ok({ uid: 'local-reviewer', username: payload.username, token: 'local-admin', expiresAt: Date.now() + 3600000, admin: payload.username !== 'fixture-review-only' })
         case 'communityOverview': return ok({ pendingPosts: 1, pendingComments: 1, openReports: 1, publishedPosts: 0, pendingProfiles: fixture.adminDecision ? 0 : 1 })
         case 'communityReviewList': return ok({ items: [], next: '' })
-        case 'communityUsers': return ok({ items: [{ ...approved, id: 'account-A', status: 0 }], next: '' })
+        case 'communityUsers': return ok({ items: [
+          { ...approved, id: 'account-A', status: 0 },
+          { id: 'account-B', nickname: '旅伴', code: '', status: 0 },
+          { id: 'account-C', nickname: '停用账户', code: 'WXYZ2345', status: 1, suspendedByOps: true }
+        ], next: '' })
         case 'communityUserDetail': return ok({ ...approved, id: 'account-A', status: 0, friendCount: 0, postCount: 0, commentCount: 0, reportCount: 0, pendingPosts: 0, publishedPosts: 0, pendingComments: 0, publicComments: 0, openReports: 0, resolvedReports: 0 })
         case 'drafts': return ok([])
         case 'profileReviewList':
@@ -161,17 +165,18 @@ async (page) => {
   await page.locator('.crop-grid').waitFor()
   const frame = await page.locator('.crop-frame').boundingBox()
   if (!frame || Math.abs(frame.width - frame.height) > 1) throw Error('The crop frame is not square')
-  const cropData = () => page.locator('#profile-avatar-crop canvas').evaluate(canvas => canvas.toDataURL())
+  if (await page.locator('.crop-frame canvas, .crop-frame uni-canvas').count()) throw Error('The preview uses the native export canvas')
+  const cropPosition = () => page.locator('.crop-photo').evaluate(photo => photo.getAttribute('style'))
   await page.locator('.crop-confirm:not([disabled])').filter({ hasText: '使用此裁剪' }).waitFor()
-  const initialCrop = await cropData()
+  const initialCrop = await cropPosition()
   await page.mouse.move(frame.x + frame.width / 2, frame.y + frame.height / 2)
   await page.mouse.down()
   await page.mouse.move(frame.x + frame.width / 2 + 40, frame.y + frame.height / 2, { steps: 5 })
   await page.mouse.up()
-  if (await cropData() === initialCrop) throw Error('Dragging did not move the crop')
+  if (await cropPosition() === initialCrop) throw Error('Dragging did not move the crop')
   await page.getByLabel('放大').click()
   await visible('重置').click()
-  if (await cropData() !== initialCrop) throw Error('Reset did not restore the original crop')
+  if (await cropPosition() !== initialCrop) throw Error('Reset did not restore the original crop')
   await page.locator('.crop-frame').evaluate(target => {
     const { left, top, width, height } = target.getBoundingClientRect()
     const centerX = left + width / 2, centerY = top + height / 2
@@ -184,7 +189,7 @@ async (page) => {
     gesture('touchmove', 75)
     gesture('touchend', 0)
   })
-  if (await cropData() === initialCrop) throw Error('Pinching did not zoom the crop')
+  if (await cropPosition() === initialCrop) throw Error('Pinching did not zoom the crop')
   await screenshot('avatar-crop', false)
   await visible('使用此裁剪').click()
   await page.locator('.crop-grid').waitFor({ state: 'hidden' })
@@ -277,7 +282,19 @@ async (page) => {
   await page.locator('.tabs').getByText('已处理', { exact: true }).waitFor()
   if (await page.locator('.tabs').getByText('待审帖子', { exact: true }).count()) throw Error('Unrelated review tabs are visible')
   await sidebar.getByText('用户管理', { exact: true }).click()
-  await visible('详情').click()
+  await page.locator('.account-row').nth(2).waitFor()
+  for (const width of [1440, 768]) {
+    await page.setViewportSize({ width, height: 1000 })
+    const rows = await page.locator('.account-row').evaluateAll(rows => rows.map(row => {
+      const rowBox = row.getBoundingClientRect()
+      const buttonBox = row.querySelector(':scope > uni-button').getBoundingClientRect()
+      const avatarBox = row.querySelector('.account-avatar').getBoundingClientRect()
+      return { right: rowBox.right - buttonBox.right, centerDelta: Math.abs(buttonBox.top + buttonBox.height / 2 - avatarBox.top - avatarBox.height / 2) }
+    }))
+    if (rows.some(row => Math.abs(row.right) > 1 || row.centerDelta > 1)) throw Error('Account details buttons do not align on each row at ' + width)
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.locator('.account-row').first().getByText('详情', { exact: true }).click()
   await visible('探索非遗文化').waitFor()
   await visible('禁言时长（分钟）').waitFor()
   await screenshot('admin-user-detail')

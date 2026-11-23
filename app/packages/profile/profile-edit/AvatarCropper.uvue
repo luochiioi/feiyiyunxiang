@@ -1,10 +1,13 @@
 <template>
   <view class="cropper" role="dialog" aria-label="裁剪头像">
+    <canvas id="profile-avatar-crop" type="2d" class="crop-export" aria-hidden="true" />
     <view class="crop-stage">
       <view class="crop-frame" :style="{ width: frameSize + 'px', height: frameSize + 'px' }"
         @touchstart.stop="startTouch" @touchmove.stop.prevent="moveTouch" @touchend.stop="startTouch" @touchcancel.stop="endGesture"
         @mousedown.stop.prevent="startMouse" @mousemove.stop.prevent="moveMouse" @mouseup.stop="endGesture" @mouseleave="endMouse">
-        <canvas id="profile-avatar-crop" type="2d" class="crop-canvas" />
+        <view class="crop-preview" aria-hidden="true">
+          <image v-if="ready" :src="source" mode="scaleToFill" class="crop-photo" :style="photoStyle" />
+        </view>
         <view class="crop-grid" aria-hidden="true">
           <view class="crop-line line-left" /><view class="crop-line line-right" />
           <view class="crop-line line-top" /><view class="crop-line line-bottom" />
@@ -18,18 +21,18 @@
     <view v-if="ready && !failed" class="crop-tools">
       <button class="crop-button zoom-button" aria-label="缩小" @click="zoomBy(1 / 1.2)">−</button>
       <button class="crop-button zoom-button" aria-label="放大" @click="zoomBy(1.2)">+</button>
-      <button class="crop-button reset-button" :disabled="!changed" @click="resetCrop">重置</button>
+      <button class="crop-button" :class="{ 'crop-disabled': !changed }" :disabled="!changed" @click="resetCrop">重置</button>
     </view>
     <view class="crop-actions">
       <button class="crop-button" @click="emit('cancel')">取消裁剪</button>
       <button v-if="failed" class="crop-button crop-confirm" @click="load">重试裁剪</button>
-      <button v-else class="crop-button crop-confirm" :disabled="!ready" @click="confirm">使用此裁剪</button>
+      <button v-else class="crop-button crop-confirm" :class="{ 'crop-disabled': !ready }" :disabled="!ready" @click="confirm">使用此裁剪</button>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
-import { getCurrentInstance, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref } from 'vue'
 import { avatarCrop, avatarSize, reframeAvatarCrop } from '@/features/profile/avatar-crop.uts'
 import type { AvatarCrop } from '@/features/profile/avatar-crop.uts'
 
@@ -50,7 +53,16 @@ let picture: Image | null = null
 let photoWidth = 0
 let photoHeight = 0
 let initialCrop: AvatarCrop | null = null
-let crop: AvatarCrop | null = null
+const crop = ref<AvatarCrop | null>(null)
+const photoStyle = computed(() => {
+  const region = crop.value
+  if (region == null) return {}
+  const scale = frameSize / region.side
+  return {
+    width: photoWidth * scale + 'px', height: photoHeight * scale + 'px',
+    left: -region.x * scale + 'px', top: -region.y * scale + 'px'
+  }
+})
 let gesture: Gesture | null = null
 let mouseDragging = false
 let lastTouch = 0
@@ -62,6 +74,7 @@ function load(): void {
   const ticket = ++generation
   ready.value = false
   failed.value = false
+  endGesture()
   uni.createCanvasContextAsync({
     id: 'profile-avatar-crop', component: instance,
     success: context => {
@@ -80,6 +93,7 @@ function load(): void {
         photoHeight = image.height
         initialCrop = avatarCrop(photoWidth, photoHeight, 1, 50, 50)
         resetCrop()
+        ready.value = true
       }
       image.onerror = () => { if (ticket === generation) failed.value = true }
       image.src = props.source
@@ -91,7 +105,7 @@ function load(): void {
 function draw(): boolean {
   const context = canvas?.getContext('2d')
   const image = picture
-  const region = crop
+  const region = crop.value
   if (context == null || image == null || region == null) return false
   try {
     context.clearRect(0, 0, avatarSize, avatarSize)
@@ -102,21 +116,19 @@ function draw(): boolean {
 
 function resetCrop(): void {
   if (initialCrop == null) return
-  crop = initialCrop
+  crop.value = initialCrop
   changed.value = false
-  ready.value = draw()
 }
 
 function reframe(origin: AvatarCrop, scale: number, dx: number, dy: number): void {
   const initial = initialCrop
   if (initial == null || !ready.value) return
   const next = reframeAvatarCrop(photoWidth, photoHeight, origin, scale, dx, dy, frameSize)
-  crop = next
+  crop.value = next
   changed.value = next.x !== initial.x || next.y !== initial.y || next.side !== initial.side
-  draw()
 }
 function zoomBy(scale: number): void {
-  const current = crop
+  const current = crop.value
   if (current != null) reframe(current, scale, 0, 0)
 }
 
@@ -156,7 +168,7 @@ function endMouse(): void { if (mouseDragging) endGesture() }
 function endGesture(): void { gesture = null; mouseDragging = false }
 
 function setPointer(pointer: Pointer | null): void {
-  const current = crop
+  const current = crop.value
   gesture = pointer == null || current == null ? null : { pointer, crop: current }
 }
 function movePointer(pointer: Pointer): void {
@@ -183,7 +195,9 @@ function confirm(): void {
 .cropper { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 500; background: #101010; padding: 20px 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); touch-action: none; }
 .crop-stage { flex: 1; justify-content: center; align-items: center; gap: 18px; }
 .crop-frame { position: relative; background: #161616; cursor: grab; touch-action: none; }
-.crop-canvas { width: 100%; height: 100%; }
+.crop-export { position: absolute; top: 0; left: -4096px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.crop-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden; pointer-events: none; }
+.crop-photo { position: absolute; }
 .crop-grid { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border: 1px solid #fff; pointer-events: none; }
 .crop-line { position: absolute; background: rgba(255, 255, 255, .55); }
 .line-left, .line-right { top: 0; bottom: 0; width: 1px; }
@@ -205,5 +219,5 @@ function confirm(): void {
 .crop-button::after { border: 0; }
 .zoom-button { font-size: 22px; background: #2d2d2d; }
 .crop-confirm { font-weight: bold; }
-.crop-button[disabled] { color: #999; background: #101010; }
+.crop-disabled { color: #999; background: #101010; }
 </style>
