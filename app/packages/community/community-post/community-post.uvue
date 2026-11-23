@@ -44,14 +44,14 @@
           <view class="card">
             <text class="heading">评论</text>
             <view v-for="comment in comments" :key="comment.id" class="stack divider">
-              <text class="muted">{{ comment.author }}{{ comment.parentId.length > 0 ? ' 回复 ' + parentName(comment.parentId) : '' }}</text>
+              <view class="row"><ProfileAvatar :code="comment.authorCode ?? ''" :version="comment.authorAvatarVersion ?? ''" :legacy="comment.authorAvatar ?? ''" :diameter="28" /><text class="muted">{{ comment.author }}{{ comment.parentId.length > 0 ? ' 回复 ' + parentName(comment.parentId) : '' }}</text></view>
               <text class="body">{{ comment.body }}</text>
               <view class="row actions"><button class="secondary" @click="reply(comment)">回复</button><button class="secondary" @click="beginReport(comment.id)">举报</button></view>
             </view>
             <text v-if="comments.length === 0" class="muted">暂无公开评论。</text>
             <button v-if="next.length > 0" class="secondary" :disabled="busy" @click="more">更多评论</button>
             <view v-for="comment in visibleMine" :key="comment.id" class="stack divider">
-              <text class="muted">我的评论 · {{ statusLabel(comment.status) }}</text>
+              <view class="row"><ProfileAvatar :code="comment.authorCode ?? ''" :version="comment.authorAvatarVersion ?? ''" :legacy="comment.authorAvatar ?? ''" :diameter="28" /><text class="muted">我的评论 · {{ statusLabel(comment.status) }}</text></view>
               <text class="body">{{ comment.body }}</text><text v-if="comment.reason" class="muted">{{ comment.reason }}</text>
             </view>
             <view v-if="replyId.length > 0" class="row spread"><text class="muted">回复 {{ replyName }}</text><button class="secondary" @click="cancelReply">取消回复</button></view>
@@ -68,6 +68,7 @@
 <script setup lang="uts">
 import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PostCard from '../components/PostCard.uvue'
 import { requestId, secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'

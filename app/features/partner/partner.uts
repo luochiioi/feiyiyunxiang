@@ -4,7 +4,7 @@ import { catalogError, refreshCatalog } from '@/features/exploration/catalog.uts
 export { coopRouteEnabled, partnerView } from './partner-view.uts'
 export type { PartnerInput, PartnerView } from './partner-view.uts'
 
-export type PartnerFriend = { code: string, nickname: string }
+export type PartnerFriend = { code: string, nickname: string, avatarVersion?: string, avatar?: string }
 type SeatProgress = { done: number, total: number }
 export type CoopTask = { id: string, title: string }
 export type CoopView = {
@@ -19,7 +19,7 @@ export type QuizAnswer = { correct: boolean, alreadyDone: boolean, attempts?: nu
 export type PkView = {
   id: string, status: string, routeId: string, invitedBy: string, ready: string[],
   startedAt: number | null, expiresAt: number, myRunId: string | null,
-  eggPending: boolean, winner: string | null
+  eggPending: boolean, winner: string | null, partner?: PartnerFriend | null
 }
 type InviteResult = { id: string }
 
@@ -42,7 +42,8 @@ export async function loadInviteFriends(): Promise<PartnerFriend[]> {
   const [rows] = await Promise.all([loadFriends(), refreshCatalog()])
   if (catalogError.value) throw new Error('CATALOG_UNAVAILABLE')
   return rows.filter(row => row['kind'] !== 'incoming').map(row => ({
-    code: row['code'] as string, nickname: row['nickname'] as string
+    code: row['code'] as string, nickname: row['nickname'] as string,
+    avatarVersion: row['avatarVersion'] as string | null ?? '', avatar: row['avatar'] as string | null ?? ''
   }))
 }
 export function sendFriendRequest(code: string, requestId: string): Promise<UTSJSONObject> {

@@ -1,8 +1,7 @@
 <template>
   <view class="card post-card" @click="emit('open')">
     <view class="row">
-      <image v-if="avatar.length > 0 && !avatarFailed" class="post-avatar" :src="avatar" mode="aspectFill" @error="avatarFailed = true" />
-      <image v-else class="post-avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+      <ProfileAvatar :code="post.authorCode ?? ''" :version="post.authorAvatarVersion ?? ''" :legacy="post.authorAvatar ?? ''" />
       <view class="stack author">
         <text class="author-name">{{ post.author }}</text>
         <text v-if="post.authorCode" class="muted">ID {{ post.authorCode }}</text>
@@ -19,21 +18,17 @@
   </view>
 </template>
 <script setup lang="uts">
-import { computed, ref, watch } from 'vue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import { postTitle, statusLabel } from '@/features/community/community.uts'
 import type { Post } from '@/features/community/community.uts'
 import PostGallery from './PostGallery.uvue'
-const props = defineProps<{ post: Post, detail: boolean, preview: boolean, visible: boolean }>()
+defineProps<{ post: Post, detail: boolean, preview: boolean, visible: boolean }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
-const avatar = computed(() => props.post.authorAvatar ?? '')
-const avatarFailed = ref(false)
-watch(avatar, () => { avatarFailed.value = false })
 </script>
 <style scoped>
 @import '@/styles/page.css';
 .post-card { gap: 12px; border-color: #efe4d3; box-shadow: 0 3px 10px #664e2c14; }
-.post-avatar { width: 38px; height: 38px; border-radius: 19px; background: #f6ecd8; flex-shrink: 0; }
-.author { gap: 2px; }
+.author { gap: 2px; flex: 1; min-width: 0; word-break: break-word; }
 .author-name, .post-title { font-size: 16px; line-height: 22px; color: #332c23; font-weight: 700; }
 .rejected-tag { background: #b52b32; color: #fff; font-weight: 700; padding: 5px 10px; border-radius: 7px; }
 .review-link { color: #b52b32; font-weight: 600; }

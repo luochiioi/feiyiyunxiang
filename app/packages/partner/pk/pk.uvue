@@ -19,6 +19,7 @@
       <template v-else-if="match != null">
         <view class="card">
           <text class="heading">本场</text>
+          <view v-if="match.partner != null" class="row"><ProfileAvatar :code="match.partner?.code ?? ''" :version="match.partner?.avatarVersion ?? ''" /><text class="body">{{ match.partner?.nickname }}</text></view>
           <text class="body">状态 {{ statusText }}</text>
           <text v-if="startedAt.length > 0" class="muted">开始于 {{ startedAt }}</text>
         </view>
@@ -49,6 +50,7 @@
 
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PartnerInviteForm from '../components/PartnerInviteForm.uvue'
 import { computed, ref } from 'vue'
 import { openRouteDetail } from '@/features/navigation.uts'

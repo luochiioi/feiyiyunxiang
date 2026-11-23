@@ -1,0 +1,169 @@
+<template>
+  <view class="profile-review">
+    <view class="actions">
+      <text class="heading">资料待审</text>
+      <button :disabled="busy" @click="load(false)">刷新队列</button>
+    </view>
+    <text v-if="message.length > 0" class="message">{{ message }}</text>
+    <text v-if="!busy && items.length === 0 && message.length === 0">当前没有待审资料。</text>
+    <view v-for="item in items" :key="item.revisionId" class="queue-item">
+      <text>{{ item.nickname }} · {{ new Date(item.createdAt).toLocaleString() }}</text>
+      <button :disabled="busy" @click="select(item.revisionId)">查看资料</button>
+    </view>
+    <button v-if="next.length > 0" :disabled="busy" @click="load(true)">加载更多</button>
+
+    <view v-if="detail != null" class="inspector">
+      <view class="comparison">
+        <view class="version">
+          <text class="heading">当前公开资料</text>
+          <image class="thumb" :src="currentSrc || defaultAvatar" mode="aspectFit" @error="imageFailed(true)" />
+          <button v-if="currentError" :disabled="busy" @click="loadAvatar(true)">重试当前头像</button>
+          <text>{{ detail?.current.nickname }}</text>
+          <text>{{ detail?.current.bio }}</text>
+          <text>{{ detail?.current.displayCity }}</text>
+          <text>{{ detail?.current.interests.join(' · ') }}</text>
+        </view>
+        <view class="version">
+          <text class="heading">申请资料</text>
+          <image class="thumb" :src="selectedSrc || defaultAvatar" mode="aspectFit" @error="imageFailed(false)" />
+          <button v-if="selectedError" :disabled="busy" @click="loadAvatar(false)">重试申请头像</button>
+          <text>{{ detail?.selected.nickname }}</text>
+          <text>{{ detail?.selected.bio }}</text>
+          <text>{{ detail?.selected.displayCity }}</text>
+          <text>{{ detail?.selected.interests.join(' · ') }}</text>
+          <text v-if="detail?.selected.reason">{{ detail?.selected.reason }}</text>
+        </view>
+      </view>
+      <text v-if="detail?.accountActive === false">账号停用中，恢复后可继续审核。</text>
+      <view v-if="canDecide" class="version">
+        <textarea v-model="reason" :disabled="busy || attempted != null" placeholder="驳回时填写原因（1–300 字）" />
+        <view class="actions" v-if="attempted == null">
+          <button :disabled="busy" @click="review('approve')">通过资料</button>
+          <button :disabled="busy" @click="review('reject')">驳回资料</button>
+        </view>
+        <button v-else :disabled="busy" @click="review(attempted ?? '')">重试确认审核结果</button>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { api, session } from '@/features/api.uts'
+import type { ProfileReviewPage, ProfileReviewDetail, ProfileReviewItem } from '@/features/api.uts'
+
+const defaultAvatar = '/static/aomiao-wave.png'
+const items = ref<ProfileReviewItem[]>([]), next = ref('')
+const detail = ref<ProfileReviewDetail | null>(null)
+const message = ref(''), reason = ref('')
+const selectedSrc = ref(''), currentSrc = ref('')
+const selectedError = ref(false), currentError = ref(false)
+const attempted = ref<string | null>(null), decided = ref(false), busy = ref(false)
+const canDecide = computed(() => detail.value?.accountActive === true && detail.value?.selected.status === 'pending' && !decided.value)
+let generation = 0
+let closed = false
+let imageTail: Promise<void> = Promise.resolve()
+onMounted(() => { load(false) })
+onBeforeUnmount(() => { closed = true; generation++ })
+
+async function fetchQueue(more: boolean): Promise<void> {
+  const result = await api<ProfileReviewPage>('profileReviewList', { cursor: more ? next.value : '' })
+  items.value = more ? [...items.value, ...result.items] : result.items
+  next.value = result.next
+}
+
+async function load(more: boolean): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await fetchQueue(more)
+    message.value = ''
+  } catch (_) {
+    message.value = '未能读取待审队列，请重试。'
+  } finally { busy.value = false }
+}
+
+async function select(id: string): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  generation++
+  detail.value = null
+  currentSrc.value = ''; selectedSrc.value = ''
+  currentError.value = false; selectedError.value = false
+  attempted.value = null; decided.value = false; reason.value = ''; message.value = ''
+  try {
+    detail.value = await api<ProfileReviewDetail>('profileReviewDetail', { revisionId: id })
+    currentSrc.value = detail.value?.current.avatar ?? ''
+    selectedSrc.value = detail.value?.selected.avatar ?? ''
+    if (detail.value?.current.avatarVersion) loadAvatar(true)
+    if (detail.value?.selected.hasAvatar === true) loadAvatar(false)
+  } catch (_) { message.value = '未能读取资料详情，请重试。' }
+  finally { busy.value = false }
+}
+
+function imageFailed(current: boolean): void {
+  if (current && currentSrc.value.length > 0) { currentSrc.value = ''; currentError.value = true }
+  if (!current && selectedSrc.value.length > 0) { selectedSrc.value = ''; selectedError.value = true }
+}
+
+function loadAvatar(current: boolean): void {
+  const ticket = generation
+  const uid = session.value?.uid
+  imageTail = imageTail.then(async () => {
+    const value = detail.value
+    if (closed || ticket !== generation || uid !== session.value?.uid || value == null) return
+    const source = current ? currentSrc : selectedSrc
+    const failure = current ? currentError : selectedError
+    failure.value = false
+    try {
+      const image = await api<{ src: string }>('profileReviewAvatar', {
+        revisionId: value.selected.revisionId, current, avatarVersion: value.current.avatarVersion
+      })
+      if (!closed && ticket === generation && uid === session.value?.uid) source.value = image.src
+    } catch (_) {
+      if (!closed && ticket === generation && uid === session.value?.uid) failure.value = true
+    }
+  })
+}
+
+async function review(decision: string): Promise<void> {
+  const value = detail.value
+  if (value == null || busy.value || !canDecide.value) return
+  const explanation = reason.value.trim()
+  if (decision === 'reject' && (explanation.length === 0 || Array.from(explanation).length > 300)) {
+    message.value = '请填写 1–300 字的驳回原因。'
+    return
+  }
+  attempted.value = decision
+  busy.value = true
+  try {
+    await api<UTSJSONObject>('profileReview', { revisionId: value.selected.revisionId, decision, reason: explanation })
+    decided.value = true
+    items.value = items.value.filter(item => item.revisionId !== value.selected.revisionId)
+    message.value = decision === 'approve' ? '资料已通过。' : '资料已驳回。'
+    try { await fetchQueue(false) }
+    catch (_) { message.value += ' 队列刷新失败，可单独刷新。' }
+  } catch (error) {
+    const code = (error as Error).message
+    if (['STALE_VERSION', 'ACCOUNT_DISABLED', 'NOT_FOUND'].includes(code)) {
+      decided.value = true
+      message.value = '资料版本或账号状态已变化，请刷新后重新查看。'
+    } else if (code === 'INVALID_REASON') {
+      attempted.value = null
+      message.value = '请检查审核原因。'
+    } else { message.value = '未收到审核确认，可重试同一决定。' }
+  } finally { busy.value = false }
+}
+</script>
+
+<style scoped>
+.profile-review, .inspector, .version { display: flex; flex-direction: column; gap: 12px; }
+.actions, .queue-item, .comparison { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
+.queue-item, .version { padding: 14px; background: #fff; border-radius: 10px; }
+.comparison { align-items: stretch; }
+.comparison .version { flex: 1; min-width: 170px; overflow-wrap: anywhere; }
+.heading { font-weight: 700; }
+.thumb { width: 64px; height: 64px; border-radius: 32px; background: #f7eedc; }
+.message { color: #74512a; }
+textarea { border: 1px solid #d5d5d5; padding: 8px; min-height: 65px; }
+</style>

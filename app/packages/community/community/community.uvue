@@ -19,7 +19,7 @@
           <text class="heading">路线完成榜</text>
           <text class="muted">仅本人和好友 · 按完成的探索路线数排名</text>
           <view v-for="row in visibleRanks" :key="row.mine ? 'me' : row.code" class="row spread divider">
-            <text class="body">{{ row.rank }}. {{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text>
+            <view class="row"><ProfileAvatar :code="row.code" :version="row.avatarVersion ?? ''" :diameter="30" /><text class="body">{{ row.rank }}. {{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text></view>
             <text class="tag">{{ row.count }} 条</text>
           </view>
         </view>
@@ -38,6 +38,7 @@
 <script setup lang="uts">
 import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PostCard from '../components/PostCard.uvue'
 import StepPanel from '../components/StepPanel.uvue'
 import { secured, session } from '@/features/api.uts'

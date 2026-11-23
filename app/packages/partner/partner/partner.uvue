@@ -23,14 +23,14 @@
           <button class="primary inline" :disabled="busy" @click="addFriend">添加</button>
         </view>
         <view v-for="item in incoming" :key="item.id" class="row spread divider">
-          <text class="body">{{ item.nickname }} 请求加为好友</text>
+          <view class="row friend-label"><ProfileAvatar :code="item.code" :version="item.avatarVersion ?? ''" :legacy="item.avatar ?? ''" :diameter="32" /><text class="body">{{ item.nickname }} 请求加为好友</text></view>
           <view class="row">
             <button class="secondary inline" :disabled="busy" @click="answer(item.id, true)">接受</button>
             <button class="secondary inline" :disabled="busy" @click="answer(item.id, false)">拒绝</button>
           </view>
         </view>
         <view v-for="item in friends" :key="item.code" class="row spread divider">
-          <text class="body">{{ item.nickname }}</text><text class="muted">邀请码 {{ item.code }}</text>
+          <view class="row friend-label"><ProfileAvatar :code="item.code" :version="item.avatarVersion ?? ''" :legacy="item.avatar ?? ''" :diameter="32" /><text class="body">{{ item.nickname }}</text></view><text class="muted">邀请码 {{ item.code }}</text>
         </view>
         <text v-if="friends.length === 0 && incoming.length === 0" class="muted">还没有好友。用邀请码互相添加后，才能发起合作或 PK。</text>
       </view>
@@ -75,6 +75,7 @@
 
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 
 import { computed, ref, watch } from 'vue'
 import { openPage } from '@/features/navigation.uts'
@@ -82,8 +83,8 @@ import { showError, requestId, secured, session, login } from '@/features/api.ut
 import { refreshNotificationsSummary } from '@/features/notifications.uts'
 import { loadFriends, loadAssignment, sendFriendRequest, answerFriendRequest, partnerView } from '@/features/partner/partner.uts'
 
-type FriendCard = { code: string, nickname: string }
-type IncomingRequest = { id: string, code: string, nickname: string }
+type FriendCard = { code: string, nickname: string, avatarVersion?: string, avatar?: string }
+type IncomingRequest = { id: string, code: string, nickname: string, avatarVersion?: string, avatar?: string }
 type AssignmentCard = { id: string, status: string, rejectAvailableAt: number, nodeTitle: string, title?: string }
 
 const showBottleTrial = process.env.NODE_ENV === 'development'
@@ -127,8 +128,14 @@ async function loadPartner(): Promise<void> {
     const [profile, rows, task] = await Promise.all([secured<UTSJSONObject>('ensureProfile', {}), loadFriends(), loadAssignment()])
     if (request !== sequence || uid !== session.value?.uid) return
     myCode.value = profile['code'] as string
-    friends.value = rows.filter(row => row['kind'] !== 'incoming').map(row => ({ code: row['code'] as string, nickname: row['nickname'] as string }))
-    incoming.value = rows.filter(row => row['kind'] === 'incoming').map(row => ({ id: row['id'] as string, code: row['code'] as string, nickname: row['nickname'] as string }))
+    friends.value = rows.filter(row => row['kind'] !== 'incoming').map(row => ({
+      code: row['code'] as string, nickname: row['nickname'] as string,
+      avatarVersion: row['avatarVersion'] as string | null ?? '', avatar: row['avatar'] as string | null ?? ''
+    }))
+    incoming.value = rows.filter(row => row['kind'] === 'incoming').map(row => ({
+      id: row['id'] as string, code: row['code'] as string, nickname: row['nickname'] as string,
+      avatarVersion: row['avatarVersion'] as string | null ?? '', avatar: row['avatar'] as string | null ?? ''
+    }))
     assignment.value = task as AssignmentCard | null
   } catch (_) { if (request === sequence && uid === session.value?.uid) loadError.value = '旅伴信息暂时无法读取，请重试。' }
   finally { if (request === sequence && uid === session.value?.uid) loading.value = false }

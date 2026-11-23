@@ -1,7 +1,8 @@
 const crypto=require('node:crypto')
 const {createNotificationService}=require('./notification-service')
 const {createProfileService}=require('./profile-service')
-const profileActions = new Set(['getMyProfile', 'profileStageAvatar', 'profileSubmit', 'profileRevision'])
+const profileReviewActions = ['profileReviewList', 'profileReviewDetail', 'profileReviewAvatar', 'profileReview']
+const profileActions = new Set(['getMyProfile', 'profileStageAvatar', 'profileSubmit', 'profileRevision', 'profileAvatar', ...profileReviewActions])
 const notificationActions = new Set(['notificationsList','notificationsSummary','notificationDetail','notificationRead'])
 const {createService,key}=require('./service')
 const { createStepService } = require('./step-service')
@@ -18,7 +19,7 @@ const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCr
 const reviewActions = new Set(['communityReviewList', 'communityReviewDetail', 'communityReviewImage', 'communityReviewPost',
   'communityReviewComment', 'communityResolveReport', 'communityMute', 'communityPolicy', 'communitySavePolicy', 'communitySeedPolicy'])
 const operationsActions = new Set(['communityOverview', 'communityUsers', 'communityUserDetail', 'communityAccountStatus'])
-const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions])
+const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions, ...profileReviewActions])
 const guestActions = new Set(['communityFeed', 'communityPost', 'communityImage', 'communityShare', 'communityComments'])
 const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment',
   'communityReport', 'communityRanking', 'communityRemoveOwn', 'communityReviewNotices', 'communityReadReview'])
@@ -47,7 +48,7 @@ exports.main=async(event,context)=>{
     let user=null
     if (adminActions.has(action)) {
       user = await authenticateAdmin(repo, event.token)
-    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action) && !(guestActions.has(action) && !event.token)) {
+    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action) && !((guestActions.has(action) || action === 'profileAvatar') && !event.token)) {
       if (typeof event.token === 'string' && event.token.startsWith('fy_admin_')) {
         throw new Error('AUTH_REQUIRED')
       }

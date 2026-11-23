@@ -1,6 +1,6 @@
 export type StepMilestone = { threshold: number, reached: boolean, reachedAt: number | null }
 export type StepStatus = { date: string, steps: number | null, syncedAt: number | null, milestones: StepMilestone[], nextMilestone: number | null, dailyCap: number }
-export type StepRank = { code: string, nickname: string, mine: boolean, steps: number | null, syncedAt: number | null, rank: number | null }
+export type StepRank = { code: string, nickname: string, mine: boolean, steps: number | null, syncedAt: number | null, rank: number | null, avatarVersion?: string }
 export type StepRanking = { date: string, rows: StepRank[] }
 export type StepHistory = { date: string, days: StepStatus[] }
 export const stepsPath = '/packages/community/steps/steps'

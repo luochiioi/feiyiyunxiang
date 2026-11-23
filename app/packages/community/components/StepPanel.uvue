@@ -24,6 +24,7 @@
         <view v-for="row in visibleRanks" :key="row.mine ? 'me' : row.code" class="row spread divider">
           <view class="row">
             <text class="step-rank">{{ row.rank == null ? '—' : row.rank }}</text>
+            <ProfileAvatar :code="row.code" :version="row.avatarVersion ?? ''" :diameter="30" />
             <text class="body">{{ row.nickname }}{{ row.mine ? '（我）' : '' }}</text>
           </view>
           <text class="body">{{ row.steps == null ? '未同步' : row.steps.toLocaleString() + ' 步' }}</text>
@@ -57,6 +58,7 @@
 
 <script setup lang="uts">
 import { computed, ref, watch } from 'vue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import { session, login, secured } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
 import { stepError, stepsPath, stepAutoSyncEnabled, setStepAutoSync } from '@/features/steps.uts'

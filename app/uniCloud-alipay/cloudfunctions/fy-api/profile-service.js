@@ -2,12 +2,16 @@ const { createHash } = require('node:crypto')
 const { key } = require('./service')
 const { createPartnershipService } = require('./partnership-service')
 const { fail, identifier } = require('./community-policy')
-const { profiles, accounts, findProfile, profileFields } = require('./profile-presenter')
+const { profiles, accounts, findProfile, profileFields, legacyAvatar } = require('./profile-presenter')
+const { validateCursor } = require('./community-review-queue')
+const { writeCommunityAudit } = require('./community-operations')
+const { writeProfileReviewNotification } = require('./profile-notification-events')
 
 const revisions = 'fy-profile-revisions'
 const uploads = 'fy-profile-uploads'
 const hour = 3600000
 const interestsAllowed = new Set(['湘绣', '瓷器', '传统建筑', '非遗美食', '博物馆', '摄影'])
+const moderator = user => { if (!user?.uid || !(user.admin || user.reviewer)) fail('FORBIDDEN') }
 
 function text(value, min, max, code) {
   if (value == null && min === 0) return ''
@@ -37,7 +41,7 @@ function revisionView(row) {
   if (!row) return null
   const { nickname, bio, displayCity, interests, avatarMedia } = row.snapshot
   return {
-    revisionId: row._id, nickname, bio, displayCity, interests, hasAvatar: !!avatarMedia,
+    revisionId: row._id, nickname, bio, displayCity, interests, hasAvatar: !!avatarMedia, avatar: legacyAvatar(row.snapshot),
     baseRevision: row.baseRevision, status: row.status, createdAt: row.createdAt, reason: row.reason ?? ''
   }
 }
@@ -82,13 +86,29 @@ function createProfileService({ repo, media, now = Date.now }) {
     return { uploadId: upload._id }
   }
 
+  async function candidate(db, id) {
+    const row = identifier(id) ? await db.get(revisions, id) : null
+    if (!row) fail('NOT_FOUND')
+    return row
+  }
+
+  async function publicAvatar(p) {
+    if (typeof p.code !== 'string' || !/^[A-Z2-9]{8}$/.test(p.code) ||
+        typeof p.avatarVersion !== 'string' || !/^[a-f0-9]{64}$/.test(p.avatarVersion)) fail('NOT_FOUND')
+    const matches = await repo.list(profiles, { code: p.code })
+    const profile = matches[0]
+    if (matches.length !== 1 || profile.avatarVersion !== p.avatarVersion || !profile.avatarMedia ||
+        (await repo.get(accounts, profile.uid))?.status !== 0) fail('NOT_FOUND')
+    return profile
+  }
+
   return {
     async getMyProfile(user) {
       const profile = await loadProfile(user)
       const pending = profile.pendingRevisionId ? await repo.get(revisions, profile.pendingRevisionId) : null
       const latest = !pending && profile.latestProfileRevisionId ? await repo.get(revisions, profile.latestProfileRevisionId) : null
       return {
-        ...profileFields(profile), pending: pending?.uid === profile.uid ? revisionView(pending) : null,
+        ...profileFields(profile), avatar: legacyAvatar(profile), pending: pending?.uid === profile.uid ? revisionView(pending) : null,
         latest: latest?.uid === profile.uid ? revisionView(latest) : null
       }
     },
@@ -138,6 +158,7 @@ function createProfileService({ repo, media, now = Date.now }) {
         if (recent.length >= 10) fail('RATE_LIMITED')
         let avatarMedia = profile.avatarMedia ?? null
         let avatarVersion = profile.avatarVersion ?? ''
+        const avatar = resetAvatar || avatarUploadId ? '' : legacyAvatar(profile)
         if (resetAvatar) { avatarMedia = null; avatarVersion = '' }
         if (avatarUploadId) {
           const upload = await db.get(uploads, avatarUploadId)
@@ -152,7 +173,7 @@ function createProfileService({ repo, media, now = Date.now }) {
           }
         }
         await db.put(revisions, id, {
-          uid, baseRevision, digest, status: 'pending', snapshot: { ...fields, avatarMedia, avatarVersion },
+          uid, baseRevision, digest, status: 'pending', snapshot: { ...fields, avatarMedia, avatarVersion, avatar },
           createdAt: at, order: String(at).padStart(13, '0') + '-' + id
         })
         await db.put(profiles, profile._id, {
@@ -160,6 +181,14 @@ function createProfileService({ repo, media, now = Date.now }) {
         })
         return { revisionId: id, status: 'pending' }
       })
+    },
+
+    async profileAvatar(_user, p) {
+      const profile = await publicAvatar(p)
+      const result = await media.read(profile.avatarMedia)
+      const checked = await publicAvatar(p)
+      if (checked.uid !== profile.uid || checked.avatarMedia.fileID !== profile.avatarMedia.fileID) fail('NOT_FOUND')
+      return result
     },
 
     async profileRevision(user, p) {
@@ -174,6 +203,74 @@ function createProfileService({ repo, media, now = Date.now }) {
         return result
       }
       return revisionView(row)
+    },
+
+    async profileReviewList(user, p = {}) {
+      moderator(user)
+      validateCursor(p.cursor)
+      const rows = await repo.page(revisions, { status: 'pending' }, { field: 'order', before: p.cursor || null, size: 21 })
+      return { items: rows.slice(0, 20).map(revisionView), next: rows.length > 20 ? rows[19].order : '' }
+    },
+
+    async profileReviewDetail(user, p) {
+      moderator(user)
+      const row = await candidate(repo, p.revisionId)
+      const [profile, account] = await Promise.all([findProfile(repo, row.uid), repo.get(accounts, row.uid)])
+      return { selected: revisionView(row), current: { ...profileFields(profile), avatar: legacyAvatar(profile) }, accountActive: account?.status === 0 }
+    },
+
+    async profileReviewAvatar(user, p) {
+      moderator(user)
+      const row = await candidate(repo, p.revisionId)
+      let reference = row.snapshot.avatarMedia
+      if (p.current === true) {
+        const profile = await findProfile(repo, row.uid)
+        if (!profile || !p.avatarVersion || profile.avatarVersion !== p.avatarVersion) fail('NOT_FOUND')
+        reference = profile.avatarMedia
+      }
+      if (!reference) fail('NOT_FOUND')
+      const result = await media.read(reference)
+      const current = p.current === true ? (await findProfile(repo, row.uid))?.avatarMedia : (await candidate(repo, row._id)).snapshot.avatarMedia
+      if (current?.fileID !== reference.fileID) fail('NOT_FOUND')
+      return result
+    },
+
+    async profileReview(user, p) {
+      moderator(user)
+      if (!['approve', 'reject'].includes(p.decision)) fail('INVALID_REQUEST')
+      const status = p.decision === 'approve' ? 'approved' : 'rejected'
+      const reason = text(p.reason, status === 'rejected' ? 1 : 0, 300, 'INVALID_REASON')
+      const initial = await candidate(repo, p.revisionId)
+      const original = await findProfile(repo, initial.uid)
+      return repo.tx(async db => {
+        const row = await candidate(db, p.revisionId)
+        if (row.status === status) {
+          if (row.reason !== reason) fail('STALE_VERSION')
+          return { revisionId: row._id, status }
+        }
+        if (row.status !== 'pending') fail('STALE_VERSION')
+        await guardAccount(db, row.uid)
+        const profile = original ? await db.get(profiles, original._id) : null
+        if (profile?.uid !== row.uid || profile.pendingRevisionId !== row._id || (profile.revision ?? 0) !== row.baseRevision) {
+          fail('STALE_VERSION')
+        }
+        const at = now()
+        const updated = { ...profile, pendingRevisionId: '' }
+        if (status === 'approved') {
+          const { nickname, bio, displayCity, interests, avatarMedia, avatarVersion } = row.snapshot
+          Object.assign(updated, { nickname, bio, displayCity, interests, avatarMedia, avatarVersion, avatar: legacyAvatar(row.snapshot), revision: row.baseRevision + 1 })
+        }
+        await db.put(profiles, profile._id, updated)
+        await db.put(revisions, row._id, { ...row, status, reason, decidedAt: at, reviewerUid: user.uid })
+        await writeCommunityAudit(db, user, 'profile.' + p.decision, row._id, {
+          targetUid: row.uid, revisionId: row._id, reason,
+          previous: profileFields(profile), submitted: revisionView(row)
+        }, at)
+        await writeProfileReviewNotification(db, {
+          recipientUid: row.uid, revisionId: row._id, kind: 'profile.' + status, reason, createdAt: at
+        })
+        return { revisionId: row._id, status }
+      })
     }
   }
 }

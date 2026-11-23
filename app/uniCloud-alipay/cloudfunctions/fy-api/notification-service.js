@@ -1,4 +1,5 @@
 const { friendTitles, friendNotificationContext } = require('./friend-notification-events')
+const { profileTitles } = require('./profile-notification-events')
 const { key } = require('./service')
 const { fail, identifier } = require('./community-policy')
 const { validateCursor } = require('./community-review-queue')
@@ -27,7 +28,7 @@ async function markNotificationRead(db, uid, id, at) {
   if (version?.uid === uid && version.postId === row.postId && version.status === 'rejected' && version.reviewSeen !== true) await db.put('fy-community-versions',version._id,{...version,reviewSeen:true})
  }
 }
-const view = row => ({id:row._id,kind:row.kind,title:titles[row.kind] ?? friendTitles[row.kind],preview:Object.hasOwn(friendTitles,row.kind) ? (row.actorNickname || '旅伴') : row.reason.slice(0,60),createdAt:row.createdAt,read:row.readAt>0})
+const view = row => ({id:row._id,kind:row.kind,title:titles[row.kind] ?? friendTitles[row.kind] ?? profileTitles[row.kind],preview:Object.hasOwn(friendTitles,row.kind) ? (row.actorNickname || '旅伴') : (row.reason ?? '').slice(0,60),createdAt:row.createdAt,read:row.readAt>0})
 function createNotificationService({repo,now=Date.now}) {
  async function own(u,id) {
   member(u);if(!identifier(id)) fail('NOT_FOUND')
