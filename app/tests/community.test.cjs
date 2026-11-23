@@ -643,7 +643,10 @@ test('manual post and comment transitions notify verified authors once and synch
  await c.communityReviewPost(reviewer,{...third,decision:'reject',reason:'新版'})
  await n.notificationRead(author,{id:rejected.id});assert.equal((await f.repo.get('fy-community-versions',third.revisionId)).reviewSeen,false)
  await c.communityReviewPost(reviewer,{...first,decision:'remove',reason:'下架'})
- assert.equal((await n.notificationDetail(author,{id:(await n.notificationsList(author,{})).items.find(x=>x.kind==='community.post.removed').id})).target,null)
+ const removedTarget=(await n.notificationDetail(author,{id:(await n.notificationsList(author,{})).items.find(x=>x.kind==='community.post.removed').id})).target
+ assert.deepEqual(removedTarget,{postId:first.postId,revisionId:first.revisionId,commentId:'',preview:true})
+ assert.equal((await c.communityPost(author,removedTarget)).status,'removed')
+ await assert.rejects(c.communityPost(stranger,removedTarget),/NOT_FOUND/)
  const other=await f.post(author,{requestId:'other'});await f.approve(other)
  for(const [id,status,decision] of [['c1','pending','approve'],['c2','pending','reject'],['c3','public','remove']]) {
   await f.repo.put('fy-community-comments',id,{uid:'friend',postId:other.postId,revisionId:other.revisionId,status})

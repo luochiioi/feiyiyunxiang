@@ -7,25 +7,30 @@
       <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="loadDetail">重试读取消息</button></view>
       <view v-if="detail != null" class="card">
         <text class="heading">{{ detail?.title ?? '' }}</text><text class="muted">{{ formatTime(detail?.createdAt ?? 0) }}</text>
-        <view v-if="detail?.friend != null" class="reason"><text class="title">{{ detail?.friend?.nickname ?? '旅伴' }}</text><text class="body">{{ friendStatusText(detail?.friend?.status ?? 'unavailable') }}</text><button class="primary" @click="openFriend">{{ detail?.friend?.status === 'pending' ? '前往旅伴处理申请' : '查看旅伴' }}</button></view>
+        <view v-if="detail?.friend != null" class="reason"><text class="title">{{ detail?.friend?.nickname ?? '旅伴' }}</text><text class="body">{{ friendStatusText(detail?.friend?.status ?? 'unavailable') }}</text></view>
         <view v-if="(detail?.reason ?? '').length > 0" class="reason"><text class="title">审核员处理原因</text><text class="body">{{ detail?.reason ?? '' }}</text></view>
-        <button v-if="detail?.target != null" class="primary" @click="openTarget">查看对应帖子／版本</button>
-        <text v-else-if="detail?.friend == null" class="muted">对应内容当前不可打开，审核结果仍保留在此。</text>
+        <text v-if="detail?.target == null && detail?.friend == null" class="muted">对应内容已删除或当前不可访问，审核结果仍保留在此。</text>
       </view>
       <view v-if="readError.length > 0" class="card"><text class="body">{{ readError }}</text><button class="secondary" :disabled="reading" @click="markRead">重试标为已读</button></view>
-      <button class="secondary" @click="backToList">返回消息列表</button>
+      <button v-if="detail != null" class="primary" :disabled="!canOpenRelated" @click="openRelated">{{ relatedLabel }}</button>
     </view>
   </view>
 </template>
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
-import { ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { session } from '@/features/api.uts'
 import { loadNotification, readNotification, NotificationDetail } from '@/features/notifications.uts'
 import { refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { openPage } from '@/features/navigation.uts'
 const id = ref(''), detail = ref<NotificationDetail | null>(null)
 const error = ref(''), readError = ref(''), loading = ref(false), reading = ref(false)
+const canOpenRelated = computed(() => detail.value?.target != null || (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')))
+const relatedLabel = computed(() => {
+  if (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')) return detail.value!.friend!.status === 'pending' ? '前往处理好友申请' : '查看旅伴'
+  if (detail.value?.target == null) return '内容当前不可访问'
+  return detail.value!.kind.startsWith('community.comment.') ? '查看评论所在帖子' : '查看对应帖子详情'
+})
 let sequence = 0
 watch(() => session.value?.uid, () => { sequence++; detail.value = null; error.value = ''; readError.value = ''; loading.value = false; reading.value = false; if (session.value != null) loadDetail() }, { flush: 'sync' })
 onLoad((options) => { id.value = options['id'] ?? ''; loadDetail() })
@@ -66,6 +71,11 @@ function openFriend(): void {
   if (detail.value?.friend == null || !detail.value!.kind.startsWith('friend.')) return
   openPage('/packages/partner/partner/partner')
 }
+function openRelated(): void {
+  if (!canOpenRelated.value) return
+  if (detail.value?.friend != null) openFriend()
+  else openTarget()
+}
 function friendStatusText(status: string): string {
   if (status === 'pending') return '这条好友申请等待你处理，请前往旅伴选择接受或拒绝。'
   if (status === 'accepted') return '好友关系已建立，可以前往旅伴查看。'
@@ -74,7 +84,6 @@ function friendStatusText(status: string): string {
   if (status === 'expired') return '这条好友申请已过期。'
   return '这条申请已失效，或相关账号当前不可用，请到旅伴查看当前状态。'
 }
-function backToList(): void { uni.redirectTo({ url: '/packages/profile/messages/messages' }) }
 function formatTime(at: number): string { return new Date(at).toLocaleString() }
 </script>
 <style scoped>

@@ -37,7 +37,7 @@ function createNotificationService({repo,now=Date.now}) {
  }
  async function target(row) {
   const post=await repo.get('fy-community-posts',row.postId)
-  if(!post || ['removed','deleted'].includes(post.status)) return null
+  if(!post || post.status==='deleted') return null
   const version=row.revisionId ? await repo.get('fy-community-versions',row.revisionId) : null
   if(row.commentId) {
    const comment=await repo.get('fy-community-comments',row.commentId)

@@ -30,18 +30,18 @@ async (page) => {
  await page.goto('http://127.0.0.1:8421/#/packages/profile/messages/messages');
  await page.getByText('微信登录后查看本人的消息。',{exact:true}).waitFor();
  await page.evaluate(async()=>{const entry=performance.getEntriesByType('resource').find(x=>/\/api\.[^/]+\.js/.test(x.name));const api=await import(entry.name);window.__memberSession=api.s;api.s.value={uid:'B',token:'local-B',expiresAt:Date.now()+3600000};});
- await page.getByText('收到好友申请',{exact:true}).click();await page.getByText('前往旅伴处理申请',{exact:true}).waitFor();
+ await page.getByText('收到好友申请',{exact:true}).click();await page.getByText('前往处理好友申请',{exact:true}).waitFor();
  await page.getByText('重试标为已读',{exact:true}).click();await page.getByText('重试标为已读',{exact:true}).waitFor({state:'hidden'});
  if(await page.evaluate(()=>window.__calls.some(x=>x.action==='respondFriend')))throw Error('reading notification accepted the request');
  await page.screenshot({path:'.superpowers/friend-received-browser.png',fullPage:true});
- await page.getByText('前往旅伴处理申请',{exact:true}).click();await page.getByText('接受',{exact:true}).click();
+ await page.getByText('前往处理好友申请',{exact:true}).click();await page.getByText('接受',{exact:true}).click();
  await page.getByText('已接受好友申请。',{exact:true}).waitFor();await page.getByText('重试读取旅伴',{exact:true}).waitFor();
  await page.getByText('重试读取旅伴',{exact:true}).click();await page.getByText('重试读取旅伴',{exact:true}).waitFor({state:'hidden'});
  if(await page.evaluate(()=>window.__calls.filter(x=>x.action==='respondFriend').length)!==1)throw Error('read retry repeated decision');
  await page.screenshot({path:'.superpowers/friend-companion-browser.png',fullPage:true});
  await page.goBack();await page.getByText('好友关系已建立，可以前往旅伴查看。',{exact:true}).waitFor();
  await page.evaluate(()=>window.__memberSession.value={uid:'A',token:'local-A',expiresAt:Date.now()+3600000});
- await page.getByText('返回消息列表',{exact:true}).click();await page.getByText('好友申请已通过',{exact:true}).click();await page.getByText('Bob',{exact:true}).waitFor();
+ await page.locator('.app-page-header-return:visible').click();await page.getByText('好友申请已通过',{exact:true}).click();await page.getByText('Bob',{exact:true}).waitFor();
  await page.screenshot({path:'.superpowers/friend-accepted-browser.png',fullPage:true});
  await page.getByText('查看旅伴',{exact:true}).click();await page.locator('input').fill('BCDEFGH2');await page.getByText('添加',{exact:true}).click();
  // Simulated lost write response: code remains and the same requestId is reused.
