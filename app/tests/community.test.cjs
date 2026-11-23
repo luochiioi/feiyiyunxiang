@@ -301,6 +301,7 @@ test('version retries keep one copy and an in-flight public image read checks vi
 
 test('feed cards use public profile fields and leave post body to detail', async () => {
   const f = fixture(), c = f.community
+  await f.repo.put('uni-id-users', author.uid, { status: 0 })
   const post = await f.post()
   await f.approve(post)
   const newAuthor = (await c.communityFeed(null, {})).items[0]

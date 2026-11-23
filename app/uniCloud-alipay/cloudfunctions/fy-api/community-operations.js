@@ -1,6 +1,7 @@
 const { pendingCount } = require('./community-review-queue')
 const { key } = require('./service')
 const { fail, identifier, requiredText } = require('./community-policy')
+const { findProfile, profileSummary } = require('./profile-presenter')
 
 const accounts = 'uni-id-users'
 const posts = 'fy-community-posts'
@@ -22,12 +23,12 @@ async function writeCommunityAudit(db, user, action, target, details, at) {
 function createCommunityOperations({ repo, now = Date.now }) {
   async function userView(account, knownProfile) {
     const [profile, mute] = await Promise.all([
-      knownProfile ? Promise.resolve(knownProfile) : repo.list('fy-profiles', { uid: account._id }).then(rows => rows[0]),
+      knownProfile ? Promise.resolve(knownProfile) : findProfile(repo, account._id),
       repo.get(mutes, account._id)
     ])
     return {
       id: account._id, status: account.status, suspendedByOps: account.fyOpsSuspended === true,
-      code: profile?.code ?? '', nickname: profile?.nickname ?? '旅伴',
+      ...profileSummary(profile),
       createdAt: account.register_date ?? 0, muteUntil: mute?.until ?? 0
     }
   }

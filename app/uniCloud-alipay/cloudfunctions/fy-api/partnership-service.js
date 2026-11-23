@@ -1,4 +1,5 @@
 const { writeFriendNotification, friendResponseId } = require('./friend-notification-events')
+const { findProfile, profileSummary, legacyAvatar, publicProfile, visibleProfiles } = require('./profile-presenter')
 const { createHash } = require('node:crypto')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const fail = code => { throw new Error(code) }
@@ -19,7 +20,8 @@ function createPartnershipService({ repo, now = Date.now }) {
   }
 
   function card(profile) {
-    return { code: profile.code, nickname: profile.nickname, avatar: profile.avatar }
+    const { avatarVersion, ...summary } = profileSummary(profile)
+    return { ...summary, avatar: legacyAvatar(profile), ...(avatarVersion ? { avatarVersion } : {}) }
   }
 
   async function seatProgress(team, uid) {
@@ -44,14 +46,14 @@ function createPartnershipService({ repo, now = Date.now }) {
     const mine = seatOf(team, uid)
     const other = team.members.find(id => id !== uid)
     const otherSeat = seatOf(team, other)
-    const partnerProfile = (await repo.list('fy-profiles', { uid: other }))[0]
+    const partnerProfile = await publicProfile(repo, other)
     const status = expiredInvite(team, now()) ? 'expired' : team.status
     const local = team.memberRoutes?.[uid]
     const remote = team.memberRoutes?.[other]
     const snapshot = await repo.get('fy-versions', local?.version ?? team.version)
     const partnerSnapshot = remote == null ? snapshot : await repo.get('fy-versions', remote.version)
     const view = { id: team._id, status, mySeat: mine, partnerSeat: otherSeat, routeId: local?.routeId ?? team.routeId, version: local?.version ?? team.version,
-      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: partnerProfile ? (local == null ? card(partnerProfile) : { nickname: partnerProfile.nickname }) : null,
+      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: local == null ? card(partnerProfile) : partnerProfile,
       myTasks: taskLabels(snapshot, taskSelection(snapshot, mine, team.tasks?.[uid])),
       partnerTasks: taskLabels(partnerSnapshot, taskSelection(partnerSnapshot, otherSeat, team.tasks?.[other])),
       myTaskOptions: taskLabels(snapshot, seatActivitiesOf(snapshot, mine)) }
@@ -93,7 +95,7 @@ function createPartnershipService({ repo, now = Date.now }) {
     async ensureProfile(u) {
       member(u)
       return repo.tx(async db => {
-        const existing = (await db.list('fy-profiles', { uid: u.uid }))[0]
+        const existing = await findProfile(db, u.uid)
         if (existing) return card(existing)
         const profile = { uid: u.uid, code: await freshCode(db), nickname: '旅伴' + u.uid.slice(0, 4), avatar: '' }
         await db.put('fy-profiles', key('profile', u.uid), profile)
@@ -105,7 +107,7 @@ function createPartnershipService({ repo, now = Date.now }) {
       member(u)
       if (!codeOf(p.code)) fail('NOT_FOUND')
       const profile = (await repo.list('fy-profiles', { code: p.code }))[0]
-      if (!profile || profile.uid === u.uid) fail('NOT_FOUND')
+      if (!profile || profile.uid === u.uid || (await repo.get('uni-id-users', profile.uid))?.status !== 0) fail('NOT_FOUND')
       return card(profile)
     },
 
@@ -174,13 +176,23 @@ function createPartnershipService({ repo, now = Date.now }) {
 
     async friends(u) {
       member(u)
-      const rows = await repo.list('fy-friends', {})
+      const rows = []
+      for (const field of ['from', 'to']) {
+        let after = null
+        while (true) {
+          const batch = await repo.page('fy-friends', { [field]: u.uid }, { field: '_id', after, size: 100 })
+          rows.push(...batch)
+          if (batch.length < 100) break
+          after = batch.at(-1)._id
+        }
+      }
       const mine = rows.filter(row => (row.from === u.uid || row.to === u.uid)
         && (row.status === 'accepted' || (row.status === 'pending' && row.to === u.uid && row.expiresAt > now())))
+      const profiles = await visibleProfiles(repo, mine.map(row => row.from === u.uid ? row.to : row.from))
       const cards = []
       for (const row of mine) {
         const other = row.from === u.uid ? row.to : row.from
-        const profile = (await repo.list('fy-profiles', { uid: other }))[0]
+        const profile = profiles.get(other)
         if (!profile) continue
         const item = card(profile)
         if (row.status === 'pending') { item.kind = 'incoming'; item.id = row.responseId ?? row.requestId }

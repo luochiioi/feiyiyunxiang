@@ -1,5 +1,6 @@
 const { createHash } = require('node:crypto')
 const { fail, identifier } = require('./community-policy')
+const { publicProfile } = require('./profile-presenter')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const friendTitles = { 'friend.request.received': '收到好友申请', 'friend.request.accepted': '好友申请已通过' }
 const friendEventKey = row => key('friend-request', row.from, row.requestId)
@@ -27,10 +28,16 @@ async function friendNotificationContext(db, notification, uid, at) {
   if (!row || friendEventKey(row) !== notification.friendEventKey) return value
   const received = notification.kind === 'friend.request.received'
   if ((received ? row.to : row.from) !== uid) return value
-  const other = await db.get('uni-id-users', received ? row.from : row.to)
+  const otherUid = received ? row.from : row.to
+  const other = await db.get('uni-id-users', otherUid)
   if (!other || other.status !== 0) return value
   const state = row.status === 'pending' && row.expiresAt <= at ? 'expired' : row.status
   if (['pending', 'accepted', 'rejected', 'withdrawn', 'expired'].includes(state)) value.status = state
+  const profile = await publicProfile(db, otherUid)
+  if (profile.code) {
+    value.nickname = profile.nickname
+    if (profile.avatarVersion) Object.assign(value, { code: profile.code, avatarVersion: profile.avatarVersion })
+  }
   return value
 }
 module.exports = { friendTitles, friendEventKey, friendResponseId, writeFriendNotification, friendNotificationContext }

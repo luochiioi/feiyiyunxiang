@@ -3,6 +3,7 @@ const { pendingRevisions, validateCursor } = require('./community-review-queue')
 const { key } = require('./service')
 const { createPartnershipService } = require('./partnership-service')
 const { writeCommunityAudit: log } = require('./community-operations')
+const { findProfile, profileSummary, legacyAvatar, visibleProfiles, publicProfiles } = require('./profile-presenter')
 const { completedActivities, activityIds } = require('./culture')
 const { defaults, starterRules, fail, identifier, normalize, requiredText, validatePolicy, decide, consume } = require('./community-policy')
 
@@ -44,8 +45,12 @@ const revisionView = v => ({
   id: v._id, title: v.title, body: v.body, ...imageFields(v), status: v.status,
   reason: v.reason ?? '', createdAt: v.createdAt
 })
-const commentView = c => ({
-  id: c._id, postId: c.postId, parentId: c.parentId, author: c.author,
+const authorView = (profile, fallback) => ({
+  author: profile?.nickname ?? fallback ?? '旅伴', authorCode: profile?.code ?? '',
+  authorAvatarVersion: profile?.avatarVersion ?? '', authorAvatar: legacyAvatar(profile)
+})
+const commentView = (c, profile) => ({
+  id: c._id, postId: c.postId, parentId: c.parentId, ...authorView(profile, c.author),
   body: c.body, status: c.status, createdAt: c.createdAt
 })
 
@@ -94,17 +99,14 @@ function createCommunityService({ repo, media, now = Date.now }) {
   }
 
   async function profile(uid) {
-    return (await repo.list('fy-profiles', { uid }))[0] ?? {}
+    return (await findProfile(repo, uid)) ?? {}
   }
 
-  async function baseView(post, version, u) {
+  function baseView(post, version, u, author) {
     const publicView = isPublic(post) && post.publicRevision === version._id && version.status === 'approved'
-    const author = await profile(post.uid)
     return {
       id: post._id, revisionId: version._id, title: version.title,
-      ...imageFields(version), author: author.nickname ?? post.author, owner: u?.uid === post.uid, publicView,
-      authorCode: typeof author.code === 'string' ? author.code : '',
-      authorAvatar: typeof author.avatar === 'string' && /^https:\/\//i.test(author.avatar) ? author.avatar : '',
+      ...imageFields(version), ...authorView(author, post.author), owner: u?.uid === post.uid, publicView,
       status: post.status === 'removed' || post.status === 'deleted' ? post.status : version.status,
       latestRevision: u?.uid === post.uid ? post.latestRevision : '',
       ...(u?.uid === post.uid ? {
@@ -114,6 +116,12 @@ function createCommunityService({ repo, media, now = Date.now }) {
       reason: u?.uid === post.uid ? post.removalReason ?? version.reason ?? '' : '',
       commentCount: publicView ? post.commentCount : 0, likeCount: publicView ? post.likeCount : 0
     }
+  }
+
+  async function feedViews(entries, user) {
+    const visible = entries.filter(Boolean)
+    const authors = await visibleProfiles(repo, visible.map(({ post }) => post.uid))
+    return visible.map(({ post, version }) => baseView(post, version, user, authors.get(post.uid)))
   }
 
   async function page(collection, query, cursor, size = 20) {
@@ -339,10 +347,10 @@ function createCommunityService({ repo, media, now = Date.now }) {
         const items = await Promise.all(rows.map(async row => {
           try {
             const { post, version } = await visible(repo, u, { postId: row.postId })
-            return baseView(post, version, u)
+            return { post, version }
           } catch (error) { if (error.message !== 'NOT_FOUND') throw error; return null }
         }))
-        return { items: items.filter(Boolean), next }
+        return { items: await feedViews(items, u), next }
       }
       const { rows, next } = await page(posts, query, p.cursor)
       const items = await Promise.all(rows.map(async row => {
@@ -350,10 +358,10 @@ function createCommunityService({ repo, media, now = Date.now }) {
           const { post, version } = await visible(repo, u, {
             postId: row._id, revisionId: p.tab === 'mine' ? row.latestRevision : undefined, preview: p.tab === 'mine'
           })
-          return baseView(post, version, u)
+          return { post, version }
         } catch (error) { if (error.message !== 'NOT_FOUND') throw error; return null }
       }))
-      return { items: items.filter(Boolean), next }
+      return { items: await feedViews(items, u), next }
     },
 
     async communityReviewNotices(u) {
@@ -388,7 +396,8 @@ function createCommunityService({ repo, media, now = Date.now }) {
 
     async communityPost(u, p) {
       const { post, version } = await visible(repo, u, p)
-      const view = { ...await baseView(post, version, u), body: version.body }
+      const author = (await visibleProfiles(repo, [post.uid])).get(post.uid)
+      const view = { ...baseView(post, version, u, author), body: version.body }
       if (!view.publicView) return { ...view, liked: false, saved: false }
       const state = async kind => u?.uid && (await repo.get(reactions, key(u.uid, post._id, kind)))?.active === true
       const [liked, saved] = await Promise.all([state('like'), state('favorite')])
@@ -425,9 +434,11 @@ function createCommunityService({ repo, media, now = Date.now }) {
       const { rows, next } = await page(comments, { postId: post._id, status: 'public' }, p.cursor)
       const mine = u?.uid && !p.cursor ? await page(comments, { postId: post._id, uid: u.uid, status: ['pending', 'rejected'] }, '') : null
       await visible(repo, null, p)
+      const ownRows = mine?.rows ?? []
+      const authors = await visibleProfiles(repo, [...rows, ...ownRows].map(row => row.uid))
       return {
-        items: rows.map(commentView), next,
-        mine: (mine?.rows ?? []).map(c => ({ ...commentView(c), reason: c.reason ?? '' }))
+        items: rows.map(c => commentView(c, authors.get(c.uid))), next,
+        mine: ownRows.map(c => ({ ...commentView(c, authors.get(c.uid)), reason: c.reason ?? '' }))
       }
     },
 
@@ -493,6 +504,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
     async communityRanking(u) {
       member(u)
       const ids = [u.uid, ...await friendIds(u.uid)]
+      const cards = await publicProfiles(repo, ids)
       const rows = []
       for (const uid of new Set(ids)) {
         if (uid !== u.uid && (await repo.get('uni-id-users', uid))?.status !== 0) continue
@@ -506,8 +518,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
           const visited = new Set(checks.map(check => check.nodeId))
           if (nodes.every(node => visited.has(node.id))) completed.add(run.routeId)
         }
-        const p = await profile(uid)
-        rows.push({ nickname: p.nickname ?? '旅伴', code: p.code ?? '', mine: uid === u.uid, count: completed.size })
+        rows.push({ ...(cards.get(uid) ?? profileSummary(null)), mine: uid === u.uid, count: completed.size })
       }
       rows.sort((a, b) => b.count - a.count || Number(b.mine) - Number(a.mine) || a.code.localeCompare(b.code))
       let rank = 0
@@ -540,7 +551,7 @@ function createCommunityService({ repo, media, now = Date.now }) {
         let last = ''
         for await (const { version, post } of pendingRevisions(repo, userFilter, p.cursor)) {
           if (result.rows.length === 20) { result.next = last; break }
-          result.rows.push({ ...revisionView(version), postId: post._id, revisionId: version._id, author: post.author })
+          result.rows.push({ ...revisionView(version), postId: post._id, revisionId: version._id, author: post.author, authorUid: post.uid })
           last = version.order
         }
       } else if (group === 'published') {
@@ -548,12 +559,12 @@ function createCommunityService({ repo, media, now = Date.now }) {
         result.rows = (await Promise.all(result.rows.map(async post => {
           try {
             const { post: current, version } = await visible(repo, null, { postId: post._id })
-            return { ...revisionView(version), status: current.status, postId: current._id, revisionId: version._id, author: current.author }
+            return { ...revisionView(version), status: current.status, postId: current._id, revisionId: version._id, author: current.author, authorUid: current.uid }
           } catch (error) { if (error.message !== 'NOT_FOUND') throw error; return null }
         }))).filter(Boolean)
       } else if (group === 'comments' || group === 'publicComments') {
         result = await page(comments, { status: group === 'comments' ? 'pending' : 'public', ...userFilter }, p.cursor)
-        result.rows = result.rows.map(c => ({ ...commentView(c), targetUid: c.uid, revisionId: c.revisionId }))
+        result.rows = result.rows.map(c => ({ ...commentView(c), targetUid: c.uid, authorUid: c.uid, revisionId: c.revisionId }))
       } else if (group === 'reports' || group === 'resolvedReports') {
         result = await page(reports, { status: group === 'reports' ? 'open' : 'resolved', ...reportFilter }, p.cursor)
         result.rows = result.rows.map(row => ({
@@ -574,7 +585,11 @@ function createCommunityService({ repo, media, now = Date.now }) {
           until: row.until, status: row.until > now() ? 'muted' : 'expired'
         }))
       } else fail('INVALID_REQUEST')
-      return { items: result.rows, next: result.next }
+      const authors = await visibleProfiles(repo, result.rows.map(row => row.authorUid).filter(Boolean))
+      return {
+        items: result.rows.map(({ authorUid, ...row }) => authorUid ? { ...row, ...authorView(authors.get(authorUid), row.author) } : row),
+        next: result.next
+      }
     },
 
     async communityReviewDetail(u, p) {
@@ -593,11 +608,12 @@ function createCommunityService({ repo, media, now = Date.now }) {
       const revisionId = report || comment
         ? reportedRevisionId || comment?.revisionId || current?._id || post.latestRevision : p.revisionId
       const version = await versionBy(repo, post, revisionId)
+      const authors = await visibleProfiles(repo, comment ? [post.uid, comment.uid] : [post.uid])
       return {
-        postId: post._id, status: post.status, targetUid: post.uid, author: post.author, latestRevision: post.latestRevision,
+        postId: post._id, status: post.status, targetUid: post.uid, ...authorView(authors.get(post.uid), post.author), latestRevision: post.latestRevision,
         selected: revisionView(version), current: current ? revisionView(current) : null,
         reportedRevisionId, reportStatus: report?.status ?? '',
-        reportedComment: comment ? { ...commentView(comment), targetUid: comment.uid } : null
+        reportedComment: comment ? { ...commentView(comment, authors.get(comment.uid)), targetUid: comment.uid } : null
       }
     },
 

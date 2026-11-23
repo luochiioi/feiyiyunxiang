@@ -8,11 +8,12 @@ function setup() {
     async get(c, id) { return structuredClone(rows.get(c + id) ?? null) },
     async put(c, id, v) { rows.set(c + id, structuredClone({ ...v, _id: id })) },
     async list(c, q) {
-      return [...rows].filter(([k, v]) => k.startsWith(c) && Object.entries(q).every(([a, b]) => v[a] === b)).map(([, v]) => structuredClone(v))
+      return [...rows].filter(([k, v]) => k.startsWith(c) && Object.entries(q).every(([a, b]) =>
+        Array.isArray(b) ? b.includes(v[a]) : v[a] === b)).map(([, v]) => structuredClone(v))
     }
   }
   db.page = async (collection, filter, { field, after, size }) => (await db.list(collection, filter))
-    .filter(row => row[field] > after).sort((left, right) => right[field] - left[field]).slice(0, size)
+    .filter(row => after == null || row[field] > after).sort((left, right) => left[field].localeCompare(right[field])).slice(0, size)
   let tail = Promise.resolve()
   const repo = {
     ...db, tx(fn) {
@@ -35,7 +36,10 @@ function setup() {
 async function ready() {
   const f = setup()
   f.codes = {}
-  for (const u of [f.a, f.b, f.c]) f.codes[u.uid] = (await f.p.ensureProfile(u)).code
+  for (const u of [f.a, f.b, f.c]) {
+    await f.repo.put('uni-id-users', u.uid, { status: 0 })
+    f.codes[u.uid] = (await f.p.ensureProfile(u)).code
+  }
   return f
 }
 
