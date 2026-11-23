@@ -18,7 +18,7 @@
       <button v-if="message.length > 0 && session != null" class="secondary" :disabled="loading || syncing" @click="refresh()">重新读取记录</button>
       <template v-if="session != null">
         <button class="secondary step-preference" :disabled="syncing" @click="toggleAutoSync">{{ autoEnabled ? '关闭自动同步' : '开启自动同步' }}</button>
-        <text class="muted">{{ autoEnabled ? '自动同步已开启，打开首页、社区或步数中心时更新今天的步数。' : '开启后，打开首页、社区或步数中心会同步今天的步数，已接受的好友可在榜单查看。' }}</text>
+        <text class="muted">{{ autoEnabled ? '自动同步已开启，打开首页或步数中心时更新今天的步数。' : '开启后，打开首页或步数中心会同步今天的步数，已接受的好友可在榜单查看。' }}</text>
       </template>
       <template v-if="ranking != null">
         <view v-for="row in visibleRanks" :key="row.mine ? 'me' : row.code" class="row spread divider">

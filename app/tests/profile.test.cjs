@@ -66,9 +66,11 @@ test('profile storage missing a collection reports an actionable error without t
   const tx = repo.tx
   repo.tx = callback => tx(transaction => callback({
     ...transaction,
-    get(name, id) {
-      if (name === 'fy-profile-revisions') throw Error('collection not found')
-      return transaction.get(name, id)
+    put(name, id, doc) {
+      if (name === 'fy-profile-revisions') {
+        throw Object.assign(Error('Cannot create namespace development.fy-profile-revisions in multi-document transaction'), { code: 100104 })
+      }
+      return transaction.put(name, id, doc)
     }
   }))
   await assert.rejects(service.profileStageAvatar(alice, { requestId: 'photo', base64: 'image' }), /PROFILE_STORAGE_UNAVAILABLE/)

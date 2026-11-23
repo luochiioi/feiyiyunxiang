@@ -62,6 +62,7 @@
 <script setup lang="uts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, scheduleProfileImage, session } from '@/features/api.uts'
+import { refreshModerationOverview } from '@/features/moderation-overview.uts'
 import type { ProfileReviewPage, ProfileReviewDetail, ProfileReviewItem } from '@/features/api.uts'
 
 const defaultAvatar = '/static/aomiao-wave.png'
@@ -153,6 +154,7 @@ async function review(decision: string): Promise<void> {
   busy.value = true
   try {
     await api<UTSJSONObject>('profileReview', { revisionId: value.selected.revisionId, decision, reason: explanation })
+    refreshModerationOverview(true)
     decided.value = true
     items.value = items.value.filter(item => item.revisionId !== value.selected.revisionId)
     message.value = decision === 'approve' ? '资料已通过。' : '资料已驳回。'

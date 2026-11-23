@@ -36,14 +36,13 @@
 </template>
 
 <script setup lang="uts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PostCard from '../components/PostCard.uvue'
 import { secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
 import { stepsPath } from '@/features/steps.uts'
-import { syncWechatSteps } from '@/features/step-sync.uts'
 import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { publicRead, communityError, postPath, composePath } from '@/features/community/community.uts'
 import type { Post, PostPage, Ranking } from '@/features/community/community.uts'
@@ -61,17 +60,9 @@ onLoad(query => {
 onShow(() => {
   visible.value = true
   refreshReviewNotices()
-  syncCommunitySteps()
   return load(false)
 })
 onHide(() => { visible.value = false; sequence++ })
-watch(() => session.value?.uid, () => { syncCommunitySteps() })
-function syncCommunitySteps(): void {
-  const uid = session.value?.uid
-  if (uid != null && visible.value && !mineOnly.value) {
-    syncWechatSteps(uid, true, () => visible.value && !mineOnly.value).catch(() => {})
-  }
-}
 function select(value: string): void { if (tab.value !== value) { tab.value = value; load(false) } }
 async function load(append: boolean): Promise<void> {
   const call = ++sequence, active = tab.value

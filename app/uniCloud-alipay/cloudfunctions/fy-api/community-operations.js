@@ -1,7 +1,7 @@
 const { pendingCount } = require('./community-review-queue')
 const { key } = require('./service')
 const { fail, identifier, requiredText } = require('./community-policy')
-const { findProfile, profileSummary } = require('./profile-presenter')
+const { findProfile, profileFields, profileSummary } = require('./profile-presenter')
 
 const accounts = 'uni-id-users'
 const posts = 'fy-community-posts'
@@ -23,7 +23,7 @@ async function writeCommunityAudit(db, user, action, target, details, at) {
 function createCommunityOperations({ repo, now = Date.now }) {
   async function userView(account, knownProfile) {
     const [profile, mute] = await Promise.all([
-      knownProfile ? Promise.resolve(knownProfile) : findProfile(repo, account._id),
+      knownProfile !== undefined ? Promise.resolve(knownProfile) : findProfile(repo, account._id),
       repo.get(mutes, account._id)
     ])
     return {
@@ -36,13 +36,15 @@ function createCommunityOperations({ repo, now = Date.now }) {
   return {
     async communityOverview(user) {
       if (!user?.admin && !user?.reviewer) fail('FORBIDDEN')
-      const [pendingPosts, pendingComments, openReports, publishedPosts] = await Promise.all([
+      const [pendingPosts, pendingComments, openReports, publishedPosts, pendingProfiles] = await Promise.all([
         pendingCount(repo),
         repo.count(comments, { status: 'pending' }),
         repo.count(reports, { status: 'open' }),
-        repo.count(posts, { status: 'public' })
+        repo.count(posts, { status: 'public' }),
+        repo.count('fy-profile-revisions', { status: 'pending' }).catch(() => null)
       ])
-      const overview = { pendingPosts, pendingComments, openReports, publishedPosts }
+      const overview = { pendingPosts, pendingComments, openReports, publishedPosts,
+        ...(pendingProfiles == null ? {} : { pendingProfiles }) }
       if (!user.admin) return overview
       const [activeAccounts, activeRoutes, activeCoops, activePk] = await Promise.all([
         repo.count(accounts, { status: 0 }),
@@ -77,9 +79,11 @@ function createCommunityOperations({ repo, now = Date.now }) {
       const account = identifier(p.targetUid) ? await repo.get(accounts, p.targetUid) : null
       if (!account) fail('NOT_FOUND')
       const uid = account._id
+      const profile = await findProfile(repo, uid)
+      const { bio, displayCity, interests } = profileFields(profile)
       const [view, sent, received, postCount, commentCount, reportCount, pendingPosts, publishedPosts, pendingComments,
         publicComments, openReports, resolvedReports] = await Promise.all([
-        userView(account),
+        userView(account, profile),
         repo.count('fy-friends', { from: uid, status: 'accepted' }),
         repo.count('fy-friends', { to: uid, status: 'accepted' }),
         repo.count(posts, { uid }),
@@ -92,7 +96,7 @@ function createCommunityOperations({ repo, now = Date.now }) {
         repo.count(reports, { targetUid: uid, status: 'open' }),
         repo.count(reports, { targetUid: uid, status: 'resolved' })
       ])
-      return { ...view, friendCount: sent + received, postCount, commentCount, reportCount,
+      return { ...view, bio, displayCity, interests, friendCount: sent + received, postCount, commentCount, reportCount,
         pendingPosts, publishedPosts, pendingComments, publicComments, openReports, resolvedReports }
     },
 

@@ -5,8 +5,8 @@
       <template v-if="session != null">
         <view class="sidebar-nav">
           <button :class="{ active: section === 'overview' }" @click="goTo('overview')">运营工作台</button>
-          <button :class="{ active: section === 'review' }" @click="openQueue('pending')">社区审核与治理</button>
-          <button v-if="session?.admin === true" :class="{ active: section === 'users' }" @click="openUsers">用户管理</button>
+          <button :class="{ active: section === 'review' }" @click="openQueue('pending')">社区审核与治理<view v-if="hasCommunityWork" class="nav-dot" aria-label="有待处理的社区事项" /></button>
+          <button :class="{ active: section === 'users' }" @click="openUsers()">用户管理<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>
           <button v-if="session?.admin === true" :class="{ active: section === 'routes' }" @click="openRoutes">路线与博物馆</button>
         </view>
         <view class="sidebar-footer">
@@ -28,7 +28,12 @@
       <template v-else>
         <template v-if="section !== 'routes'">
           <CommunityOverview v-if="section === 'overview'" @review="openQueue" />
-          <CommunityUsers v-if="usersOpened && session?.admin === true" v-show="section === 'users'" :visible="section === 'users'" @review="openReview" />
+          <view v-if="section === 'users' && session?.admin === true" class="toolbar user-tabs">
+            <button :class="{ active: userTab === 'accounts' }" @click="userTab = 'accounts'">账户列表</button>
+            <button :class="{ active: userTab === 'profiles' }" @click="userTab = 'profiles'">资料待审<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>
+          </view>
+          <CommunityUsers v-if="usersOpened && session?.admin === true" v-show="section === 'users' && userTab === 'accounts'" :visible="section === 'users' && userTab === 'accounts'" @review="openReview" />
+          <ProfileReview v-if="section === 'users' && userTab === 'profiles'" />
           <template v-if="section === 'review'">
             <view v-if="reviewFrom === 'users'" class="toolbar"><button @click="goTo('users')">返回用户管理</button></view>
             <CommunityGovernance :key="reviewKey" :initial-group="reviewGroup" :target-uid="reviewUid" :target-label="reviewLabel" />
@@ -103,12 +108,14 @@
   </view>
 </template>
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api, session, AdminSession } from '@/features/api.uts'
 import ContentPreview from './ContentPreview.uvue'
 import CommunityGovernance from './CommunityGovernance.uvue'
 import CommunityOverview from './CommunityOverview.uvue'
 import CommunityUsers from './CommunityUsers.uvue'
+import ProfileReview from './ProfileReview.uvue'
+import { moderationOverview, refreshModerationOverview, resetModerationOverview } from '@/features/moderation-overview.uts'
 import { combinedContent, macauContent, hunanContent, scriptedContent, museumRouteDraft } from '@/features/stage-three-content.uts'
 import type { DraftExhibit, DraftNode, DraftPreview } from '@/features/stage-three-content.uts'
 type Museum = { name: string, description: string }
@@ -127,6 +134,25 @@ let savedPayload = ''
 const draft = ref<Draft>({ id: '', name: '', region: '', description: '', revision: 0, testOnly: true, museum: { name: '', description: '' }, viewport: { latitude: 0, longitude: 0, scale: 16 }, nodes: [] })
 function numeric(value: string): number { return Number(value) }
 const section = ref('overview'), reviewGroup = ref('pending'), reviewUid = ref(''), reviewLabel = ref(''), reviewKey = ref(0), reviewFrom = ref('overview')
+const userTab = ref('accounts')
+const hasCommunityWork = computed(() => {
+  const value = moderationOverview.value
+  return value != null && value.pendingPosts + value.pendingComments + value.openReports > 0
+})
+const hasProfileWork = computed(() => (moderationOverview.value?.pendingProfiles ?? 0) > 0)
+let overviewTimer = 0
+function stopOverview(): void {
+  if (overviewTimer > 0) clearInterval(overviewTimer)
+  overviewTimer = 0
+  resetModerationOverview()
+}
+watch(() => session.value?.token, () => {
+  stopOverview()
+  if (session.value == null) return
+  refreshModerationOverview()
+  overviewTimer = setInterval(() => { refreshModerationOverview() }, 30000)
+}, { immediate: true })
+onBeforeUnmount(stopOverview)
 function sectionTitle(): string {
   switch (section.value) {
     case 'routes': return '路线与博物馆'
@@ -143,9 +169,18 @@ function goTo(value: string): void {
   section.value = value
   message.value = ''
 }
-function openUsers(): void { usersOpened.value = true; goTo('users') }
+function openUsers(group: string = 'accounts'): void {
+  if (busy.value) return
+  const administrator = session.value?.admin === true
+  usersOpened.value = administrator
+  userTab.value = administrator ? group : 'profiles'
+  goTo('users')
+}
 function openRoutes(): void { if (section.value !== 'routes' && !busy.value) { goTo('routes'); load() } }
-function openQueue(group: string): void { openReview(group, '', '') }
+function openQueue(group: string): void {
+  if (group === 'profiles') openUsers('profiles')
+  else openReview(group, '', '')
+}
 function openReview(group: string, uid: string, label: string): void {
   if (busy.value) return
   if (section.value !== 'review') reviewFrom.value = section.value === 'users' ? 'users' : 'overview'
@@ -369,6 +404,9 @@ page { background:#f3f4ed; color:#35452d; font-size:14px; }
 .sidebar button { background:transparent; color:#e2ede5; text-align:left; padding:3px 10px; border:none; border-radius:8px; }
 .sidebar button::after { border:none; }
 .sidebar button:hover,.sidebar button.active { color:#fff; background:#ffffff22; }
+.nav-dot { display:inline-block; width:8px; height:8px; margin-left:8px; vertical-align:middle; border-radius:50%; background:#d7454a; }
+.sidebar .nav-dot { background:#ff8588; }
+.user-tabs button.active { background:#426240; color:#fff; }
 .title { display:block; font-size:26px; font-weight:700; margin-bottom:18px; }
 .main { padding:28px clamp(16px,3vw,44px); flex:1; min-width:0; }
 .card { padding:24px; background:#fffef7; border-radius:20px; display:flex; flex-direction:column; gap:12px; }

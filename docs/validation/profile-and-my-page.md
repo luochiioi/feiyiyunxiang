@@ -67,3 +67,14 @@
 - Node 全量 212 项通过。微信开发包、后台 Web 与 App Web 构建通过。测试涵盖真实图片清理和加密逻辑，存储接口采用本机替身。Edge 模拟核验输出图片尺寸、头像与资料重试、仅本人预览、管理员分组、驳回原因展开及窄屏布局。开发云真实对象上传和 iOS／Android 真机裁剪待验。
 
 截图：[头像裁剪](evidence/profile-and-my-page/avatar-crop.png)、[本人待审预览](evidence/profile-and-my-page/owner-preview.png)、[管理端审核](evidence/profile-and-my-page/admin-review.png)。
+
+## 开发云初始化后复验
+
+- 初始化前，两次回滚探针分别向 `fy-profile-uploads` 和 `fy-profile-revisions` 执行与业务一致的事务写入。支付宝云均返回 `100104`，原因是在多文档事务内无法创建缺失的集合。探针回滚后未留下记录。
+- 用户手动初始化后，两张新表已出现在支付宝开发空间 `env-00jy72i6ol3c`，回读 Schema 确认客户端读写关闭。随后按授权补齐 `fy-profiles` 和 `fy-notifications` 的可选字段，更新 `fy-api`。回读核对了变更文件及开发空间原有私密配置，原配置文件哈希一致。索引状态未单独从云端回读。
+- 使用 HBuilderX 本地云函数调试连接开发云数据库与对象存储。隔离账号验证纯文字提交及重试、加密头像暂存和重试、本人读取待审头像、其他账号与游客在审核前无法读取、通过后公开头像并收到一条审核通知。成功轮次回读确认测试记录为 0，创建的 1 个测试对象已删除。另一次开发云对象上传返回 `MEDIA_UPLOAD_FAILED`，复跑全流程通过。
+- 新版裁剪为全屏方框和九宫格，支持拖动、双指缩放、重置及取消。社区页面不再触发微信运动自动同步，首页和步数中心保留原有配置及同步机制。
+- 管理端侧栏和待审队列显示红点，处理后刷新。资料审核归入「用户管理」，审核员可访问待审资料，管理员还可查看账户公开简介、城市和文化兴趣。两个禁言入口都标出时长单位，默认 60 分钟。
+- 本机 Node 212 项通过。微信开发包与两端 Web 编译通过。Edge 通过模拟接口验证裁剪拖动、双指缩放、重置、红点更新、用户详情和仅审核员权限。微信真机操作仍待验证。
+
+截图：[新版头像裁剪](evidence/profile-and-my-page/avatar-crop.png)、[用户详情](evidence/profile-and-my-page/admin-user-detail.png)、[用户管理中的资料审核](evidence/profile-and-my-page/admin-review.png)。

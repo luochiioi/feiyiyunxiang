@@ -1,50 +1,62 @@
 <template>
-  <view class="cropper">
-    <text class="heading">裁剪头像</text>
-    <text class="muted">缩放或移动照片，头像会显示圆圈内的区域。</text>
-    <view class="crop-frame">
-      <canvas id="profile-avatar-crop" type="2d" class="crop-canvas" />
+  <view class="cropper" role="dialog" aria-label="裁剪头像">
+    <view class="crop-stage">
+      <view class="crop-frame" :style="{ width: frameSize + 'px', height: frameSize + 'px' }"
+        @touchstart.stop="startTouch" @touchmove.stop.prevent="moveTouch" @touchend.stop="startTouch" @touchcancel.stop="endGesture"
+        @mousedown.stop.prevent="startMouse" @mousemove.stop.prevent="moveMouse" @mouseup.stop="endGesture" @mouseleave="endMouse">
+        <canvas id="profile-avatar-crop" type="2d" class="crop-canvas" />
+        <view class="crop-grid" aria-hidden="true">
+          <view class="crop-line line-left" /><view class="crop-line line-right" />
+          <view class="crop-line line-top" /><view class="crop-line line-bottom" />
+          <view class="crop-corner corner-tl" /><view class="crop-corner corner-tr" />
+          <view class="crop-corner corner-bl" /><view class="crop-corner corner-br" />
+        </view>
+      </view>
+      <text v-if="failed" class="crop-hint" role="status">这张照片暂时无法裁剪。请重试或选择另一张。</text>
+      <text v-else class="crop-hint">拖动或双指缩放照片，头像将使用方框内的画面</text>
     </view>
-    <text v-if="failed" class="muted" role="status">这张照片暂时无法裁剪。请重试或选择另一张。</text>
-    <template v-if="ready">
-      <view class="control">
-        <text class="muted">缩放</text>
-        <slider :value="zoom" :min="100" :max="300" :step="5" activeColor="#426240" @changing="setZoom($event.detail.value)" @change="setZoom($event.detail.value)" />
-      </view>
-      <view v-if="canMoveX" class="control">
-        <text class="muted">左右移动</text>
-        <slider :value="x" :min="0" :max="100" activeColor="#426240" @changing="setX($event.detail.value)" @change="setX($event.detail.value)" />
-      </view>
-      <view v-if="canMoveY" class="control">
-        <text class="muted">上下移动</text>
-        <slider :value="y" :min="0" :max="100" activeColor="#426240" @changing="setY($event.detail.value)" @change="setY($event.detail.value)" />
-      </view>
-    </template>
-    <view class="row crop-buttons">
-      <button class="secondary" @click="emit('cancel')">取消裁剪</button>
-      <button v-if="failed" class="primary" @click="load">重试裁剪</button>
-      <button v-else class="primary" :disabled="!ready" @click="confirm">使用此裁剪</button>
+    <view v-if="ready && !failed" class="crop-tools">
+      <button class="crop-button zoom-button" aria-label="缩小" @click="zoomBy(1 / 1.2)">−</button>
+      <button class="crop-button zoom-button" aria-label="放大" @click="zoomBy(1.2)">+</button>
+      <button class="crop-button reset-button" :disabled="!changed" @click="resetCrop">重置</button>
+    </view>
+    <view class="crop-actions">
+      <button class="crop-button" @click="emit('cancel')">取消裁剪</button>
+      <button v-if="failed" class="crop-button crop-confirm" @click="load">重试裁剪</button>
+      <button v-else class="crop-button crop-confirm" :disabled="!ready" @click="confirm">使用此裁剪</button>
     </view>
   </view>
 </template>
 
 <script setup lang="uts">
-import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref } from 'vue'
-import { avatarCrop, avatarSize } from '@/features/profile/avatar-crop.uts'
+import { getCurrentInstance, onBeforeUnmount, onMounted, ref } from 'vue'
+import { avatarCrop, avatarSize, reframeAvatarCrop } from '@/features/profile/avatar-crop.uts'
+import type { AvatarCrop } from '@/features/profile/avatar-crop.uts'
+
+type Pointer = { x: number, y: number, span: number, count: number }
+type Gesture = { pointer: Pointer, crop: AvatarCrop }
 
 const props = defineProps<{ source: string }>()
 const emit = defineEmits<{ (event: 'cancel'): void, (event: 'confirm', value: string): void }>()
 const instance = getCurrentInstance()!.proxy
-const width = ref(0), height = ref(0), zoom = ref(100), x = ref(50), y = ref(50)
-const ready = ref(false), failed = ref(false)
-const canMoveX = computed(() => width.value > height.value || zoom.value > 100)
-const canMoveY = computed(() => height.value > width.value || zoom.value > 100)
+const windowInfo = uni.getWindowInfo()
+const frameSize = Math.max(1, Math.min(windowInfo.windowWidth - 34, windowInfo.windowHeight - 160, 440))
+const ready = ref(false)
+const failed = ref(false)
+const changed = ref(false)
 let generation = 0
 let canvas: CanvasContext | null = null
 let picture: Image | null = null
+let photoWidth = 0
+let photoHeight = 0
+let initialCrop: AvatarCrop | null = null
+let crop: AvatarCrop | null = null
+let gesture: Gesture | null = null
+let mouseDragging = false
+let lastTouch = 0
 
 onMounted(load)
-onBeforeUnmount(() => { generation++; canvas = null; picture = null })
+onBeforeUnmount(() => { generation++; canvas = null; picture = null; endGesture() })
 
 function load(): void {
   const ticket = ++generation
@@ -62,9 +74,12 @@ function load(): void {
         if (image.width <= 0 || image.height <= 0) { failed.value = true; return }
         drawable.canvas.width = avatarSize
         drawable.canvas.height = avatarSize
-        width.value = image.width; height.value = image.height
-        canvas = context; picture = image
-        ready.value = draw()
+        canvas = context
+        picture = image
+        photoWidth = image.width
+        photoHeight = image.height
+        initialCrop = avatarCrop(photoWidth, photoHeight, 1, 50, 50)
+        resetCrop()
       }
       image.onerror = () => { if (ticket === generation) failed.value = true }
       image.src = props.source
@@ -76,17 +91,83 @@ function load(): void {
 function draw(): boolean {
   const context = canvas?.getContext('2d')
   const image = picture
-  if (context == null || image == null) return false
+  const region = crop
+  if (context == null || image == null || region == null) return false
   try {
-    const crop = avatarCrop(width.value, height.value, zoom.value / 100, x.value, y.value)
     context.clearRect(0, 0, avatarSize, avatarSize)
-    context.drawImage(image, crop.x, crop.y, crop.side, crop.side, 0, 0, avatarSize, avatarSize)
+    context.drawImage(image, region.x, region.y, region.side, region.side, 0, 0, avatarSize, avatarSize)
     return true
   } catch (_) { failed.value = true; return false }
 }
-function setZoom(value: number): void { zoom.value = value; draw() }
-function setX(value: number): void { x.value = value; draw() }
-function setY(value: number): void { y.value = value; draw() }
+
+function resetCrop(): void {
+  if (initialCrop == null) return
+  crop = initialCrop
+  changed.value = false
+  ready.value = draw()
+}
+
+function reframe(origin: AvatarCrop, scale: number, dx: number, dy: number): void {
+  const initial = initialCrop
+  if (initial == null || !ready.value) return
+  const next = reframeAvatarCrop(photoWidth, photoHeight, origin, scale, dx, dy, frameSize)
+  crop = next
+  changed.value = next.x !== initial.x || next.y !== initial.y || next.side !== initial.side
+  draw()
+}
+function zoomBy(scale: number): void {
+  const current = crop
+  if (current != null) reframe(current, scale, 0, 0)
+}
+
+function touchPointer(event: UniTouchEvent): Pointer | null {
+  const touches = event.touches
+  if (touches.length === 0) return null
+  const first = touches[0]
+  if (touches.length === 1) return { x: first.clientX, y: first.clientY, span: 0, count: 1 }
+  const second = touches[1]
+  const dx = first.clientX - second.clientX
+  const dy = first.clientY - second.clientY
+  return {
+    x: (first.clientX + second.clientX) / 2,
+    y: (first.clientY + second.clientY) / 2,
+    span: Math.max(1, Math.sqrt(dx * dx + dy * dy)), count: 2
+  }
+}
+function startTouch(event: UniTouchEvent): void {
+  lastTouch = Date.now()
+  mouseDragging = false
+  setPointer(touchPointer(event))
+}
+function moveTouch(event: UniTouchEvent): void {
+  lastTouch = Date.now()
+  const pointer = touchPointer(event)
+  if (pointer != null) movePointer(pointer)
+}
+function startMouse(event: UniMouseEvent): void {
+  if (Date.now() - lastTouch < 500) return
+  mouseDragging = true
+  setPointer({ x: event.clientX, y: event.clientY, span: 0, count: 1 })
+}
+function moveMouse(event: UniMouseEvent): void {
+  if (mouseDragging) movePointer({ x: event.clientX, y: event.clientY, span: 0, count: 1 })
+}
+function endMouse(): void { if (mouseDragging) endGesture() }
+function endGesture(): void { gesture = null; mouseDragging = false }
+
+function setPointer(pointer: Pointer | null): void {
+  const current = crop
+  gesture = pointer == null || current == null ? null : { pointer, crop: current }
+}
+function movePointer(pointer: Pointer): void {
+  const start = gesture
+  if (start == null || start.pointer.count !== pointer.count) {
+    setPointer(pointer)
+    return
+  }
+  const scale = pointer.count === 2 ? pointer.span / start.pointer.span : 1
+  reframe(start.crop, scale, pointer.x - start.pointer.x, pointer.y - start.pointer.y)
+}
 
 function confirm(): void {
   if (!ready.value || !draw()) return
@@ -99,11 +180,30 @@ function confirm(): void {
 </script>
 
 <style scoped>
-@import '@/styles/page.css';
-.cropper { padding: 12px; gap: 8px; border: 1px solid #e8dbc9; border-radius: 14px; background: #fffaf4; }
-.crop-frame { align-self: center; width: 232px; height: 232px; border-radius: 50%; overflow: hidden; background: #f0e7d8; }
-.crop-canvas { width: 232px; height: 232px; border-radius: 50%; }
-.control { gap: 3px; }
-slider { margin: 0 8px; }
-.crop-buttons > button { flex: 1; width: auto; }
+.cropper { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 500; background: #101010; padding: 20px 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); touch-action: none; }
+.crop-stage { flex: 1; justify-content: center; align-items: center; gap: 18px; }
+.crop-frame { position: relative; background: #161616; cursor: grab; touch-action: none; }
+.crop-canvas { width: 100%; height: 100%; }
+.crop-grid { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border: 1px solid #fff; pointer-events: none; }
+.crop-line { position: absolute; background: rgba(255, 255, 255, .55); }
+.line-left, .line-right { top: 0; bottom: 0; width: 1px; }
+.line-left { left: 33.333%; }
+.line-right { left: 66.667%; }
+.line-top, .line-bottom { left: 0; right: 0; height: 1px; }
+.line-top { top: 33.333%; }
+.line-bottom { top: 66.667%; }
+.crop-corner { position: absolute; width: 14px; height: 14px; border-color: #fff; border-style: solid; border-width: 0; }
+.corner-tl { top: -2px; left: -2px; border-top-width: 3px; border-left-width: 3px; }
+.corner-tr { top: -2px; right: -2px; border-top-width: 3px; border-right-width: 3px; }
+.corner-bl { bottom: -2px; left: -2px; border-bottom-width: 3px; border-left-width: 3px; }
+.corner-br { bottom: -2px; right: -2px; border-bottom-width: 3px; border-right-width: 3px; }
+.crop-hint { color: #ddd; font-size: 13px; text-align: center; }
+.crop-tools, .crop-actions { flex-direction: row; align-items: center; }
+.crop-tools { justify-content: center; gap: 10px; padding: 4px 0 14px; }
+.crop-actions { justify-content: space-between; }
+.crop-button { min-width: 44px; margin: 0; padding: 0 12px; height: 44px; line-height: 44px; border: 0; border-radius: 8px; font-size: 15px; color: #fff; background: #101010; }
+.crop-button::after { border: 0; }
+.zoom-button { font-size: 22px; background: #2d2d2d; }
+.crop-confirm { font-weight: bold; }
+.crop-button[disabled] { color: #999; background: #101010; }
 </style>

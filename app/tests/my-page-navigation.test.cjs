@@ -33,20 +33,19 @@ test('direct My Posts opens only the personal feed and does not trigger step syn
   assert.deepEqual(calls, [['communityFeed', 'mine']])
 })
 
-test('opening public community offers background sync only while community is visible', async () => {
-  let loadPage, showPage, hidePage, canSync
+test('opening public community loads posts without triggering WeRun', async () => {
+  let loadPage, showPage
   const calls = []
   clientScript('packages/community/community/community.uvue', {
     onLoad: callback => { loadPage = callback }, onShow: callback => { showPage = callback },
-    onHide: callback => { hidePage = callback },
+    onHide() {},
     session: { value: { uid: 'member' } }, refreshReviewNotices() {},
-    syncWechatSteps: async (uid, automatic, visible) => { calls.push([uid, automatic]); canSync = visible },
-    publicRead: async () => ({ items: [], next: '' })
+    syncWechatSteps: async () => { calls.push('sync') },
+    publicRead: async action => { calls.push(action); return { items: [], next: '' } }
   })
   loadPage({})
   await showPage()
-  assert.deepEqual(calls, [['member', true]])
-  assert.equal(canSync(), true)
-  hidePage()
-  assert.equal(canSync(), false)
+  assert.deepEqual(calls, ['communityFeed'])
+  assert.match(source('pages/index/index.uvue'), /syncWechatSteps/)
+  assert.match(source('packages/community/components/StepPanel.uvue'), /syncWechatSteps/)
 })

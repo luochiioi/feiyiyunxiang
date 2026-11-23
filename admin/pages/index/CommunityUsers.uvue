@@ -31,6 +31,12 @@
         <text class="heading">{{ selected?.nickname }} · {{ statusLabel(selected?.status ?? -1, selected?.suspendedByOps === true) }}</text>
         <text class="muted">{{ selected?.code ? 'ID ' + selected?.code : '尚无公开 ID' }} · {{ created() }}</text>
         <text class="muted">{{ muted ? '禁言中 · 截止 ' + new Date(selected?.muteUntil ?? 0).toLocaleString() : '未禁言' }}</text>
+        <view class="profile-summary">
+          <text class="heading">当前公开资料</text>
+          <text class="muted">简介</text><text class="profile-bio">{{ selected?.bio || '未填写简介' }}</text>
+          <text class="muted">城市标签 {{ selected?.displayCity || '未填写' }}</text>
+          <text class="muted">文化兴趣 {{ selected?.interests?.join(' · ') || '未填写' }}</text>
+        </view>
         <text>好友 {{ selected?.friendCount }} · 帖子共 {{ selected?.postCount }} · 评论共 {{ selected?.commentCount }} · 被举报共 {{ selected?.reportCount }}</text>
         <view class="tools">
           <button :disabled="busy" @click="review('pending')">待审帖子（{{ selected?.pendingPosts }}）</button>
@@ -49,7 +55,7 @@
           <button v-if="selected?.suspendedByOps && selected?.status === 1" :disabled="busy" @click="setStatus(false)">恢复账户</button>
         </view>
         <view class="tools">
-          <input :disabled="busy" v-model="minutes" type="number" placeholder="1–43200 分钟" />
+          <view class="duration"><text class="muted">禁言时长（分钟）</text><input :disabled="busy" v-model="minutes" type="number" /></view>
           <button :disabled="busy" @click="mute(false)">禁言</button>
           <button v-if="muted" :disabled="busy" @click="mute(true)">解除禁言</button>
         </view>
@@ -62,7 +68,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '@/features/api.uts'
 import AccountAvatar from './AccountAvatar.uvue'
 type Account = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, avatarVersion?: string, createdAt: number, muteUntil: number }
-type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, avatarVersion?: string, createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number, pendingPosts: number, publishedPosts: number, pendingComments: number, publicComments: number, openReports: number, resolvedReports: number }
+type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, avatarVersion?: string, bio?: string, displayCity?: string, interests?: string[], createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number, pendingPosts: number, publishedPosts: number, pendingComments: number, publicComments: number, openReports: number, resolvedReports: number }
 type AccountPage = { items: Account[], next: string }
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (event: 'review', group: string, uid: string, label: string): void }>()
@@ -202,6 +208,10 @@ function mute(release: boolean): void {
 .inspector { flex: 1; min-width: 330px; }
 button { margin: 0; }
 .tools input { width: 180px; }
+.profile-summary,.duration { display:flex; flex-direction:column; gap:4px; }
+.profile-summary { background:#f2f5ed; border-radius:8px; padding:10px; }
+.profile-bio { overflow-wrap:anywhere; white-space:pre-wrap; margin-bottom:5px; }
+.tools .duration input { width:145px; }
 .receipt { color: #304c37; font-weight: 700; }
 .muted { font-size: 13px; color: #675d50; }
 </style>

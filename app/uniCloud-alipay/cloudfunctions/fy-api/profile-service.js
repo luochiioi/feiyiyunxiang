@@ -74,7 +74,7 @@ async function profileStorage(operation) {
     const code = error?.code ?? error?.errCode
     const message = String(error?.message ?? error?.errMsg ?? '')
     if (['DATABASE_COLLECTION_NOT_EXIST', 'DATABASE_COLLECTION_NOT_FOUND'].includes(code) ||
-        /(?:collection|集合|数据表).{0,120}(?:not found|not exist|missing|不存在)|NamespaceNotFound/i.test(message)) {
+        /(?:collection|集合|数据表).{0,120}(?:not found|not exist|missing|不存在)|NamespaceNotFound|Cannot create namespace .+ in multi-document transaction/i.test(message)) {
       fail('PROFILE_STORAGE_UNAVAILABLE')
     }
     throw error
