@@ -29,7 +29,7 @@
             </view>
           </view>
           <text v-if="resultView?.reason" class="body wrap">{{ resultView?.reason }}</text>
-          <text v-if="resultView?.status === 'pending'" class="muted">审核期间继续展示当前公开资料。</text>
+          <text v-if="resultView?.status === 'pending'" class="muted">新资料仅自己可见，审核通过后会公开。</text>
           <button v-if="resultPhotoFailed" class="secondary" @click="refreshResultPhoto">重试审核头像</button>
           <button v-if="historyMode && historyView != null" class="secondary" :disabled="busy || myProfile == null" @click="editHistory">以此修改</button>
         </view>
@@ -44,7 +44,7 @@
               <button class="secondary" :disabled="busy || selecting" @click="resetPhoto">使用默认澳喵</button>
             </view>
           </view>
-          <text class="muted">JPG 或 PNG，压缩后最多 1 MiB</text>
+          <AvatarCropper v-if="cropSource.length > 0" :key="cropSource" :source="cropSource" @cancel="cancelCrop" @confirm="useCrop" />
           <text class="label">昵称</text>
           <input v-model="draft.nickname" class="field" :maxlength="-1" :disabled="busy" placeholder="2–20 字" />
           <text class="label">一句话简介（可选）</text>
@@ -55,7 +55,7 @@
           <view class="interests">
             <button v-for="interest in profileInterests" :key="interest" class="interest" :class="{ selected: draft.interests.includes(interest) }" :disabled="busy" @click="toggleInterest(interest)">{{ interest }}</button>
           </view>
-          <button class="primary" :disabled="busy || selecting || needsRead" @click="save">{{ busy ? '正在提交…' : '提交审核' }}</button>
+          <button class="primary" :disabled="busy || selecting || needsRead || cropSource.length > 0" @click="save">{{ busy ? '正在提交…' : '提交审核' }}</button>
         </view>
         <button v-if="saved && !needsRead" class="secondary" :disabled="busy" @click="editAgain">继续编辑</button>
       </template>
@@ -69,8 +69,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import ProfileAvatar from '@/components/ProfileAvatar.uvue'
+import AvatarCropper from './AvatarCropper.uvue'
 import { login, requestId, session } from '@/features/api.uts'
-import { myProfile, profileError, profileInterests, profileRequest, refreshMyProfile, submitMyProfile } from '@/features/profile/profile.uts'
+import { myPendingProfile, myProfile, profileError, profileInterests, profileRequest, refreshMyProfile, rememberPendingProfile, submitMyProfile } from '@/features/profile/profile.uts'
 import type { ProfileRevision } from '@/features/profile/profile.uts'
 import { removeAvatarPreview, saveAvatarPreview } from '@/features/profile/profile-avatar.uts'
 import { statusLabel } from '@/features/community/community.uts'
@@ -81,13 +82,14 @@ const history = ref<ProfileRevision | null>(null), historyId = ref('')
 const editingHistory = ref<ProfileRevision | null>(null)
 const busy = ref(false), selecting = ref(false), saved = ref(false), needsRead = ref(false)
 const message = ref(''), photoPath = ref(''), resultPhoto = ref('')
+const cropSource = ref('')
 const resultPhotoFailed = ref(false), owner = ref('')
 let generation = 0, reading = 0, photoReading = 0
-let uploadRequest = '', uploadId = ''
+let uploadRequest = '', uploadId = '', croppedBase64 = ''
 let rebase = false
 const historyMode = computed(() => historyId.value.length > 0)
 const historyView = computed(() => owner.value === session.value?.uid ? history.value : null)
-const resultView = computed(() => historyMode.value ? historyView.value : editingHistory.value ?? myProfile.value?.pending ?? myProfile.value?.latest ?? null)
+const resultView = computed(() => historyMode.value ? historyView.value : editingHistory.value ?? myPendingProfile.value ?? myProfile.value?.latest ?? null)
 const publicTags = computed(() => [myProfile.value?.displayCity ?? '', ...(myProfile.value?.interests ?? [])].filter(item => item.length > 0).join(' · '))
 const resultTags = computed(() => [resultView.value?.displayCity ?? '', ...(resultView.value?.interests ?? [])].filter(item => item.length > 0).join(' · '))
 const draftPhoto = computed(() => photoPath.value || (draft.value?.avatarRevisionId === resultView.value?.revisionId ? resultPhoto.value : '') || '/static/ip/aomiao-wave.png')
@@ -100,7 +102,12 @@ function clearResultPhoto(): void {
   resultPhoto.value = ''
   resultPhotoFailed.value = false
 }
-onBeforeUnmount(() => { generation++; reading++; clearResultPhoto() })
+function clearCroppedPhoto(): void {
+  removeAvatarPreview(photoPath.value)
+  photoPath.value = ''; cropSource.value = ''; croppedBase64 = ''
+  uploadId = ''; uploadRequest = ''
+}
+onBeforeUnmount(() => { generation++; reading++; clearResultPhoto(); clearCroppedPhoto() })
 watch(() => session.value?.uid, () => {
   reading++
   clearResultPhoto()
@@ -109,7 +116,7 @@ watch(() => session.value?.uid, () => {
   generation++
   owner.value = uid
   draft.value = null; history.value = null; editingHistory.value = null; saved.value = false; rebase = false
-  photoPath.value = ''; uploadId = ''; uploadRequest = ''; message.value = ''
+  clearCroppedPhoto(); message.value = ''
   busy.value = false; selecting.value = false; needsRead.value = true
 }, { flush: 'sync' })
 
@@ -136,7 +143,7 @@ async function refresh(): Promise<void> {
       const value = await profileRequest<ProfileRevision>(uid, 'profileRevision', { revisionId: historyId.value })
       if (ticket !== reading || uid !== session.value?.uid) return
       history.value = value
-    } else if (draft.value == null && !saved.value) populate(myProfile.value?.pending ?? null)
+    } else if (draft.value == null && !saved.value) populate(myPendingProfile.value)
     else if (rebase && draft.value != null && myProfile.value != null) {
       draft.value!.baseRevision = myProfile.value!.revision
       rebase = false
@@ -187,9 +194,9 @@ function editHistory(): void {
   history.value = null
 }
 function editAgain(): void {
-  photoPath.value = ''; uploadId = ''; uploadRequest = ''
+  clearCroppedPhoto()
   editingHistory.value = null
-  populate(myProfile.value?.pending ?? null)
+  populate(myPendingProfile.value)
   saved.value = false
   message.value = ''
 }
@@ -203,7 +210,7 @@ function toggleInterest(value: string): void {
 function resetPhoto(): void {
   const current = draft.value
   if (current == null || busy.value) return
-  photoPath.value = ''; uploadId = ''; uploadRequest = ''
+  clearCroppedPhoto()
   current.avatarRevisionId = ''; current.resetAvatar = true
 }
 function choosePhoto(): void {
@@ -214,9 +221,7 @@ function choosePhoto(): void {
     success: result => {
       const current = draft.value, selected = result.tempFilePaths[0]
       if (ticket !== generation || uid !== session.value?.uid || current == null || !selected) return
-      photoPath.value = selected
-      uploadId = ''; uploadRequest = requestId()
-      current.avatarRevisionId = ''; current.resetAvatar = false
+      cropSource.value = selected
       message.value = ''
     },
     fail: error => {
@@ -227,38 +232,31 @@ function choosePhoto(): void {
     complete: () => { if (ticket === generation) selecting.value = false }
   })
 }
-function readPhoto(path: string): Promise<string> {
-  // #ifdef MP-WEIXIN
-  if (typeof uni.getFileSystemManager === 'function') {
-    return new Promise<string>((resolve, reject) => {
-      uni.getFileSystemManager().readFile({ filePath: path, encoding: 'base64',
-        success: value => resolve(value.data as string), fail: () => reject(new Error('INVALID_IMAGE')) })
-    })
+function cancelCrop(): void { cropSource.value = '' }
+async function useCrop(src: string): Promise<void> {
+  const uid = session.value?.uid, ticket = generation, current = draft.value
+  const selected = cropSource.value
+  if (uid == null || current == null || selected.length === 0 || selecting.value) return
+  selecting.value = true
+  try {
+    const prefix = 'data:image/png;base64,'
+    if (!src.startsWith(prefix) || src.length <= prefix.length) throw new Error('INVALID_IMAGE')
+    const path = await saveAvatarPreview(src)
+    if (ticket !== generation || uid !== session.value?.uid || selected !== cropSource.value) {
+      removeAvatarPreview(path)
+      return
+    }
+    clearCroppedPhoto()
+    photoPath.value = path
+    croppedBase64 = src.slice(prefix.length)
+    uploadRequest = requestId()
+    current.avatarRevisionId = ''; current.resetAvatar = false
+    message.value = ''
+  } catch (_) {
+    if (ticket === generation && uid === session.value?.uid) message.value = '头像裁剪结果暂时无法保存，请重试。'
+  } finally {
+    if (ticket === generation) selecting.value = false
   }
-  // #endif
-  // #ifdef WEB
-  return fetch(path).then(response => response.blob()).then(blob => new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '')
-    reader.onerror = () => reject(new Error('INVALID_IMAGE'))
-    reader.readAsDataURL(blob)
-  }))
-  // #endif
-  // #ifndef WEB
-  return Promise.reject(new Error('INVALID_IMAGE'))
-  // #endif
-}
-async function photoBase64(path: string): Promise<string> {
-  const limit = 1398104
-  const data = await readPhoto(path)
-  if (data.length > 0 && data.length <= limit) return data
-  const compressed = await new Promise<string>((resolve, reject) => {
-    uni.compressImage({ src: path, quality: 72, compressedWidth: 800,
-      success: result => resolve(result.tempFilePath), fail: () => reject(new Error('INVALID_IMAGE')) })
-  })
-  const smaller = await readPhoto(compressed)
-  if (smaller.length === 0 || smaller.length > limit) throw new Error('INVALID_IMAGE')
-  return smaller
 }
 function checked(value: string, min: number, max: number, code: string): string {
   const plain = value.trim(), size = Array.from(plain).length
@@ -268,7 +266,7 @@ function checked(value: string, min: number, max: number, code: string): string 
 async function save(): Promise<void> {
   const uid = session.value?.uid, current = draft.value
   const ticket = generation
-  if (uid == null || current == null || busy.value || selecting.value || saved.value || historyMode.value || needsRead.value) return
+  if (uid == null || current == null || busy.value || selecting.value || saved.value || historyMode.value || needsRead.value || cropSource.value.length > 0) return
   busy.value = true
   message.value = ''
   let phase = 'submit'
@@ -277,12 +275,11 @@ async function save(): Promise<void> {
     const bio = checked(current.bio, 0, 80, 'INVALID_BIO')
     const displayCity = checked(current.displayCity, 0, 20, 'INVALID_CITY')
     if (current.interests.length > 3 || current.interests.some(item => !profileInterests.includes(item))) throw new Error('INVALID_INTERESTS')
-    if (photoPath.value.length > 0 && uploadId.length === 0) {
+    if (croppedBase64.length > 0 && uploadId.length === 0) {
       phase = 'avatar'
-      const base64 = await photoBase64(photoPath.value)
+      const upload = await profileRequest<{ uploadId: string }>(uid, 'profileStageAvatar', { requestId: uploadRequest, base64: croppedBase64 })
       if (ticket !== generation || uid !== session.value?.uid) return
-      const upload = await profileRequest<{ uploadId: string }>(uid, 'profileStageAvatar', { requestId: uploadRequest, base64 })
-      if (ticket !== generation || uid !== session.value?.uid) return
+      if (!upload?.uploadId) throw new Error('MEDIA_UPLOAD_FAILED')
       uploadId = upload.uploadId
     }
     phase = 'submit'
@@ -290,8 +287,15 @@ async function save(): Promise<void> {
     if (uploadId.length > 0) values['avatarUploadId'] = uploadId
     else if (current.avatarRevisionId.length > 0) values['avatarRevisionId'] = current.avatarRevisionId
     else if (current.resetAvatar) values['resetAvatar'] = true
-    await submitMyProfile(values)
+    const receipt = await submitMyProfile(values)
     if (ticket !== generation || uid !== session.value?.uid) return
+    const currentAvatar = myProfile.value?.avatarVersion ?? ''
+    rememberPendingProfile(uid, {
+      revisionId: receipt.revisionId, status: 'pending', nickname, bio, displayCity, interests: [...current.interests],
+      hasAvatar: uploadId.length > 0 || current.avatarRevisionId.length > 0 || (!current.resetAvatar && currentAvatar.length > 0),
+      avatar: current.resetAvatar ? '' : myProfile.value?.avatar ?? '',
+      reason: '', createdAt: Date.now(), baseRevision: current.baseRevision
+    })
     saved.value = true
     editingHistory.value = null
     message.value = '资料已提交审核。'

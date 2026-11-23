@@ -1,0 +1,53 @@
+<template>
+  <view class="pending-avatar">
+    <image class="photo" :src="source || '/static/ip/aomiao-wave.png'" :mode="source.length > 0 ? 'aspectFill' : 'aspectFit'" @error="imageFailed" />
+    <button v-if="failed" class="retry" aria-label="重试待审头像" @click="load">↻</button>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { session } from '@/features/api.uts'
+import { profileRequest } from '@/features/profile/profile.uts'
+import { removeAvatarPreview, saveAvatarPreview } from '@/features/profile/profile-avatar.uts'
+
+const props = defineProps<{ revisionId: string, hasAvatar: boolean, legacy: string }>()
+const source = ref(''), failed = ref(false)
+let generation = 0
+function clear(): void {
+  generation++
+  removeAvatarPreview(source.value)
+  source.value = ''
+  failed.value = false
+}
+function imageFailed(): void {
+  if (source.value.length === 0) return
+  clear()
+  failed.value = props.hasAvatar
+}
+
+async function load(): Promise<void> {
+  clear()
+  const uid = session.value?.uid
+  if (uid == null || !props.revisionId) return
+  if (!props.hasAvatar) { source.value = props.legacy; return }
+  const ticket = generation
+  try {
+    const result = await profileRequest<{ src: string }>(uid, 'profileRevision', { revisionId: props.revisionId, avatar: true })
+    const path = await saveAvatarPreview(result.src)
+    if (ticket === generation && session.value?.uid === uid) source.value = path
+    else removeAvatarPreview(path)
+  } catch (_) {
+    if (ticket === generation && session.value?.uid === uid) failed.value = true
+  }
+}
+
+watch(() => [session.value?.uid, props.revisionId, props.hasAvatar, props.legacy], () => { load() }, { immediate: true, flush: 'sync' })
+onBeforeUnmount(clear)
+</script>
+
+<style scoped>
+.pending-avatar { position: relative; width: 60px; height: 60px; flex-shrink: 0; border-radius: 50%; background: #f6ecd8; }
+.photo { width: 60px; height: 60px; border-radius: 50%; }
+.retry { position: absolute; right: -2px; bottom: -2px; width: 24px; height: 24px; padding: 0; border-radius: 50%; font-size: 14px; line-height: 22px; background: #fff7e9; color: #604526; }
+</style>

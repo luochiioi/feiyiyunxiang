@@ -9,6 +9,7 @@ function editor(overrides = {}) {
   let load, show
   const script = clientScript('packages/profile/profile-edit/profile-edit.uvue', {
     session, myProfile, calls, requestId: () => 'photo-request',
+    myPendingProfile: { value: null }, rememberPendingProfile() {},
     profileInterests: ['湘绣', '摄影'], profileError: error => error.message,
     onLoad: callback => { load = callback }, onShow: callback => { show = callback }, onBeforeUnmount() {},
     refreshMyProfile: async () => {}, login: async () => { session.value = { uid: 'A' } },
@@ -63,13 +64,12 @@ test('avatar upload failure keeps the selected file, fields and staging request 
   const stages = []
   const page = editor({
     uni: {
-      chooseImage({ success, complete }) { success({ tempFilePaths: ['selected.jpg'] }); complete() },
-      getFileSystemManager: () => ({ readFile({ success }) { success({ data: 'eA==' }) } })
+      chooseImage({ success, complete }) { success({ tempFilePaths: ['selected.jpg'] }); complete() }
     },
     async profileRequest(uid, action, payload) {
       assert.equal(uid, 'A')
       assert.equal(action, 'profileStageAvatar')
-      stages.push(payload.requestId)
+      stages.push([payload.requestId, payload.base64])
       if (stages.length === 1) throw Error('MEDIA_UPLOAD_FAILED')
       return { uploadId: 'stage' }
     }
@@ -77,12 +77,15 @@ test('avatar upload failure keeps the selected file, fields and staging request 
   await page.open()
   page.run('draft.value.nickname = "保留昵称"; choosePhoto()')
   await page.run('save()')
+  assert.equal(stages.length, 0)
+  await page.run('useCrop("data:image/png;base64,eA==")')
+  await page.run('save()')
   assert.equal(page.run('message.value'), 'MEDIA_UPLOAD_FAILED')
-  assert.equal(page.run('photoPath.value'), 'selected.jpg')
+  assert.equal(page.run('photoPath.value'), 'data:image/png;base64,eA==')
   assert.equal(page.run('draft.value.nickname'), '保留昵称')
   assert.equal(page.calls.length, 0)
   await page.run('save()')
-  assert.deepEqual(stages, ['photo-request', 'photo-request'])
+  assert.deepEqual(stages, [['photo-request', 'eA=='], ['photo-request', 'eA==']])
   assert.equal(page.calls[0].avatarUploadId, 'stage')
 })
 

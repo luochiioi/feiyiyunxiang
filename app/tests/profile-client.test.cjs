@@ -3,6 +3,24 @@ const assert = require('node:assert/strict')
 const { clientScript } = require('./helpers/client-script.cjs')
 const { fixture, alice, input } = require('./helpers/profile-fixture.cjs')
 
+test('confirmed pending profile is immediately visible to its owner and clears on authoritative read or account switch', async () => {
+  const approved = { nickname: '公开昵称', pending: null }
+  const session = { value: { uid: 'A', expiresAt: Date.now() + 3600000 } }
+  const script = clientScript('features/profile/profile.uts', { session, api: async () => approved })
+  await script.run('refreshMyProfile()')
+  script.run('rememberPendingProfile("A", { revisionId: "pending", nickname: "本人预览", status: "pending" })')
+  assert.equal(script.run('myPendingProfile.value.nickname'), '本人预览')
+  assert.equal(script.run('myProfile.value.nickname'), '公开昵称')
+  await script.run('refreshMyProfile()')
+  assert.equal(script.run('myPendingProfile.value'), null)
+  script.run('rememberPendingProfile("A", { revisionId: "second", status: "pending" })')
+  session.value = { uid: 'B' }
+  script.change()
+  assert.equal(script.run('myPendingProfile.value'), null)
+  script.run('rememberPendingProfile("A", { revisionId: "late", status: "pending" })')
+  assert.equal(script.run('myPendingProfile.value'), null)
+})
+
 test('profile error copy distinguishes the failed stage and missing server configuration', () => {
   const script = clientScript('features/profile/profile.uts', { session: { value: null } })
   assert.match(script.run('profileError(new Error("SERVICE_UNAVAILABLE"), "avatar")'), /头像.*草稿/)

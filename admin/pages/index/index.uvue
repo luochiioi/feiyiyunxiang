@@ -1,20 +1,24 @@
 <template>
   <view class="desktop">
     <view class="sidebar">
-      <image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" />
-      <text class="brand">非遗云享</text>
+      <view class="brand-row"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text></view>
       <template v-if="session != null">
-        <text class="hint">{{ session?.username }}</text>
-        <button @click="section = 'overview'">运营工作台</button>
-        <button @click="openReview('pending', '', '')">社区审核与治理</button>
-        <button v-if="session?.admin === true" @click="openUsers">用户管理</button>
-        <button v-if="session?.admin === true" @click="openRoutes">路线与博物馆</button>
-        <button class="logout" :disabled="busy" @click="signOut">退出登录</button>
+        <view class="sidebar-nav">
+          <button :class="{ active: section === 'overview' }" @click="goTo('overview')">运营工作台</button>
+          <button :class="{ active: section === 'review' }" @click="openQueue('pending')">社区审核与治理</button>
+          <button v-if="session?.admin === true" :class="{ active: section === 'users' }" @click="openUsers">用户管理</button>
+          <button v-if="session?.admin === true" :class="{ active: section === 'routes' }" @click="openRoutes">路线与博物馆</button>
+        </view>
+        <view class="sidebar-footer">
+          <text class="hint">{{ session?.username }}</text>
+          <button v-if="session?.admin === true" :class="{ active: section === 'settings' }" :disabled="busy" @click="showAccountForm">账号设置</button>
+          <button class="logout" :disabled="busy" @click="signOut">退出登录</button>
+        </view>
       </template>
     </view>
     <view class="main">
       <text class="title">{{ session == null ? '管理员登录' : sectionTitle() }}</text>
-      <text class="message">{{ message }}</text>
+      <text v-if="message.length > 0" role="status" class="message">{{ message }}</text>
       <view v-if="session == null" class="card login">
         <text>管理员账号</text><input v-model="username" placeholder="受控初始化的账号" />
         <text>密码</text><input v-model="password" :password="true" placeholder="管理员密码" />
@@ -26,13 +30,11 @@
           <CommunityOverview v-if="section === 'overview'" @review="openQueue" />
           <CommunityUsers v-if="usersOpened && session?.admin === true" v-show="section === 'users'" :visible="section === 'users'" @review="openReview" />
           <template v-if="section === 'review'">
-            <view class="toolbar"><button @click="section = reviewFrom">返回{{ reviewFrom === 'users' ? '用户管理' : '工作台' }}</button></view>
+            <view v-if="reviewFrom === 'users'" class="toolbar"><button @click="goTo('users')">返回用户管理</button></view>
             <CommunityGovernance :key="reviewKey" :initial-group="reviewGroup" :target-uid="reviewUid" :target-label="reviewLabel" />
           </template>
         </template>
-        <template v-else>
-        <view class="toolbar"><button @click="load">刷新草稿</button><button @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="openMuseumDraft(true)">澳门 · 上集</button><button :disabled="busy" @click="openMuseumDraft(false)">湖南 · 下集</button><button :disabled="busy" @click="showAccountForm">修改登录账号或密码</button></view>
-        <view v-if="editingAccount" class="card account-form">
+        <view v-if="section === 'settings' && session?.admin === true" class="card account-form">
           <text class="heading">修改管理员登录信息</text>
           <text>登录账号（3–40 字符）</text><input v-model="newUsername" :maxlength="40" :disabled="busy" />
           <text>当前密码</text><input v-model="currentPassword" :password="true" :maxlength="256" :disabled="busy" />
@@ -43,9 +45,11 @@
           <text class="hint">保存后，各设备需要重新登录。请先保存正在编辑的路线草稿。</text>
           <view class="toolbar">
             <button class="primary" :disabled="busy" @click="saveAccount">保存登录信息</button>
-            <button :disabled="busy" @click="closeAccountForm">取消</button>
+            <button :disabled="busy" @click="goTo('overview')">取消</button>
           </view>
         </view>
+        <template v-if="section === 'routes'">
+        <view class="toolbar"><button @click="load">刷新草稿</button><button class="primary" @click="newDraft">新建开发测试路线</button><button :disabled="busy" @click="openMuseumDraft(true)">澳门 · 上集</button><button :disabled="busy" @click="openMuseumDraft(false)">湖南 · 下集</button></view>
         <view class="workspace">
           <view class="list card"><view v-for="item in drafts" :key="item.id" class="list-item" @click="edit(item)"><text>{{ item.name }}</text><text class="hint">{{ item.region }} · 草稿 v{{ item.revision }}</text></view><text v-if="drafts.length === 0">暂无草稿</text></view>
           <view v-if="editing" class="card editor">
@@ -111,7 +115,7 @@ type Museum = { name: string, description: string }
 type Viewport = { latitude: number, longitude: number, scale: number }
 type Draft = { id: string, name: string, region: string, description: string, revision: number, testOnly: boolean, museum: Museum, viewport: Viewport, nodes: DraftNode[], exhibit?: DraftExhibit, cultureUpgrade?: string[] | null }
 const username = ref(''), password = ref(''), busy = ref(false), message = ref('')
-const editingAccount = ref(false), newUsername = ref('')
+const newUsername = ref('')
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref('')
 const drafts = ref<Draft[]>([])
 const editing = ref(false)
@@ -128,31 +132,38 @@ function sectionTitle(): string {
     case 'routes': return '路线与博物馆'
     case 'users': return '用户管理'
     case 'review': return '社区审核与治理'
+    case 'settings': return '账号设置'
     default: return '运营工作台'
   }
 }
 const usersOpened = ref(false)
-function openUsers(): void { usersOpened.value = true; section.value = 'users' }
-function openRoutes(): void { section.value = 'routes'; load() }
+function goTo(value: string): void {
+  if (busy.value || section.value === value) return
+  if (section.value === 'settings') closeAccountForm()
+  section.value = value
+  message.value = ''
+}
+function openUsers(): void { usersOpened.value = true; goTo('users') }
+function openRoutes(): void { if (section.value !== 'routes' && !busy.value) { goTo('routes'); load() } }
 function openQueue(group: string): void { openReview(group, '', '') }
 function openReview(group: string, uid: string, label: string): void {
+  if (busy.value) return
   if (section.value !== 'review') reviewFrom.value = section.value === 'users' ? 'users' : 'overview'
   reviewGroup.value = group; reviewUid.value = uid; reviewLabel.value = label; reviewKey.value++
-  section.value = 'review'
+  goTo('review')
 }
 async function signIn(): Promise<void> { if (busy.value) return; busy.value = true; message.value = ''; try { session.value = await api<AdminSession>('adminLogin', { username: username.value, password: password.value }); password.value = ''; section.value = 'overview' } catch (_) { message.value = '登录失败，请检查账号、密码或云端配置。' } finally { busy.value = false } }
 async function signOut(): Promise<void> { try { await api<UTSJSONObject>('adminLogout'); session.value = null; usersOpened.value = false; editing.value = false; drafts.value = []; closeAccountForm() } catch (_) { message.value = '退出未完成，请重试。' } }
 function showAccountForm(): void {
-  message.value = ''
+  if (busy.value || section.value === 'settings') return
+  goTo('settings')
   newUsername.value = session.value?.username ?? username.value
-  editingAccount.value = true
 }
 function closeAccountForm(): void {
   newUsername.value = ''
   currentPassword.value = ''
   newPassword.value = ''
   confirmPassword.value = ''
-  editingAccount.value = false
 }
 async function saveAccount(): Promise<void> {
   if (busy.value) return
@@ -347,15 +358,22 @@ async function publish(): Promise<void> {
 </script>
 <style>
 page { background:#f3f4ed; color:#35452d; font-size:14px; }
-.desktop { padding-left:220px; box-sizing:border-box; min-height:100vh; display:flex; flex-direction:row; }
-.sidebar { position: fixed; top: 0; left: 0; height: 100vh; overflow-y: auto; z-index: 10; width:220px; flex-shrink:0; background:#304c37; color:#fff; padding:32px 22px; box-sizing:border-box; display:flex; flex-direction:column; gap:20px; }
-.sidebar .logout { margin-top: auto; width: 100%; background: #ffffff14; color: #fff; border: 1px solid #ffffff50; }
-.pet { width:110px; height:110px; }
-.brand,.title { font-size:25px; font-weight:700; }
-.main { padding:32px; flex:1; min-width:0; }
+.desktop { padding-left:210px; box-sizing:border-box; min-height:100vh; display:flex; flex-direction:row; }
+.sidebar { position:fixed; inset:0 auto 0 0; overflow-y:auto; z-index:10; width:210px; flex-shrink:0; background:#244132; color:#fff; padding:24px 14px; box-sizing:border-box; display:flex; flex-direction:column; gap:24px; }
+.brand-row { display:flex; flex-direction:row; align-items:center; gap:8px; padding:4px; }
+.pet { width:40px; height:40px; flex-shrink:0; }
+.brand { font-size:19px; font-weight:700; }
+.sidebar-nav,.sidebar-footer { display:flex; flex-direction:column; gap:6px; }
+.sidebar-footer { margin-top:auto; border-top:1px solid #ffffff30; padding-top:12px; }
+.sidebar-footer .hint { padding:0 10px 4px; }
+.sidebar button { background:transparent; color:#e2ede5; text-align:left; padding:3px 10px; border:none; border-radius:8px; }
+.sidebar button::after { border:none; }
+.sidebar button:hover,.sidebar button.active { color:#fff; background:#ffffff22; }
+.title { display:block; font-size:26px; font-weight:700; margin-bottom:18px; }
+.main { padding:28px clamp(16px,3vw,44px); flex:1; min-width:0; }
 .card { padding:24px; background:#fffef7; border-radius:20px; display:flex; flex-direction:column; gap:12px; }
 .login { max-width:440px; margin-top:24px; }
-.password-form { max-width:440px; margin-bottom:16px; }
+.account-form { max-width:510px; margin-bottom:16px; }
 .hint { font-size:12px; opacity:.75; line-height:1.7; }
 .message { display:block; padding:12px 0; color:#8b532b; }
 .toolbar { display:flex; flex-direction:row; gap:12px; margin:12px 0; flex-wrap:wrap; }
@@ -371,5 +389,11 @@ textarea { height:90px; }
 .node { display:flex; flex-direction:column; gap:10px; padding:18px; border:1px solid #e0e6d6; border-radius:12px; }
 .coords { display:flex; flex-direction:row; gap:12px; }.coords>view { flex:1; min-width:0; }
 .heading { font-weight:700; font-size:16px; }
-@media(max-width:1000px) { .desktop { padding-left:160px; }.sidebar { position: fixed; top: 0; left: 0; height: 100vh; overflow-y: auto; z-index: 10; width:160px; }.workspace { flex-direction:column; }.list { width:100%; }.main { padding:16px; } }
+@media(max-width:1000px) { .desktop { padding-left:170px; }.sidebar { width:170px; }.workspace { flex-direction:column; }.list { width:100%; box-sizing:border-box; } }
+@media(max-width:650px) {
+  .desktop { padding-left:0; flex-direction:column; }
+  .sidebar { position:static; width:100%; padding:12px; gap:8px; }
+  .sidebar-nav,.sidebar-footer { flex-direction:row; flex-wrap:wrap; align-items:center; }
+  .sidebar-footer { margin-top:0; padding-top:6px; }
+}
 </style>

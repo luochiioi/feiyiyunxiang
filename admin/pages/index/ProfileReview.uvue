@@ -1,16 +1,19 @@
 <template>
   <view class="profile-review">
-    <view class="actions">
-      <text class="heading">资料待审</text>
-      <button :disabled="busy" @click="load(false)">刷新队列</button>
+    <text v-if="message.length > 0" class="message" role="status">{{ message }}</text>
+    <view class="review-columns">
+    <view class="queue">
+      <view class="actions queue-heading">
+        <text class="heading">待审队列</text>
+        <button :disabled="busy" @click="load(false)">刷新队列</button>
+      </view>
+      <text v-if="!busy && items.length === 0 && message.length === 0" class="muted">当前没有待审资料。</text>
+      <button v-for="item in items" :key="item.revisionId" class="queue-item" :class="{ active: selectedId === item.revisionId }" :disabled="busy"
+        @click="select(item.revisionId)">
+        <text class="heading">{{ item.nickname }}</text><text class="muted">{{ new Date(item.createdAt).toLocaleString() }}</text>
+      </button>
+      <button v-if="next.length > 0" :disabled="busy" @click="load(true)">加载更多</button>
     </view>
-    <text v-if="message.length > 0" class="message">{{ message }}</text>
-    <text v-if="!busy && items.length === 0 && message.length === 0">当前没有待审资料。</text>
-    <view v-for="item in items" :key="item.revisionId" class="queue-item">
-      <text>{{ item.nickname }} · {{ new Date(item.createdAt).toLocaleString() }}</text>
-      <button :disabled="busy" @click="select(item.revisionId)">查看资料</button>
-    </view>
-    <button v-if="next.length > 0" :disabled="busy" @click="load(true)">加载更多</button>
 
     <view v-if="detail != null" class="inspector">
       <view class="comparison">
@@ -19,30 +22,39 @@
           <image class="thumb" :src="currentSrc || defaultAvatar" mode="aspectFit" @error="imageFailed(true)" />
           <button v-if="currentError" :disabled="busy" @click="loadAvatar(true)">重试当前头像</button>
           <text>{{ detail?.current.nickname }}</text>
-          <text>{{ detail?.current.bio }}</text>
-          <text>{{ detail?.current.displayCity }}</text>
-          <text>{{ detail?.current.interests.join(' · ') }}</text>
+          <text class="muted">{{ detail?.current.bio || '未填写简介' }}</text>
+          <text class="muted">{{ detail?.current.displayCity || '未填写城市标签' }}</text>
+          <text class="muted">{{ detail?.current.interests.join(' · ') || '未选择文化兴趣' }}</text>
         </view>
         <view class="version">
           <text class="heading">申请资料</text>
           <image class="thumb" :src="selectedSrc || defaultAvatar" mode="aspectFit" @error="imageFailed(false)" />
           <button v-if="selectedError" :disabled="busy" @click="loadAvatar(false)">重试申请头像</button>
           <text>{{ detail?.selected.nickname }}</text>
-          <text>{{ detail?.selected.bio }}</text>
-          <text>{{ detail?.selected.displayCity }}</text>
-          <text>{{ detail?.selected.interests.join(' · ') }}</text>
+          <text class="muted">{{ detail?.selected.bio || '未填写简介' }}</text>
+          <text class="muted">{{ detail?.selected.displayCity || '未填写城市标签' }}</text>
+          <text class="muted">{{ detail?.selected.interests.join(' · ') || '未选择文化兴趣' }}</text>
           <text v-if="detail?.selected.reason">{{ detail?.selected.reason }}</text>
         </view>
       </view>
       <text v-if="detail?.accountActive === false">账号停用中，恢复后可继续审核。</text>
-      <view v-if="canDecide" class="version">
-        <textarea v-model="reason" :disabled="busy || attempted != null" placeholder="驳回时填写原因（1–300 字）" />
-        <view class="actions" v-if="attempted == null">
-          <button :disabled="busy" @click="review('approve')">通过资料</button>
-          <button :disabled="busy" @click="review('reject')">驳回资料</button>
+      <view v-if="canDecide" class="decision">
+        <button v-if="attempted != null" :disabled="busy" @click="review(attempted ?? '')">重试确认审核结果</button>
+        <template v-else-if="rejecting">
+          <text class="heading">驳回原因</text>
+          <textarea v-model="reason" :disabled="busy" placeholder="填写 1–300 字，申请人将在消息中看到" />
+          <view class="actions decision-actions">
+            <button :disabled="busy" @click="cancelReject">取消</button>
+            <button class="danger" :disabled="busy" @click="review('reject')">确认驳回</button>
+          </view>
+        </template>
+        <view v-else class="actions decision-actions">
+          <button :disabled="busy" @click="rejecting = true">驳回…</button>
+          <button class="primary" :disabled="busy" @click="review('approve')">通过资料</button>
         </view>
-        <button v-else :disabled="busy" @click="review(attempted ?? '')">重试确认审核结果</button>
       </view>
+    </view>
+    <view v-else class="inspector placeholder"><text class="muted">{{ busy ? '正在读取…' : '选择一条申请，查看当前公开资料和修改内容。' }}</text></view>
     </view>
   </view>
 </template>
@@ -55,6 +67,7 @@ import type { ProfileReviewPage, ProfileReviewDetail, ProfileReviewItem } from '
 const defaultAvatar = '/static/aomiao-wave.png'
 const items = ref<ProfileReviewItem[]>([]), next = ref('')
 const detail = ref<ProfileReviewDetail | null>(null)
+const selectedId = ref(''), rejecting = ref(false)
 const message = ref(''), reason = ref('')
 const selectedSrc = ref(''), currentSrc = ref('')
 const selectedError = ref(false), currentError = ref(false)
@@ -87,9 +100,10 @@ async function select(id: string): Promise<void> {
   busy.value = true
   generation++
   detail.value = null
+  selectedId.value = id
   currentSrc.value = ''; selectedSrc.value = ''
   currentError.value = false; selectedError.value = false
-  attempted.value = null; decided.value = false; reason.value = ''; message.value = ''
+  attempted.value = null; decided.value = false; cancelReject(); message.value = ''
   try {
     detail.value = await api<ProfileReviewDetail>('profileReviewDetail', { revisionId: id })
     currentSrc.value = detail.value?.current.avatar ?? ''
@@ -99,6 +113,8 @@ async function select(id: string): Promise<void> {
   } catch (_) { message.value = '未能读取资料详情，请重试。' }
   finally { busy.value = false }
 }
+
+function cancelReject(): void { rejecting.value = false; reason.value = '' }
 
 function imageFailed(current: boolean): void {
   if (current && currentSrc.value.length > 0) { currentSrc.value = ''; currentError.value = true }
@@ -156,13 +172,27 @@ async function review(decision: string): Promise<void> {
 </script>
 
 <style scoped>
-.profile-review, .inspector, .version { display: flex; flex-direction: column; gap: 12px; }
-.actions, .queue-item, .comparison { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
-.queue-item, .version { padding: 14px; background: #fff; border-radius: 10px; }
-.comparison { align-items: stretch; }
-.comparison .version { flex: 1; min-width: 170px; overflow-wrap: anywhere; }
-.heading { font-weight: 700; }
+.profile-review, .inspector, .version, .queue, .decision { display: flex; flex-direction: column; gap: 12px; }
+.review-columns { display: grid; grid-template-columns: minmax(190px, 255px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.queue,.inspector { padding: 16px; min-width:0; background:#fff; border:1px solid #e1e8df; border-radius: 14px; }
+.queue-heading { justify-content: space-between; }
+.queue-heading button { padding: 0 8px; font-size: 12px; }
+.queue-item { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:3px; padding:10px 12px; background: #f4f7f3; border-radius:8px; line-height:1.45; word-break:break-word; }
+.queue-item.active { background:#e1ede2; box-shadow: inset 3px 0 #426240; }
+.queue-item::after { border:none; }
+.comparison { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:12px; }
+.version { padding: 14px; border-radius: 10px; background:#f6f7f3; overflow-wrap: anywhere; }
+.heading { color:#244132; font-weight:700; }
+.muted { color:#516256; font-size:13px; }
 .thumb { width: 64px; height: 64px; border-radius: 32px; background: #f7eedc; }
 .message { color: #74512a; }
+.decision { padding-top:12px; border-top:1px solid #e1e8df; }
+.decision-actions { justify-content:flex-end; }
+.decision .primary { color:#fff; background:#426240; border-color:#426240; }
+.danger { color:#fff; background:#a2383d; }
+.placeholder { min-height: 140px; justify-content:center; }
 textarea { border: 1px solid #d5d5d5; padding: 8px; min-height: 65px; }
+@media (max-width: 840px) { .review-columns { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 440px) { .comparison { grid-template-columns: minmax(0,1fr); } }
 </style>

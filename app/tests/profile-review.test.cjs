@@ -1,6 +1,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { fixture, alice, bob, input } = require('./helpers/profile-fixture.cjs')
+const { createProfileService } = require('../uniCloud-alipay/cloudfunctions/fy-api/profile-service')
+const { createCommunityMedia } = require('../uniCloud-alipay/cloudfunctions/fy-api/community-media')
 const admin = { uid: 'admin', admin: true }, reviewer = { uid: 'reviewer', reviewer: true }
 
 test('profile review authorization, stale candidates, suspension and restoration', async () => {
@@ -57,4 +59,37 @@ test('revision-owned photos survive staging expiry and can seed a new draft only
   await service.profileReview(reviewer, { ...draft, decision: 'approve' })
   assert.equal((await service.getMyProfile(alice)).avatarVersion, draft.revisionId)
   assert.match((await service.profileRevision(alice, { ...draft, avatar: true })).src, /^data:image\/png/)
+})
+
+test('a staged PNG uses encrypted storage and remains private until approval', async () => {
+  const { repo } = await fixture()
+  const files = new Map()
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aiekAAAAASUVORK5CYII='
+  const media = createCommunityMedia({
+    namespace: 'profile-avatar',
+    cfg: { privateStorageVerified: true, mediaEncryptionKey: Buffer.alloc(32, 41).toString('base64') },
+    limited: async () => {},
+    cloud: {
+      async uploadFile({ cloudPath, fileContent }) {
+        assert.match(cloudPath, /^fy-private\/profile-avatar\//)
+        files.set(cloudPath, fileContent)
+        return { fileID: cloudPath }
+      },
+      async downloadFile({ fileID }) { return { fileContent: files.get(fileID) } }
+    }
+  })
+  const service = createProfileService({ repo, media })
+  const file = await service.profileStageAvatar(alice, { requestId: 'selected-photo', base64: png })
+  assert.doesNotMatch(JSON.stringify(file), /fy-private/)
+  assert.equal(files.size, 1)
+  assert.ok(![...files.values()][0].includes(Buffer.from(png, 'base64')))
+  const pending = await service.profileSubmit(alice, { ...input, avatarUploadId: file.uploadId })
+  const publicPhoto = { code: 'ALICE234', avatarVersion: pending.revisionId }
+  assert.equal((await service.getMyProfile(alice)).pending.nickname, input.nickname)
+  await assert.rejects(service.profileRevision(bob, { ...pending, avatar: true }), /NOT_FOUND/)
+  await assert.rejects(service.profileAvatar(null, publicPhoto), /NOT_FOUND/)
+  assert.match((await service.profileRevision(alice, { ...pending, avatar: true })).src, /^data:image\/png/)
+  await service.profileReview(reviewer, { ...pending, decision: 'approve' })
+  assert.equal((await service.getMyProfile(alice)).pending, null)
+  assert.match((await service.profileAvatar(null, publicPhoto)).src, /^data:image\/png/)
 })

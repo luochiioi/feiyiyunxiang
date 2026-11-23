@@ -20,12 +20,13 @@ async (page) => {
     const post = { id: 'post', revisionId: 'post-version', latestRevision: 'post-version', title: '测试帖子', body: '帖子详情正文', author: name, authorCode: code,
       authorAvatarVersion: avatarVersion, owner: false, publicView: true, status: 'approved', hasImage: false, imageCount: 0, commentCount: 1, likeCount: 0 }
     const rank = { ...approved, mine: true, rank: 1, count: 3, steps: 7234 }
-    function testAvatar(background, accent) {
+    function testAvatar(background, accent, width = 96) {
       const canvas = document.createElement('canvas')
-      canvas.width = canvas.height = 96
+      canvas.width = width
+      canvas.height = 96
       const context = canvas.getContext('2d')
       context.fillStyle = background
-      context.fillRect(0, 0, 96, 96)
+      context.fillRect(0, 0, width, 96)
       context.fillStyle = accent
       context.beginPath()
       context.moveTo(2, 96)
@@ -41,14 +42,15 @@ async (page) => {
     const nativeInputClick = HTMLInputElement.prototype.click
     HTMLInputElement.prototype.click = function () {
       if (this.type !== 'file') return nativeInputClick.call(this)
-      const fixtureFile = Uint8Array.from(atob(proposedPng.split(',')[1]), char => char.charCodeAt(0))
+      const landscape = testAvatar('#745176', '#fbd5a4', 144)
+      const fixtureFile = Uint8Array.from(atob(landscape.split(',')[1]), char => char.charCodeAt(0))
       const transfer = new DataTransfer()
       transfer.items.add(new File([fixtureFile], 'test-avatar.png', { type: 'image/png' }))
       this.files = transfer.files
       queueMicrotask(() => this.dispatchEvent(new Event('change', { bubbles: true })))
     }
     const candidate = { ...rejected, revisionId: 'admin-case', nickname: '申请审核昵称', status: 'pending', hasAvatar: true, reason: '', createdAt: Date.now() }
-    window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [],
+    window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [], avatarContents: [],
       adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0 }
     window.__mockCloud = async ({ data }) => {
       const { action, token, payload = {} } = data, fixture = window.__profileFixture
@@ -56,9 +58,10 @@ async (page) => {
       const fail = result => ({ result: { code: result, data: null } })
       switch (action) {
         case 'catalog': return ok([])
-        case 'adminLogin': return ok({ uid: 'local-reviewer', username: '模拟审核员', token: 'local-admin', expiresAt: Date.now() + 3600000, admin: false })
+        case 'adminLogin': return ok({ uid: 'local-reviewer', username: '模拟审核员', token: 'local-admin', expiresAt: Date.now() + 3600000, admin: true })
         case 'communityOverview': return ok({ pendingPosts: 0, pendingComments: 0, openReports: 0, publishedPosts: 0 })
         case 'communityReviewList': return ok({ items: [], next: '' })
+        case 'drafts': return ok([])
         case 'profileReviewList':
           if (fixture.failQueue) { fixture.failQueue = false; throw Error('QUEUE_READ_FAILED') }
           return ok({ items: fixture.adminDecision ? [] : [candidate], next: '' })
@@ -78,7 +81,11 @@ async (page) => {
           return ok({ src: png })
         case 'profileStageAvatar':
           if (typeof payload.base64 !== 'string' || !payload.base64.startsWith('iVBOR')) return fail('INVALID_IMAGE')
+          const header = Uint8Array.from(atob(payload.base64.slice(0, 32)), char => char.charCodeAt(0))
+          const dimensions = new DataView(header.buffer)
+          if (dimensions.getUint32(16) !== 256 || dimensions.getUint32(20) !== 256) return fail('INVALID_IMAGE')
           fixture.uploads.push(payload.requestId)
+          fixture.avatarContents.push(payload.base64)
           if (fixture.uploads.length === 1) return fail('SERVICE_UNAVAILABLE')
           return ok({ uploadId: 'fixture-avatar' })
         case 'profileSubmit':
@@ -148,20 +155,29 @@ async (page) => {
   await visible('提交新资料').waitFor()
   await page.locator('input').first().fill('申请测试昵称')
   await visible('选择头像').click()
+  await visible('左右移动').waitFor()
+  await screenshot('avatar-crop')
+  await visible('使用此裁剪').click()
+  await visible('裁剪头像').waitFor({ state: 'hidden' })
   await visible('提交审核').click()
   await visible('头像上传未收到确认，草稿已保留。可重试，或使用默认澳喵后提交。').waitFor()
   await visible('提交审核').click()
   await visible('提交审核未收到确认，草稿已保留。可重试同一次提交。').waitFor()
   await visible('提交审核').click()
   await visible('资料已提交审核。').waitFor()
-  await visible('审核期间继续展示当前公开资料。').waitFor()
+  await visible('新资料仅自己可见，审核通过后会公开。').waitFor()
   const name = await page.evaluate(() => window.__profileFixture.name)
   await visible(name).waitFor()
-  const { writes, uploads } = await page.evaluate(() => window.__profileFixture)
+  const { writes, uploads, avatarContents } = await page.evaluate(() => window.__profileFixture)
   if (uploads.length !== 2 || uploads[0] !== uploads[1]) throw Error('Avatar retry changed its staging request')
+  if (avatarContents[0] !== avatarContents[1]) throw Error('Avatar retry changed the crop')
   if (writes.length !== 2 || writes[0] !== writes[1]) throw Error('Uncertain write was not replayed')
   await screenshot('pending')
   await back()
+  await visible('申请测试昵称').waitFor()
+  await visible('待审核 · 仅自己可见').waitFor()
+  await page.locator('.pending-avatar img[src^="data:image/"]').waitFor()
+  await screenshot('owner-preview')
   await page.locator('.review-dot[aria-label="有未读消息"]').waitFor()
   await visible('消息').click()
   await visible('资料审核未通过').click()
@@ -200,6 +216,7 @@ async (page) => {
   await go('/packages/community/community/community')
   await visible('测试帖子').click()
   await visible('测试评论').waitFor()
+  if (await visible('申请测试昵称').count()) throw Error('Pending nickname appeared on public content')
   await approvedAvatar(page.locator('.post-card')).waitFor()
   await page.getByText(name, { exact: true }).last().waitFor()
   await back()
@@ -213,21 +230,37 @@ async (page) => {
   await page.getByRole('textbox').nth(0).fill('local-reviewer')
   await page.getByRole('textbox').nth(1).fill('fixture-password')
   await visible('登录工作台').click()
+  await visible('账号设置').click()
+  await visible('修改管理员登录信息').waitFor()
+  await visible('路线与博物馆').click()
+  await visible('新建开发测试路线').waitFor()
+  if (await visible('修改管理员登录信息').count()) throw Error('Account settings remain mixed with routes')
   await visible('社区审核与治理').click()
+  await visible('举报').click()
+  await page.locator('.tabs').getByText('已处理', { exact: true }).waitFor()
+  if (await page.locator('.tabs').getByText('待审帖子', { exact: true }).count()) throw Error('Unrelated review tabs are visible')
   await visible('资料待审').click()
-  await visible('查看资料').click()
+  await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).click()
   await visible('当前公开资料').waitFor()
   await visible('重试申请头像').click()
   await visible('重试申请头像').waitFor({ state: 'hidden' })
   await page.waitForFunction(() => document.querySelectorAll('.comparison img[src^="data:image/"]').length === 2)
   await screenshot('admin-review')
+  await page.setViewportSize({ width: 768, height: 900 })
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw Error('Admin review overflows at tablet width')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  if (await page.locator('textarea').count()) throw Error('Rejection reason shows before the reviewer chooses to reject')
+  await visible('驳回…').click()
+  await visible('取消').click()
+  if (await page.locator('textarea').count()) throw Error('Cancelled rejection kept the reason field')
+  await visible('驳回…').click()
   await page.locator('textarea').fill('请修改简介')
-  await visible('驳回资料').click()
+  await visible('确认驳回').click()
   await visible('资料已驳回。 队列刷新失败，可单独刷新。').waitFor()
   await visible('刷新队列').click()
   await visible('当前没有待审资料。').waitFor()
   if (await page.evaluate(() => window.__profileFixture.adminWrites) !== 1) throw Error('Queue refresh repeated a review')
   await visible('退出登录').waitFor()
   if (uncaught.length > 0) throw Error(uncaught.join('; '))
-  return 'Verified avatar selection and retry, same-request submission, distinct My routes, 375/390/430 layout, and Admin review'
+  return 'Verified 256px crop, exact avatar retry, owner-only preview, steps navigation, mobile layouts, and grouped Admin review'
 }

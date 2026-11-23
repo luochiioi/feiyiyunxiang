@@ -13,14 +13,24 @@ export type ProfileReceipt = { revisionId: string, status: string }
 export const profileEditPath = '/packages/profile/profile-edit/profile-edit'
 export const profileInterests = ['湘绣', '瓷器', '传统建筑', '非遗美食', '博物馆', '摄影']
 const loaded = ref<MyProfile | null>(null)
+const confirmedPending = ref<ProfileRevision | null>(null)
 const owner = ref('')
 let sequence = 0, accountEpoch = 0
 let uncertain = '', uncertainPayload = ''
 export const myProfile = computed(() => owner.value === session.value?.uid ? loaded.value : null)
+export const myPendingProfile = computed(() => owner.value === session.value?.uid
+  ? confirmedPending.value ?? loaded.value?.pending ?? null : null)
+
+export function rememberPendingProfile(uid: string, revision: ProfileRevision): void {
+  if (owner.value !== uid || session.value?.uid !== uid) return
+  sequence++
+  confirmedPending.value = revision
+}
 
 export function forgetMyProfile(): void {
   owner.value = ''
   loaded.value = null
+  confirmedPending.value = null
   uncertain = ''; uncertainPayload = ''
   sequence++; accountEpoch++
 }
@@ -52,7 +62,10 @@ export async function refreshMyProfile(): Promise<void> {
   if (uid == null) return
   const ticket = ++sequence, epoch = accountEpoch
   const value = await profileRequest<MyProfile>(uid, 'getMyProfile')
-  if (ticket === sequence && epoch === accountEpoch && uid === session.value?.uid) loaded.value = value
+  if (ticket === sequence && epoch === accountEpoch && uid === session.value?.uid) {
+    loaded.value = value
+    confirmedPending.value = null
+  }
 }
 
 export async function submitMyProfile(input: UTSJSONObject): Promise<ProfileReceipt> {
