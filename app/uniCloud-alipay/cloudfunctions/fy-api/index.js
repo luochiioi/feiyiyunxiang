@@ -1,5 +1,8 @@
 const crypto=require('node:crypto')
 const {createNotificationService}=require('./notification-service')
+const {createProfileService}=require('./profile-service')
+const profileReviewActions = ['profileReviewList', 'profileReviewDetail', 'profileReviewAvatar', 'profileReview']
+const profileActions = new Set(['getMyProfile', 'profileStageAvatar', 'profileSubmit', 'profileRevision', 'profileAvatar', ...profileReviewActions])
 const notificationActions = new Set(['notificationsList','notificationsSummary','notificationDetail','notificationRead'])
 const {createService,key}=require('./service')
 const { createStepService } = require('./step-service')
@@ -16,7 +19,7 @@ const { createAdminSession, authenticateAdmin, revokeAdminSession, updateAdminCr
 const reviewActions = new Set(['communityReviewList', 'communityReviewDetail', 'communityReviewImage', 'communityReviewPost',
   'communityReviewComment', 'communityResolveReport', 'communityMute', 'communityPolicy', 'communitySavePolicy', 'communitySeedPolicy'])
 const operationsActions = new Set(['communityOverview', 'communityUsers', 'communityUserDetail', 'communityAccountStatus'])
-const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions])
+const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions, ...profileReviewActions])
 const guestActions = new Set(['communityFeed', 'communityPost', 'communityImage', 'communityShare', 'communityComments'])
 const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment',
   'communityReport', 'communityRanking', 'communityRemoveOwn', 'communityReviewNotices', 'communityReadReview'])
@@ -29,6 +32,7 @@ const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts'
   'invitePk', 'respondPk', 'readyPk', 'myPk', 'settlePk', 'forfeitPk', 'pkEggs', 'chooseEgg', 'cancelPk', 'assignment', 'assignmentQuiz', 'answerAssignment', 'completeAssignment', 'rejectAssignment'])
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','CLUE_LOCKED','CLUE_INCORRECT','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
 known.add('APPEARANCE_LOCKED')
+known.add('PROFILE_STORAGE_UNAVAILABLE')
 for (const code of ['WERUN_SESSION_FAILED', 'WERUN_ACCOUNT_MISMATCH', 'WERUN_DAY_CHANGED', 'WECHAT_LOGIN_CONFIG']) known.add(code)
 exports.main=async(event,context)=>{
   try {
@@ -45,7 +49,7 @@ exports.main=async(event,context)=>{
     let user=null
     if (adminActions.has(action)) {
       user = await authenticateAdmin(repo, event.token)
-    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action) && !(guestActions.has(action) && !event.token)) {
+    } else if (!['catalog', 'wxLogin', 'adminLogin'].includes(action) && !((guestActions.has(action) || action === 'profileAvatar') && !event.token)) {
       if (typeof event.token === 'string' && event.token.startsWith('fy_admin_')) {
         throw new Error('AUTH_REQUIRED')
       }
@@ -114,6 +118,9 @@ exports.main=async(event,context)=>{
       data = await createStepService({ repo, verify: payload => verifyWechatRun(payload, {
         http: uniCloud.httpclient, appId: cfg.wechatAppId, secret: cfg.wechatSecret
       }) })[action](user, p)
+    } else if (profileActions.has(action)) {
+      const media = createCommunityMedia({ cloud: uniCloud, cfg, service, limited, namespace: 'profile-avatar' })
+      data = await createProfileService({ repo, media })[action](user, p)
     } else if (notificationActions.has(action)) {
       data = await createNotificationService({repo})[action](user,p)
     } else if (operationsActions.has(action)) {

@@ -1,0 +1,29 @@
+{
+  "bsonType": "object",
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false
+  },
+  "properties": {
+    "_id": {
+      "bsonType": "string"
+    },
+    "uid": {
+      "bsonType": "string"
+    },
+    "requestId": {
+      "bsonType": "string"
+    },
+    "digest": {
+      "bsonType": "string"
+    },
+    "media": {
+      "bsonType": "object"
+    },
+    "expiresAt": {
+      "bsonType": "long"
+    }
+  }
+}

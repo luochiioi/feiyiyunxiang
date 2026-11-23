@@ -1,15 +1,12 @@
 <template>
   <view class="governance">
-    <view class="tools">
-      <button :class="{ active: group === 'pending' }" :disabled="busy" @click="switchTo('pending')">待审帖子</button>
-      <button :class="{ active: group === 'published' }" :disabled="busy" @click="switchTo('published')">已发布帖子</button>
-      <button :class="{ active: group === 'comments' }" :disabled="busy" @click="switchTo('comments')">待审评论</button>
-      <button :class="{ active: group === 'publicComments' }" :disabled="busy" @click="switchTo('publicComments')">公开评论</button>
-      <button :class="{ active: group === 'reports' }" :disabled="busy" @click="switchTo('reports')">待处理举报</button>
-      <button :class="{ active: group === 'resolvedReports' }" :disabled="busy" @click="switchTo('resolvedReports')">已处理举报</button>
-      <button :class="{ active: group === 'mutes' }" :disabled="busy" @click="switchTo('mutes')">禁言记录</button>
-      <button :class="{ active: group === 'policy' }" :disabled="busy" @click="switchTo('policy')">词库与限流</button>
-      <button :class="{ active: group === 'audit' }" :disabled="busy" @click="switchTo('audit')">审计记录</button>
+    <view class="tools categories">
+      <button :class="{ active: category === 'content' }" :disabled="busy" @click="selectCategory('content', 'pending')">帖子与评论<view v-if="hasPending('pending') || hasPending('comments')" class="review-dot" aria-label="有待审内容" /></button>
+      <button :class="{ active: category === 'reports' }" :disabled="busy" @click="selectCategory('reports', 'reports')">举报<view v-if="hasPending('reports')" class="review-dot" aria-label="有待处理举报" /></button>
+      <button :class="{ active: category === 'records' }" :disabled="busy" @click="selectCategory('records', 'policy')">规则与记录</button>
+    </view>
+    <view class="tools tabs">
+      <button v-for="tab in currentTabs" :key="tab.id" :class="{ selected: group === tab.id }" :disabled="busy" @click="switchTo(tab.id)">{{ tab.label }}<view v-if="hasPending(tab.id)" class="review-dot" aria-label="有待处理事项" /></button>
     </view>
     <view v-if="targetUid.length > 0" class="tools"><text class="muted">当前筛选用户 {{ targetLabel }}</text><button :disabled="busy" @click="clearUser">清除筛选</button></view>
     <view class="tools"><text class="heading">{{ groupName() }}</text><button :disabled="busy" @click="reload">{{ group === 'policy' ? '重新读取规则' : '刷新队列' }}</button></view>
@@ -26,11 +23,11 @@
       <text class="muted">词库用于评论。拒绝词条阻止发送，待审词条转人工审核。帖子仍逐篇审核。</text>
       <view v-for="(rule, i) in rules" :key="i" class="tools">
         <input v-model="rule.word" placeholder="词条" :maxlength="80" :disabled="busy || !policy?.canEdit" />
-        <text>{{ ruleName(rule.action) }}</text>
-        <template v-if="policy?.canEdit">
-          <button :disabled="busy" @click="rule.action = 'reject'">拒绝</button><button :disabled="busy" @click="rule.action = 'pending'">待审</button>
-          <button :disabled="busy" @click="rule.action = 'allow'">允许</button><button :disabled="busy" @click="removeRule(i)">删除词条</button>
-        </template>
+        <picker v-if="policy?.canEdit" mode="selector" :range="ruleLabels" :value="policyIndex(rule.action)" :disabled="busy" @change="setRuleAction(i, Number($event.detail.value))">
+          <view class="rule-mode">{{ ruleName(rule.action) }} ▾</view>
+        </picker>
+        <text v-else>{{ ruleName(rule.action) }}</text>
+        <button v-if="policy?.canEdit" :disabled="busy" @click="removeRule(i)">删除词条</button>
       </view>
       <view v-if="policy?.canEdit" class="tools">
         <button :disabled="busy" @click="seedPolicy">保存并补充基础屏蔽词</button><button :disabled="busy" @click="addRule">新增词条</button><button :disabled="busy" @click="savePolicy">保存规则</button>
@@ -109,7 +106,7 @@
               <button v-if="detail?.reportStatus === 'open'" :disabled="busy" @click="resolveReport">结束举报处理</button>
             </view>
             <view v-if="target().length > 0" class="tools">
-              <input v-model="minutes" type="number" placeholder="禁言分钟数" />
+              <view class="duration"><text class="muted">禁言时长（分钟）</text><input v-model="minutes" type="number" :disabled="busy" /></view>
               <button :disabled="busy" @click="mute(false)">{{ group === 'mutes' ? '更新禁言时长' : comment != null ? '禁言评论作者' : '禁言帖子作者' }}</button>
               <button :disabled="busy" @click="mute(true)">解除禁言</button>
             </view>
@@ -124,6 +121,7 @@
 import { computed, ref } from 'vue'
 import ReviewGallery from './ReviewGallery.uvue'
 import { api } from '@/features/api.uts'
+import { moderationOverview, refreshModerationOverview } from '@/features/moderation-overview.uts'
 type Row = { id: string, title?: string, author?: string, body?: string, status?: string, postId?: string, revisionId?: string, commentId?: string, targetUid?: string, reason?: string, resolution?: string, createdAt?: number, imageCount?: number, hasImage?: boolean, at?: number, until?: number, actor?: string, action?: string, target?: string }
 type Revision = { id: string, title: string, body: string, status: string, hasImage: boolean, imageCount?: number, reason: string }
 type Detail = { postId: string, status: string, author: string, targetUid: string, latestRevision: string, reportedRevisionId: string, reportStatus: string, selected: Revision, current: Revision | null, reportedComment: Row | null }
@@ -132,6 +130,25 @@ type Policy = { revision: number, canEdit: boolean, minSeconds: number, maxPerWi
 type Page = { items: Row[], next: string }
 const props = defineProps<{ initialGroup: string, targetUid: string, targetLabel: string }>()
 const group = ref(props.initialGroup), targetUid = ref(props.targetUid), targetLabel = ref(props.targetLabel)
+const contentTabs = [{ id: 'pending', label: '待审帖子' }, { id: 'published', label: '已发布帖子' },
+  { id: 'comments', label: '待审评论' }, { id: 'publicComments', label: '公开评论' }]
+const reportTabs = [{ id: 'reports', label: '待处理' }, { id: 'resolvedReports', label: '已处理' }]
+const recordTabs = [{ id: 'policy', label: '词库与限流' }, { id: 'mutes', label: '禁言记录' }, { id: 'audit', label: '审计记录' }]
+const category = computed(() => {
+  const value = group.value
+  if (reportTabs.some(tab => tab.id === value)) return 'reports'
+  return recordTabs.some(tab => tab.id === value) ? 'records' : 'content'
+})
+const currentTabs = computed(() => category.value === 'reports' ? reportTabs : category.value === 'records' ? recordTabs : contentTabs)
+const ruleLabels = ['待审', '拒绝', '允许']
+const ruleActions = ['pending', 'reject', 'allow']
+function hasPending(groupId: string): boolean {
+  const value = moderationOverview.value
+  if (value == null || targetUid.value.length > 0) return false
+  if (groupId === 'pending') return value.pendingPosts > 0
+  if (groupId === 'comments') return value.pendingComments > 0
+  return groupId === 'reports' && value.openReports > 0
+}
 const busy = ref(false), message = ref(''), receipt = ref(''), rows = ref<Row[]>([]), next = ref('')
 const selected = ref<Row | null>(null), detail = ref<Detail | null>(null), comment = ref<Row | null>(null)
 const currentVersion = computed(() => detail.value?.current ?? null)
@@ -180,6 +197,12 @@ function objectLabel(row: Row): string {
   return group.value === 'comments' || group.value === 'publicComments' ? '评论' : '帖子'
 }
 function ruleName(value: string): string { return value === 'reject' ? '拒绝' : value === 'pending' ? '待审' : '允许' }
+function policyIndex(value: string): number { return Math.max(0, ruleActions.indexOf(value)) }
+function setRuleAction(index: number, action: number): void {
+  if (!busy.value && policy.value?.canEdit && rules.value[index] != null && ruleActions[action] != null) {
+    rules.value[index].action = ruleActions[action]
+  }
+}
 function target(): string { return comment.value?.targetUid ?? detail.value?.targetUid ?? selected.value?.targetUid ?? '' }
 function clearDetail(): void {
   selected.value = null; detail.value = null; comment.value = null; reason.value = ''; minutes.value = '60'
@@ -226,10 +249,15 @@ function clearUser(): void {
   targetUid.value = ''; targetLabel.value = ''; resetQueue(); reload()
 }
 function more(): void { task(async () => { await load(true) }) }
+function selectCategory(value: string, defaultGroup: string): void {
+  if (category.value !== value) switchTo(defaultGroup)
+}
 function switchTo(value: string): void {
   if (busy.value) return
   if (group.value === value) return
-  group.value = value; resetQueue(); reload()
+  group.value = value
+  resetQueue()
+  reload()
 }
 function resetQueue(): void {
   rows.value = []; next.value = ''; policy.value = null; receipt.value = ''; queueState.value = 'loading'
@@ -282,6 +310,7 @@ function reviewComment(decision: string): void {
   })
 }
 async function afterDecision(): Promise<void> {
+  refreshModerationOverview(true)
   const row = selected.value
   await refreshAfterChange('已记录处理结果。', async () => {
     if (group.value === 'reports' && row != null) {
@@ -308,6 +337,7 @@ function resolveReport(): void {
     const version = item.reportedRevisionId || '旧举报未记录版本'
     if (!await confirm('结束举报处理', subject + '\n版本：' + version + '\n这一步只记录处理结果。', true)) return
     await api<UTSJSONObject>('communityResolveReport', { reportId: selected.value?.id ?? '', reason: reason.value })
+    refreshModerationOverview(true)
     clearDetail()
     await refreshAfterChange('举报已处理。', () => load(false))
   })
@@ -352,10 +382,19 @@ function savePolicy(): void {
 .tools { flex-wrap: wrap; align-items: center; }
 .tools button { margin: 0; }
 .tools button.active { background: #304c37; color: white; }
+.categories { padding: 10px; background: #fff; border-radius: 12px; }
+.categories button,.tabs button { border: 0; }
+.categories button::after,.tabs button::after { border: 0; }
+.tabs { padding: 0 0 8px; border-bottom: 1px solid #d9e2d7; }
+.tabs button { background: transparent; color: #43554a; }
+.tabs button.selected { background: #dae8dd; color: #244132; font-weight: 700; }
+.rule-mode { padding: 8px 12px; border: 1px solid #cad6cb; border-radius: 8px; cursor: pointer; }
+.review-dot { display:inline-block; width:8px; height:8px; margin-left:8px; vertical-align:middle; border-radius:50%; background:#ce353c; }
+.duration { display:flex; flex-direction:column; gap:4px; width:145px; }
 .workspace { flex-wrap: wrap; }
 .panel { background: #fff; border-radius: 12px; padding: 16px; }
-.results { width: 260px; }
-.inspector { flex: 1; min-width: 420px; }
+.results { width: 260px; max-width: 100%; box-sizing: border-box; }
+.inspector { flex: 1; min-width: min(420px, 100%); box-sizing: border-box; }
 .version { flex: 1; min-width: 240px; background: #faf7ef; border-radius: 10px; padding: 12px; }
 .versions { flex-wrap: wrap; }
 .result { border-bottom: 1px solid #ede8dc; padding-bottom: 12px; }

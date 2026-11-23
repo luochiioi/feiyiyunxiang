@@ -15,7 +15,7 @@
         </view>
         <view class="card">
           <text class="heading">旅伴</text>
-          <text class="body">{{ partnerText }}</text>
+          <view class="row"><ProfileAvatar :code="team.partner?.code ?? ''" :version="team.partner?.avatarVersion ?? ''" :legacy="team.partner?.avatar ?? ''" /><text class="body">{{ partnerText }}</text></view>
           <text class="muted">对外成果只展示席位标签，不展示对方昵称。</text>
         </view>
         <view class="card">
@@ -56,6 +56,7 @@
 
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PartnerInviteForm from '../components/PartnerInviteForm.uvue'
 import { computed, ref } from 'vue'
 import { openCoopStory, openRouteDetail } from '@/features/navigation.uts'

@@ -23,7 +23,7 @@ import { ref, watch } from 'vue'
 import { session, login } from '@/features/api.uts'
 import { listNotifications, refreshNotificationsSummary, NotificationItem } from '@/features/notifications.uts'
 import { openPage } from '@/features/navigation.uts'
-import { communityPath } from '@/features/community/community.uts'
+import { myPostsPath } from '@/features/community/community.uts'
 const items = ref<NotificationItem[]>([]), cursor = ref(''), error = ref('')
 const loading = ref(false), loaded = ref(false)
 let sequence = 0
@@ -48,7 +48,7 @@ async function loadMessages(restart: boolean): Promise<void> {
 }
 async function retryLoad(): Promise<void> { await loadMessages(retryRestart.value) }
 async function signIn(): Promise<void> { try { await login(); await loadMessages(true); await refreshNotificationsSummary() } catch (_) { uni.showToast({ title: '登录未完成，请重试', icon: 'none' }) } }
-function openMine(): void { openPage(communityPath + '?tab=mine') }
+function openMine(): void { openPage(myPostsPath) }
 function openMessage(id: string): void { openPage('/packages/profile/message-detail/message-detail?id=' + encodeURIComponent(id)) }
 function formatTime(at: number): string { return new Date(at).toLocaleString() }
 </script>

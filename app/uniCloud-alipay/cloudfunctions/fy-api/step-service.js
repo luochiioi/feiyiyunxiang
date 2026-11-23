@@ -77,14 +77,12 @@ function createStepService({ repo, verify, now = Date.now }) {
           after = friends.at(-1)._id
         }
       }
+      const profiles = await publicProfiles(repo, ids)
       const candidates = await Promise.all([...ids].map(async uid => {
         if (uid !== user.uid && (await repo.get('uni-id-users', uid))?.status !== 0) return null
-        const [row, profiles] = await Promise.all([
-          repo.get('fy-daily-steps', dailyId(uid, date)), repo.list('fy-profiles', { uid })
-        ])
-        const profile = profiles[0]
+        const row = await repo.get('fy-daily-steps', dailyId(uid, date))
         return {
-          code: profile?.code ?? '', nickname: profile?.nickname ?? '探索者', mine: uid === user.uid,
+          ...profiles.get(uid), mine: uid === user.uid,
           steps: row?.steps ?? null, syncedAt: row?.syncedAt ?? null
         }
       }))
@@ -101,3 +99,4 @@ function createStepService({ repo, verify, now = Date.now }) {
   }
 }
 module.exports = { createStepService }
+const { publicProfiles } = require('./profile-presenter')

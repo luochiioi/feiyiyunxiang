@@ -12,7 +12,8 @@ function setup() {
     async get(c, id) { return structuredClone(rows.get(c + id) ?? null) },
     async put(c, id, row) { rows.set(c + id, structuredClone({ ...row, _id: id })) },
     async list(c, q) {
-      return [...rows].filter(([id, row]) => id.startsWith(c) && Object.entries(q).every(([k, v]) => row[k] === v))
+      return [...rows].filter(([id, row]) => id.startsWith(c) && Object.entries(q).every(([k, v]) =>
+        Array.isArray(v) ? v.includes(row[k]) : row[k] === v))
         .map(([, row]) => structuredClone(row))
     },
     async page(c, q, { field, after, size }) {

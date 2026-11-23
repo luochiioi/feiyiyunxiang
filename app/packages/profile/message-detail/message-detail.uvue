@@ -7,9 +7,9 @@
       <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="loadDetail">重试读取消息</button></view>
       <view v-if="detail != null" class="card">
         <text class="heading">{{ detail?.title ?? '' }}</text><text class="muted">{{ formatTime(detail?.createdAt ?? 0) }}</text>
-        <view v-if="detail?.friend != null" class="reason"><text class="title">{{ detail?.friend?.nickname ?? '旅伴' }}</text><text class="body">{{ friendStatusText(detail?.friend?.status ?? 'unavailable') }}</text></view>
+        <view v-if="detail?.friend != null" class="reason"><view class="row"><ProfileAvatar :code="detail?.friend?.code ?? ''" :version="detail?.friend?.avatarVersion ?? ''" /><text class="title">{{ detail?.friend?.nickname ?? '旅伴' }}</text></view><text class="body">{{ friendStatusText(detail?.friend?.status ?? 'unavailable') }}</text></view>
         <view v-if="(detail?.reason ?? '').length > 0" class="reason"><text class="title">审核员处理原因</text><text class="body">{{ detail?.reason ?? '' }}</text></view>
-        <text v-if="detail?.target == null && detail?.friend == null" class="muted">对应内容已删除或当前不可访问，审核结果仍保留在此。</text>
+        <text v-if="detail?.target == null && detail?.friend == null && detail?.profileTarget == null" class="muted">对应内容已删除或当前不可访问，审核结果仍保留在此。</text>
       </view>
       <view v-if="readError.length > 0" class="card"><text class="body">{{ readError }}</text><button class="secondary" :disabled="reading" @click="markRead">重试标为已读</button></view>
       <button v-if="detail != null" class="primary" :disabled="!canOpenRelated" @click="openRelated">{{ relatedLabel }}</button>
@@ -18,6 +18,8 @@
 </template>
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
+import { profileEditPath } from '@/features/profile/profile.uts'
 import { computed, ref, watch, nextTick } from 'vue'
 import { session } from '@/features/api.uts'
 import { loadNotification, readNotification, NotificationDetail } from '@/features/notifications.uts'
@@ -25,8 +27,9 @@ import { refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { openPage } from '@/features/navigation.uts'
 const id = ref(''), detail = ref<NotificationDetail | null>(null)
 const error = ref(''), readError = ref(''), loading = ref(false), reading = ref(false)
-const canOpenRelated = computed(() => detail.value?.target != null || (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')))
+const canOpenRelated = computed(() => detail.value?.target != null || detail.value?.profileTarget != null || (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')))
 const relatedLabel = computed(() => {
+  if (detail.value?.profileTarget != null) return '查看资料审核结果'
   if (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')) return detail.value!.friend!.status === 'pending' ? '前往处理好友申请' : '查看旅伴'
   if (detail.value?.target == null) return '内容当前不可访问'
   return detail.value!.kind.startsWith('community.comment.') ? '查看评论所在帖子' : '查看对应帖子详情'
@@ -73,7 +76,9 @@ function openFriend(): void {
 }
 function openRelated(): void {
   if (!canOpenRelated.value) return
-  if (detail.value?.friend != null) openFriend()
+  const profile = detail.value?.profileTarget
+  if (profile != null) openPage(profileEditPath + '?revisionId=' + encodeURIComponent(profile.revisionId))
+  else if (detail.value?.friend != null) openFriend()
   else openTarget()
 }
 function friendStatusText(status: string): string {

@@ -1,0 +1,106 @@
+import { requestId } from '@/features/api.uts'
+import { publicRead } from '@/features/community/community.uts'
+
+const cache = new Map<string, string>()
+const held = new Map<string, string>()
+const pins = new Map<string, number>()
+const pending = new Map<string, Promise<string>>()
+const queue: (() => void)[] = []
+let inFlight = 0
+let cleanup: Promise<void> | null = null
+
+export function avatarKey(code: string, version: string): string { return code + '/' + version }
+export function retainProfileAvatar(key: string): void { pins.set(key, (pins.get(key) ?? 0) + 1) }
+export function releaseProfileAvatar(key: string): void {
+  const remaining = (pins.get(key) ?? 0) - 1
+  if (remaining > 0) { pins.set(key, remaining); return }
+  pins.delete(key)
+  const path = held.get(key)
+  if (path != null) { held.delete(key); removeAvatarPreview(path) }
+}
+
+export function invalidateProfileAvatar(key: string): void {
+  const path = cache.get(key) ?? held.get(key)
+  cache.delete(key)
+  held.delete(key)
+  if (path != null) removeAvatarPreview(path)
+}
+
+export function saveAvatarPreview(src: string): Promise<string> {
+  const png = 'data:image/png;base64,'
+  const jpg = 'data:image/jpeg;base64,'
+  const prefix = src.startsWith(png) ? png : jpg
+  if (!src.startsWith(prefix)) return Promise.reject(new Error('PHOTO_UNAVAILABLE'))
+  // #ifdef MP-WEIXIN
+  if (typeof uni.getFileSystemManager === 'function') {
+    const directory = uni.env.USER_DATA_PATH
+    const fs = uni.getFileSystemManager()
+    if (cleanup == null) cleanup = new Promise<void>(resolve => {
+      fs.readdir({ dirPath: directory, success: result => {
+        const prior = result.files.filter(name => name.startsWith('fy-profile-preview-'))
+        Promise.all(prior.map(name => new Promise<void>(done => {
+          fs.unlink({ filePath: directory + '/' + name, complete: () => done() })
+        }))).then(() => resolve())
+      }, fail: () => resolve() })
+    })
+    const path = directory + '/fy-profile-preview-' + requestId() + (prefix === png ? '.png' : '.jpg')
+    return cleanup!.then(() => new Promise<string>((resolve, reject) => {
+      fs.writeFile({ filePath: path, data: src.slice(prefix.length), encoding: 'base64',
+        success: () => resolve(path), fail: () => reject(new Error('PHOTO_UNAVAILABLE')) })
+    }))
+  }
+  // #endif
+  return Promise.resolve(src)
+}
+
+export function removeAvatarPreview(path: string): void {
+  // #ifdef MP-WEIXIN
+  if (path.startsWith((uni.env?.USER_DATA_PATH ?? '') + '/fy-profile-preview-')) {
+    uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} })
+  }
+  // #endif
+}
+
+function runQueue(): void {
+  while (inFlight < 3 && queue.length > 0) {
+    const start = queue.shift()
+    if (start != null) start()
+  }
+}
+
+function remember(key: string, path: string): void {
+  cache.set(key, path)
+  if (cache.size <= 40) return
+  const oldest = cache.keys().next().value as string
+  const value = cache.get(oldest)
+  cache.delete(oldest)
+  if (value == null) return
+  if (pins.has(oldest)) held.set(oldest, value)
+  else removeAvatarPreview(value)
+}
+
+export function loadProfileAvatar(code: string, version: string): Promise<string> {
+  const key = avatarKey(code, version)
+  const path = cache.get(key)
+  if (path != null) {
+    cache.delete(key); cache.set(key, path)
+    return Promise.resolve(path)
+  }
+  const active = held.get(key)
+  if (active != null) return Promise.resolve(active)
+  const existing = pending.get(key)
+  if (existing != null) return existing
+  const task = new Promise<string>((resolve, reject) => {
+    queue.push(() => {
+      inFlight++
+      publicRead<{ src: string }>('profileAvatar', { code, avatarVersion: version })
+        .then(value => saveAvatarPreview(value.src))
+        .then(value => { remember(key, value); resolve(value) })
+        .catch(error => reject(error))
+        .finally(() => { inFlight--; pending.delete(key); runQueue() })
+    })
+  })
+  pending.set(key, task)
+  runQueue()
+  return task
+}

@@ -2,16 +2,17 @@ import { api, secured, session, requestId } from '@/features/api.uts'
 
 export type Post = {
   id: string, revisionId: string, latestRevision: string, title: string, body?: string, author: string,
-  authorCode?: string, authorAvatar?: string,
+  authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string,
   hasImage: boolean, imageCount?: number, owner: boolean, publicView: boolean, reviewUnread?: boolean, hasPublicVersion?: boolean, status: string, reason: string,
   commentCount: number, likeCount: number, liked?: boolean, saved?: boolean
 }
-export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string }
+export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string, authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string }
 export type PostPage = { items: Post[], next: string }
 export type CommentPage = { items: Comment[], next: string, mine: Comment[] }
-export type Ranking = { code: string, nickname: string, count: number, rank: number, mine: boolean }
+export type Ranking = { code: string, nickname: string, count: number, rank: number, mine: boolean, avatarVersion?: string }
 export type DiaryPhoto = { _id: string, title: string, createdAt: number, mediaId: string }
 export const communityPath = '/packages/community/community/community'
+export const myPostsPath = communityPath + '?tab=mine'
 export const postPath = '/packages/community/community-post/community-post'
 export const composePath = '/packages/community/community-compose/community-compose'
 export function imageCount(post: Post): number { return post.imageCount ?? (post.hasImage ? 1 : 0) }

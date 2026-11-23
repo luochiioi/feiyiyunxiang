@@ -1,0 +1,30 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const { fixture, alice, bob, input } = require('./helpers/profile-fixture.cjs')
+const { createNotificationService } = require('../uniCloud-alipay/cloudfunctions/fy-api/notification-service')
+const reviewer = { uid: 'reviewer', reviewer: true }
+
+test('profile decisions resolve only the owner’s exact historical revision and keep read state on replay', async () => {
+  const { service, rows, repo, loseNextResponse } = await fixture()
+  const notifications = createNotificationService({ repo, now: () => 1700000000010 })
+  const first = await service.profileSubmit(alice, input)
+  const reject = { ...first, decision: 'reject', reason: '请修改简介' }
+  loseNextResponse()
+  await assert.rejects(service.profileReview(reviewer, reject), /RESPONSE_LOST/)
+  const [message] = (await notifications.notificationsList(alice)).items
+  assert.equal(message.title, '资料审核未通过')
+  const detail = await notifications.notificationDetail(alice, message)
+  assert.deepEqual(detail.profileTarget, { revisionId: first.revisionId })
+  assert.equal(detail.target, null)
+  await assert.rejects(notifications.notificationDetail(bob, message), /NOT_FOUND/)
+  await assert.rejects(notifications.notificationRead(bob, message), /NOT_FOUND/)
+  await notifications.notificationRead(alice, message)
+  await service.profileReview(reviewer, reject)
+  assert.equal((await notifications.notificationsSummary(alice)).unread, 0)
+  const second = await service.profileSubmit(alice, { ...input, requestId: 'new' })
+  await service.profileReview(reviewer, { ...second, decision: 'approve' })
+  assert.equal((await notifications.notificationsSummary(alice)).unread, 1)
+  assert.deepEqual((await notifications.notificationDetail(alice, message)).profileTarget, detail.profileTarget)
+  rows.delete('fy-profile-revisions/' + first.revisionId)
+  assert.equal((await notifications.notificationDetail(alice, message)).profileTarget, null)
+})

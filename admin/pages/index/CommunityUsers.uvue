@@ -15,8 +15,12 @@
         <text class="heading">{{ listTitle() }}</text>
         <text v-if="!busy && listState === 'ready' && users.length === 0" class="muted">没有匹配的账户。</text>
         <view v-for="user in users" :key="user.id" class="account-row">
-          <view class="ops"><text>{{ user.nickname }}</text><text class="muted">{{ user.code.length > 0 ? 'ID ' + user.code : '尚无公开 ID' }} · {{ statusLabel(user.status, user.suspendedByOps) }}</text></view>
-          <button :disabled="busy" @click="select(user.id)">详情</button>
+          <AccountAvatar :code="user.code" :version="user.status === 0 ? user.avatarVersion ?? '' : ''" />
+          <view class="account-identity">
+            <text class="account-name" :title="user.nickname">{{ user.nickname }}</text>
+            <text class="account-meta muted">{{ user.code.length > 0 ? 'ID ' + user.code : '尚无公开 ID' }} · {{ statusLabel(user.status, user.suspendedByOps) }}</text>
+          </view>
+          <button class="account-detail" :disabled="busy" @click="select(user.id)">详情</button>
         </view>
         <button v-if="listState === 'failed'" :disabled="busy" @click="refreshList">重试账户列表</button>
         <button v-if="next.length > 0 && listState !== 'failed'" :disabled="busy" @click="more">{{ listState === 'moreFailed' ? '重试加载更多' : '加载更多' }}</button>
@@ -26,9 +30,16 @@
         <button :disabled="busy" @click="retryDetail">重试账户详情</button>
       </view>
       <view v-else-if="selected != null" class="panel inspector">
+        <AccountAvatar :code="selected?.code ?? ''" :version="selected?.status === 0 ? selected?.avatarVersion ?? '' : ''" />
         <text class="heading">{{ selected?.nickname }} · {{ statusLabel(selected?.status ?? -1, selected?.suspendedByOps === true) }}</text>
         <text class="muted">{{ selected?.code ? 'ID ' + selected?.code : '尚无公开 ID' }} · {{ created() }}</text>
         <text class="muted">{{ muted ? '禁言中 · 截止 ' + new Date(selected?.muteUntil ?? 0).toLocaleString() : '未禁言' }}</text>
+        <view class="profile-summary">
+          <text class="heading">当前公开资料</text>
+          <text class="muted">简介</text><text class="profile-bio">{{ selected?.bio || '未填写简介' }}</text>
+          <text class="muted">城市标签 {{ selected?.displayCity || '未填写' }}</text>
+          <text class="muted">文化兴趣 {{ selected?.interests?.join(' · ') || '未填写' }}</text>
+        </view>
         <text>好友 {{ selected?.friendCount }} · 帖子共 {{ selected?.postCount }} · 评论共 {{ selected?.commentCount }} · 被举报共 {{ selected?.reportCount }}</text>
         <view class="tools">
           <button :disabled="busy" @click="review('pending')">待审帖子（{{ selected?.pendingPosts }}）</button>
@@ -47,7 +58,7 @@
           <button v-if="selected?.suspendedByOps && selected?.status === 1" :disabled="busy" @click="setStatus(false)">恢复账户</button>
         </view>
         <view class="tools">
-          <input :disabled="busy" v-model="minutes" type="number" placeholder="1–43200 分钟" />
+          <view class="duration"><text class="muted">禁言时长（分钟）</text><input :disabled="busy" v-model="minutes" type="number" /></view>
           <button :disabled="busy" @click="mute(false)">禁言</button>
           <button v-if="muted" :disabled="busy" @click="mute(true)">解除禁言</button>
         </view>
@@ -58,8 +69,9 @@
 <script setup lang="uts">
 import { computed, ref, watch } from 'vue'
 import { api } from '@/features/api.uts'
-type Account = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number }
-type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number, pendingPosts: number, publishedPosts: number, pendingComments: number, publicComments: number, openReports: number, resolvedReports: number }
+import AccountAvatar from './AccountAvatar.uvue'
+type Account = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, avatarVersion?: string, createdAt: number, muteUntil: number }
+type AccountDetail = { id: string, status: number, suspendedByOps: boolean, code: string, nickname: string, avatarVersion?: string, bio?: string, displayCity?: string, interests?: string[], createdAt: number, muteUntil: number, friendCount: number, postCount: number, commentCount: number, reportCount: number, pendingPosts: number, publishedPosts: number, pendingComments: number, publicComments: number, openReports: number, resolvedReports: number }
 type AccountPage = { items: Account[], next: string }
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (event: 'review', group: string, uid: string, label: string): void }>()
@@ -191,14 +203,22 @@ function mute(release: boolean): void {
 </script>
 <style scoped>
 .ops, .panel { display: flex; flex-direction: column; gap: 10px; }
-.tools, .columns, .account-row { display: flex; flex-direction: row; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tools, .columns { display: flex; flex-direction: row; gap: 10px; align-items: center; flex-wrap: wrap; }
 .columns { align-items: flex-start; }
-.account-row { justify-content: space-between; border-bottom: 1px solid #ece7dc; padding: 8px 0; }
+.account-row { display: flex; flex-direction: row; align-items: center; gap: 10px; border-bottom: 1px solid #ece7dc; padding: 8px 0; }
+.account-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-meta { overflow-wrap: anywhere; line-height: 1.4; }
+.account-detail { flex-shrink: 0; }
 .panel { background: #fffef7; border-radius: 12px; padding: 16px; }
 .account-list { width: 280px; }
 .inspector { flex: 1; min-width: 330px; }
 button { margin: 0; }
 .tools input { width: 180px; }
+.profile-summary,.duration { display:flex; flex-direction:column; gap:4px; }
+.profile-summary { background:#f2f5ed; border-radius:8px; padding:10px; }
+.profile-bio { overflow-wrap:anywhere; white-space:pre-wrap; margin-bottom:5px; }
+.tools .duration input { width:145px; }
 .receipt { color: #304c37; font-weight: 700; }
 .muted { font-size: 13px; color: #675d50; }
 </style>

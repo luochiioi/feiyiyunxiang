@@ -56,6 +56,9 @@
     },
     "actorNickname": {
       "bsonType": "string"
+    },
+    "profileRevisionId": {
+      "bsonType": "string"
     }
   }
 }

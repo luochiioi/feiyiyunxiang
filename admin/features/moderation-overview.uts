@@ -1,0 +1,39 @@
+import { computed, ref } from 'vue'
+import { api, session } from './api.uts'
+
+export type ModerationOverview = {
+  pendingPosts: number, pendingComments: number, openReports: number, publishedPosts: number,
+  pendingProfiles?: number, activeAccounts?: number, activeRoutes?: number, activeCoops?: number, activePk?: number
+}
+const owner = ref(''), loaded = ref<ModerationOverview | null>(null)
+export const moderationOverview = computed(() => owner.value === session.value?.uid ? loaded.value : null)
+export const overviewLoading = ref(false)
+export const overviewError = ref('')
+let ticket = 0
+
+export function resetModerationOverview(): void {
+  ticket++
+  owner.value = ''
+  loaded.value = null
+  overviewLoading.value = false
+  overviewError.value = ''
+}
+
+export async function refreshModerationOverview(afterDecision: boolean = false): Promise<void> {
+  const current = session.value
+  if (current == null || (overviewLoading.value && !afterDecision)) return
+  const request = ++ticket
+  overviewLoading.value = true
+  overviewError.value = ''
+  try {
+    const response = await api<ModerationOverview>('communityOverview')
+    if (request === ticket && session.value?.token === current.token) {
+      owner.value = current.uid
+      loaded.value = response
+    }
+  } catch (_) {
+    if (request === ticket && session.value?.token === current.token) {
+      overviewError.value = moderationOverview.value == null ? '未能读取工作台，请重试。' : '刷新失败，保留上次读取的指标。'
+    }
+  } finally { if (request === ticket) overviewLoading.value = false }
+}

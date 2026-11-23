@@ -1,0 +1,22 @@
+export type AvatarCrop = { x: number, y: number, side: number }
+export const avatarSize = 256
+
+export function avatarCrop(width: number, height: number, zoom: number, x: number, y: number): AvatarCrop {
+  if (width <= 0 || height <= 0) throw new Error('INVALID_IMAGE')
+  const side = Math.min(width, height) / Math.max(1, zoom)
+  const fraction = (value: number): number => Math.max(0, Math.min(100, value)) / 100
+  return { x: (width - side) * fraction(x), y: (height - side) * fraction(y), side }
+}
+
+export function reframeAvatarCrop(
+  width: number, height: number, origin: AvatarCrop, scale: number, dx: number, dy: number, previewSize: number
+): AvatarCrop {
+  const maxSide = Math.min(width, height)
+  const side = Math.max(maxSide / 3, Math.min(maxSide, origin.side / scale))
+  const inset = (origin.side - side) / 2
+  return {
+    x: Math.max(0, Math.min(width - side, origin.x + inset - dx * side / previewSize)),
+    y: Math.max(0, Math.min(height - side, origin.y + inset - dy * side / previewSize)),
+    side
+  }
+}

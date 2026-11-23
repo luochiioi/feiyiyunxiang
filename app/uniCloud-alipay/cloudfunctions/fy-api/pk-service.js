@@ -1,3 +1,4 @@
+const { publicProfile } = require('./profile-presenter')
 const HOUR = 3600 * 1000
 
 // 彩蛋来自发布路线，旧路线没有配置时回退为第一个点位。
@@ -66,13 +67,15 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
         return settled == null ? null : {
           id: settled._id, status: 'settled', routeId: settled.routeId, invitedBy: settled.invitedBy,
           ready: settled.ready, startedAt: settled.startedAt ?? null, expiresAt: settled.expiresAt,
-          myRunId: null, eggPending: true, winner: u.uid
+          myRunId: null, eggPending: true, winner: u.uid,
+          partner: await publicProfile(repo, settled.uids.find(uid => uid !== u.uid))
         }
       }
       return {
         id: match._id, status: match.status, routeId: match.routeId, invitedBy: match.invitedBy,
         ready: match.ready, startedAt: match.startedAt ?? null, expiresAt: match.expiresAt,
-        myRunId: match.status === 'running' ? match.runs[u.uid] : null, eggPending: false, winner: match.winner ?? null
+        myRunId: match.status === 'running' ? match.runs[u.uid] : null, eggPending: false, winner: match.winner ?? null,
+        partner: await publicProfile(repo, match.uids.find(uid => uid !== u.uid))
       }
     },
 

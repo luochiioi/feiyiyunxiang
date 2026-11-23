@@ -1,0 +1,44 @@
+{
+  "bsonType": "object",
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false
+  },
+  "properties": {
+    "_id": {
+      "bsonType": "string"
+    },
+    "uid": {
+      "bsonType": "string"
+    },
+    "baseRevision": {
+      "bsonType": "int"
+    },
+    "digest": {
+      "bsonType": "string"
+    },
+    "status": {
+      "bsonType": "string"
+    },
+    "snapshot": {
+      "bsonType": "object"
+    },
+    "createdAt": {
+      "bsonType": "long"
+    },
+    "order": {
+      "bsonType": "string"
+    },
+    "reason": {
+      "bsonType": "string"
+    },
+    "decidedAt": {
+      "bsonType": "long"
+    },
+    "reviewerUid": {
+      "bsonType": "string"
+    }
+  }
+}

@@ -2,39 +2,58 @@
   <view class="screen">
     <AppPageHeader title="我的" :show-back="true" />
     <view class="content">
-      <view class="card row">
-        <image class="avatar" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
-        <view class="stack">
-          <text class="heading">{{ session == null ? '你好，探索者' : '微信已登录' }}</text>
-          <text class="muted">{{ session == null ? '游客，可浏览已发布路线' : '小程序账号 ' + session.uid.slice(-10).toUpperCase() }}</text>
+      <view class="card profile-card">
+        <view class="row">
+          <PendingProfileAvatar v-if="myPendingProfile != null" :revision-id="myPendingProfile?.revisionId ?? ''" :has-avatar="myPendingProfile?.hasAvatar === true" :legacy="myPendingProfile?.avatar ?? ''" />
+          <ProfileAvatar v-else :code="myProfile?.code ?? ''" :version="myProfile?.avatarVersion ?? ''" :legacy="myProfile?.avatar ?? ''" :diameter="60" />
+          <view class="stack">
+            <text class="title nickname">{{ session == null ? '你好，探索者' : displayedNickname }}</text>
+            <text v-if="session == null" class="muted">登录后可设置个人资料、领取澳喵。</text>
+            <text v-else-if="displayedBio" class="body wrap">{{ displayedBio }}</text>
+            <text v-if="tags.length > 0" class="muted wrap">{{ tags }}</text>
+            <text v-if="myPendingProfile != null" class="pending-label">待审核 · 仅自己可见</text>
+          </view>
         </view>
+        <button v-if="session == null" class="primary" :disabled="busy" @click="signIn">微信登录</button>
+        <template v-else>
+          <view v-if="myProfile != null" class="row spread code-row">
+            <text class="body invite-code">邀请码 {{ myProfile?.code }}</text>
+            <button class="secondary inline" :disabled="!myProfile?.code" @click="copyCode">复制</button>
+          </view>
+          <view v-if="profileFailed" class="row spread"><text class="muted">资料暂时无法同步。</text><button class="secondary inline" @click="readProfile">重试</button></view>
+          <button class="primary" @click="openPage(profileEditPath)">编辑资料</button>
+        </template>
       </view>
-      <view class="card green">
-        <view class="row spread">
-          <text class="title">{{ aomiao?.claimed === true ? '我的澳喵' : '领取你的澳喵' }}</text>
-          <text v-if="aomiao?.claimed === true" class="tag">已领取</text>
-        </view>
-        <view class="pet-stage">
-          <image class="pet" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+
+      <view class="card shortcuts">
+        <view class="row spread menu-row" @click="openPage('/packages/profile/messages/messages')"><view class="stack"><view class="my-posts-label"><text class="heading">消息</text><view v-if="hasUnreadNotifications" class="review-dot" aria-label="有未读消息" /></view><text class="muted">好友申请与审核结果</text></view><text class="arrow">›</text></view>
+        <view class="row spread divider menu-row" @click="openPage(myPostsPath)"><view class="stack"><view class="my-posts-label"><text class="heading">我的帖子</text><view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></view><text class="muted">查看帖子与审核进度</text></view><text class="arrow">›</text></view>
+        <view class="row spread divider menu-row" @click="openPage('/packages/profile/my-checkins/my-checkins')"><view class="stack"><text class="heading">探索档案</text><text class="muted">打卡日记、文化作品与旅伴记录</text></view><text class="arrow">›</text></view>
+      </view>
+
+      <view v-if="aomiao?.claimed === true" class="card green">
+        <view class="row">
+          <image class="pet-compact" src="/static/ip/aomiao-wave.png" mode="aspectFit" />
+          <view class="stack"><text class="heading">我的澳喵</text><text class="muted">已领取</text></view>
+          <button class="secondary inline" @click="openPage('/packages/routes/routes/routes')">带澳喵去探索</button>
         </view>
         <text v-if="roleError.length > 0" class="body">{{ roleError }}</text>
-        <button v-if="roleError.length > 0 && aomiao != null" class="secondary" :disabled="busy" @click="loadAomiao">重试读取澳喵</button>
-        <button v-if="session == null" class="primary" :disabled="busy" @click="signIn">{{ busy ? '正在登录…' : '微信登录后领取' }}</button>
+        <button v-if="roleError.length > 0" class="secondary" :disabled="busy" @click="loadAomiao">重试读取澳喵</button>
+      </view>
+      <view v-else class="card green">
+        <text class="heading">领取你的澳喵</text>
+        <view class="pet-stage"><image class="pet" src="/static/ip/aomiao-wave.png" mode="aspectFit" /></view>
+        <text v-if="roleError.length > 0" class="body">{{ roleError }}</text>
+        <button v-if="session == null" class="primary" :disabled="busy" @click="signIn">微信登录后领取</button>
         <button v-else-if="aomiao == null" class="secondary" :disabled="busy" @click="loadAomiao">{{ busy ? '正在读取澳喵…' : '重试读取澳喵' }}</button>
-        <button v-else-if="aomiao?.claimed !== true" class="primary" :disabled="busy" @click="claim">{{ busy ? '正在领取…' : '领取澳喵' }}</button>
-        <button v-else class="primary" @click="openPage('/packages/routes/routes/routes')">带澳喵去探索</button>
+        <button v-else class="primary" :disabled="busy" @click="claim">{{ busy ? '正在领取…' : '领取澳喵' }}</button>
       </view>
-      <view class="card green">
-        <text class="heading">探索档案</text><text class="body">回看打卡日记、文化作品和旅伴记录。</text>
-        <button class="primary" @click="openPage('/packages/profile/my-checkins/my-checkins')">查看档案</button>
-      </view>
-      <view class="card">
-        <text class="heading">社区记录</text>
-        <view class="row spread menu-row" @click="openPage('/packages/profile/messages/messages')"><view class="my-posts-label"><text class="body">消息</text><view v-if="hasUnreadNotifications" class="review-dot" aria-label="有未读消息" /></view><text class="muted">消息 ›</text></view>
-        <view class="row spread menu-row" @click="openPage(communityPath + '?tab=mine')"><view class="my-posts-label"><text class="body">我的帖子</text><view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></view><text class="muted">审核进度 ›</text></view>
-        <view class="row spread divider menu-row" @click="openPage(communityPath)"><text class="body">社区</text><text class="muted">›</text></view>
+
+      <view class="card shortcuts">
+        <view class="row spread menu-row" @click="openPage(stepsPath)"><view class="stack"><text class="heading">步数中心</text><text class="muted">好友步数榜、历史与自动同步</text></view><text class="arrow">›</text></view>
+        <view class="row spread divider menu-row" @click="openPage('/packages/partner/partner/partner')"><view class="stack"><text class="heading">旅伴</text><text class="muted">好友、合作与 PK</text></view><text class="arrow">›</text></view>
         <!-- #ifdef MP-WEIXIN -->
-        <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="muted">›</text></view>
+        <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="arrow">›</text></view>
         <!-- #endif -->
       </view>
       <button v-if="session != null" class="secondary" :disabled="busy" @click="signOut">退出登录</button>
@@ -44,22 +63,43 @@
 
 <script setup lang="uts">
 import AppPageHeader from '@/components/AppPageHeader.uvue'
+import ProfileAvatar from '@/components/ProfileAvatar.uvue'
+import PendingProfileAvatar from '@/components/PendingProfileAvatar.uvue'
+import { forgetMyProfile, myPendingProfile, myProfile, profileEditPath, refreshMyProfile } from '@/features/profile/profile.uts'
+import { stepsPath } from '@/features/steps.uts'
 
 import { openPage } from '@/features/navigation.uts'
 import { computed, ref } from 'vue'
 import { session, login, api, secured, clearSession, showError } from '@/features/api.uts'
 import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { hasUnreadNotifications, refreshNotificationsSummary } from '@/features/notifications.uts'
-import { communityPath } from '@/features/community/community.uts'
+import { myPostsPath } from '@/features/community/community.uts'
 import { activeRun } from '@/features/exploration/catalog.uts'
 type Aomiao = { claimed: boolean }
 const busy = ref(false)
-const roleError = ref('')
+const roleError = ref(''), profileFailed = ref(false)
+const displayedNickname = computed(() => myPendingProfile.value?.nickname ?? myProfile.value?.nickname ?? '微信已登录')
+const displayedBio = computed(() => myPendingProfile.value?.bio ?? myProfile.value?.bio ?? '')
+const tags = computed(() => {
+  const shown = myPendingProfile.value ?? myProfile.value
+  return [shown?.displayCity ?? '', ...(shown?.interests ?? [])].filter(value => value.length > 0).join(' · ')
+})
 const role = ref<Aomiao | null>(null)
 const owner = ref('')
 const aomiao = computed(() => session.value?.uid === owner.value ? role.value : null)
-onShow(() => { if (session.value != null) loadAomiao(); refreshReviewNotices(); refreshNotificationsSummary() })
+onShow(() => { if (session.value != null) { loadAomiao(); readProfile() }; refreshReviewNotices(); refreshNotificationsSummary() })
 
+async function readProfile(): Promise<void> {
+  const uid = session.value?.uid
+  if (uid == null) return
+  profileFailed.value = false
+  try { await refreshMyProfile() }
+  catch (_) { if (session.value?.uid === uid) profileFailed.value = true }
+}
+function copyCode(): void {
+  const code = myProfile.value?.code ?? ''
+  if (code.length > 0) uni.setClipboardData({ data: code, fail: () => showError() })
+}
 async function updateAomiao(action: string): Promise<void> {
   if (busy.value) return
   busy.value = true
@@ -89,7 +129,7 @@ async function signIn(): Promise<void> {
       ? '微信登录服务配置异常，请联系维护人员' : '微信登录未完成，请重试'
     uni.showToast({ title: message, icon: 'none' })
   } finally { busy.value = false }
-  if (session.value != null) { await loadAomiao(); await refreshReviewNotices(); await refreshNotificationsSummary() }
+  if (session.value != null) { await Promise.all([loadAomiao(), readProfile(), refreshReviewNotices(), refreshNotificationsSummary()]) }
 }
 function showPrivacy(): void {
   // #ifdef MP-WEIXIN
@@ -101,6 +141,7 @@ async function signOut(): Promise<void> {
   busy.value = true
   try {
     await api<UTSJSONObject>('logout')
+    forgetMyProfile()
     clearSession()
     activeRun.value = null
     role.value = null
@@ -112,7 +153,17 @@ async function signOut(): Promise<void> {
 
 <style scoped>
 @import '@/styles/page.css';
-.my-posts-label { position: relative; padding-right: 12px; }
+.profile-card { background: #f9f2e4; border-color: #eadcc6; }
+.nickname, .wrap { word-break: break-word; }
+.nickname { font-size: 22px; line-height: 1.25; }
+.code-row { padding-top: 8px; border-top: 1px solid #eadcc6; }
+.invite-code { font-weight: 600; letter-spacing: 0.5px; }
+.pending-label { align-self: flex-start; color: #715022; background: #f0e3bf; border-radius: 10px; padding: 3px 8px; font-size: 12px; }
+.inline { flex-shrink: 0; width: auto; }
+.shortcuts { gap: 10px; }
+.arrow { color: #725938; font-size: 22px; }
+.my-posts-label { position: relative; align-self: flex-start; padding-right: 12px; }
+.pet-compact { flex-shrink: 0; width: 58px; height: 58px; border-radius: 12px; background: #f8efd9; }
 .review-dot { position: absolute; right: 0; top: 0; width: 8px; height: 8px; border-radius: 50%; background: #c73535; }
 .pet-stage { height: 172px; align-items: center; justify-content: center; border-radius: 14px; background: #f8efd9; }
 .pet { width: 158px; height: 158px; }

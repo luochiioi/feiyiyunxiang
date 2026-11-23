@@ -1,7 +1,39 @@
 import { ref } from 'vue'
 export type AdminSession = { uid: string, username: string, token: string, expiresAt: number, admin?: boolean }
+export type ProfileReviewItem = { revisionId: string, nickname: string, bio: string, displayCity: string, interests: string[], status: string, createdAt: number, reason: string, hasAvatar: boolean, avatar?: string }
+export type ProfileReviewPage = { items: ProfileReviewItem[], next: string }
+type CurrentProfile = { nickname: string, bio: string, displayCity: string, interests: string[], avatarVersion: string, avatar?: string }
+export type ProfileReviewDetail = { selected: ProfileReviewItem, current: CurrentProfile, accountActive: boolean }
 export const session = ref<AdminSession | null>(null)
 type Reply<T> = { code: string, data: T }
+type AvatarImage = { src: string }
+const profileImageQueue: (() => void)[] = []
+let profileImagesInFlight = 0
+function loadNextProfileImage(): void {
+  if (profileImagesInFlight >= 3) return
+  const start = profileImageQueue.shift()
+  if (start != null) start()
+}
+export function scheduleProfileImage(work: () => Promise<void>): void {
+  profileImageQueue.push(() => {
+    profileImagesInFlight++
+    work().finally(() => { profileImagesInFlight--; loadNextProfileImage() })
+  })
+  loadNextProfileImage()
+}
+export function loadPublicProfileAvatar(code: string, avatarVersion: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    scheduleProfileImage(async () => {
+      try {
+        const reply = await uniCloud.callFunction<Reply<AvatarImage>>({
+          name: 'fy-api', data: { action: 'profileAvatar', payload: { code, avatarVersion } }
+        })
+        if (reply.result.code !== 'OK') throw new Error(reply.result.code)
+        resolve(reply.result.data.src)
+      } catch (error) { reject(error) }
+    })
+  })
+}
 // Keep administrator tokens only in memory; reload requires login again.
 export async function api<T>(action: string, payload: UTSJSONObject = {}): Promise<T> {
   const response = await uniCloud.callFunction<Reply<T>>({ name: 'fy-api', data: { action, payload, token: session.value?.token ?? '' } })

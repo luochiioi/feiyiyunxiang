@@ -5,7 +5,37 @@ const entry=path.resolve(__dirname,'../uniCloud-alipay/cloudfunctions/fy-api/ind
 const nativeRequire=createRequire(entry)
 function gateway({configured=true,validCode=true,wechatError=40029,privateStorageVerified=false,storage=null,missingCollection=null}={}) {
  const rows=new Map()
- const db={collection(c){if(c===missingCollection)throw new Error('collection does not exist');return {doc(id){return {async get(){return {data:rows.has(c+id)?[{...rows.get(c+id),_id:id}]:[]}},async set(v){rows.set(c+id,v)}}},where(q){return {limit(){return {async get(){return {data:[...rows].filter(([k,v])=>k.startsWith(c)&&Object.entries(q).every(([a,b])=>v[a]===b)).map(([k,v])=>({...v,_id:k.slice(c.length)}))}}}}}}}},async startTransaction(){return {...db,async commit(){},async rollback(){}}}}
+ const db = {
+  command: { in: values => ({ values }) },
+  collection(c) {
+   if (c === missingCollection) throw new Error('collection does not exist')
+   return {
+    doc(id) {
+     return {
+      async get() { return { data: rows.has(c + id) ? [{ ...rows.get(c + id), _id: id }] : [] } },
+      async set(value) { rows.set(c + id, value) }
+     }
+    },
+    where(filter) {
+     let size = 100, field = '_id', direction = 'asc'
+     const query = {
+      orderBy(name, order) { field = name; direction = order; return query },
+      limit(n) { size = n; return query },
+      async get() {
+       const data = [...rows].filter(([key]) => key.startsWith(c))
+        .map(([key, value]) => ({ ...value, _id: key.slice(c.length) }))
+        .filter(row => Object.entries(filter).every(([key, value]) => value?.values
+          ? value.values.includes(row[key]) : row[key] === value))
+        .sort((left, right) => String(left[field]).localeCompare(String(right[field])) * (direction === 'asc' ? 1 : -1))
+       return { data: data.slice(0, size) }
+      }
+     }
+     return query
+    }
+   }
+  },
+  async startTransaction() { return { ...db, async commit() {}, async rollback() {} } }
+ }
  let exchanges=0,uploads=0
  const cloud={database:()=>db,httpclient:{async request(url,opts){exchanges++;assert.equal(url,'https://api.weixin.qq.com/sns/jscode2session');assert.equal(opts.data.js_code,'wx-code');assert.equal(opts.data.secret,'server-fixture-secret');return {status:200,data:validCode?{openid:'fixture-openid',session_key:'never-return-this'}:{errcode:wechatError}}}},async uploadFile(args){uploads++;assert.ok(storage,'unexpected upload');return storage.uploadFile(args)},async downloadFile(args){assert.ok(storage,'unexpected download');return storage.downloadFile(args)}}
  const identity={async checkToken(token){return token==='fixture-token'?{uid:'member',errCode:0}:{errCode:'expired'}},async createToken({uid}){return {errCode:0,token:'issued-token',tokenExpired:1000,uid}}}
@@ -198,6 +228,14 @@ test('community gateway separates guest reads, author previews and reviewer priv
   assert.equal((await call('communityReadReview', reviewerToken, pending.data)).code, 'AUTH_REQUIRED')
   assert.equal((await call('communityReadReview', '', pending.data)).code, 'AUTH_REQUIRED')
   assert.equal((await call('communityReadReview', 'fixture-token', pending.data)).code, 'OK')
+  assert.equal((await call('getMyProfile', reviewerToken, { uid: 'member' })).code, 'AUTH_REQUIRED')
+  assert.equal((await call('getMyProfile', '', { uid: 'member' })).code, 'AUTH_REQUIRED')
+  assert.equal((await call('profileReviewList', 'fixture-token', {})).code, 'AUTH_REQUIRED')
+  assert.equal((await call('profileReviewList', reviewerToken, {})).code, 'OK')
+  const profile = await call('getMyProfile', 'fixture-token', { uid: 'reviewer' })
+  assert.equal(profile.code, 'OK')
+  assert.match(profile.data.code, /^[A-Z2-9]{8}$/)
+  assert.equal((await call('profileAvatar', '', { code: profile.data.code, avatarVersion: 'a'.repeat(64) })).code, 'NOT_FOUND')
   for (const action of ['communityUsers', 'communityUserDetail', 'communityAccountStatus']) {
     assert.equal((await call(action, reviewerToken, { targetUid: 'member', admin: true })).code, 'FORBIDDEN')
     assert.equal((await call(action, 'fixture-token', { targetUid: 'member' })).code, 'AUTH_REQUIRED')

@@ -1,0 +1,223 @@
+<template>
+  <view class="cropper" role="dialog" aria-label="裁剪头像">
+    <canvas id="profile-avatar-crop" type="2d" class="crop-export" aria-hidden="true" />
+    <view class="crop-stage">
+      <view class="crop-frame" :style="{ width: frameSize + 'px', height: frameSize + 'px' }"
+        @touchstart.stop="startTouch" @touchmove.stop.prevent="moveTouch" @touchend.stop="startTouch" @touchcancel.stop="endGesture"
+        @mousedown.stop.prevent="startMouse" @mousemove.stop.prevent="moveMouse" @mouseup.stop="endGesture" @mouseleave="endMouse">
+        <view class="crop-preview" aria-hidden="true">
+          <image v-if="ready" :src="source" mode="scaleToFill" class="crop-photo" :style="photoStyle" />
+        </view>
+        <view class="crop-grid" aria-hidden="true">
+          <view class="crop-line line-left" /><view class="crop-line line-right" />
+          <view class="crop-line line-top" /><view class="crop-line line-bottom" />
+          <view class="crop-corner corner-tl" /><view class="crop-corner corner-tr" />
+          <view class="crop-corner corner-bl" /><view class="crop-corner corner-br" />
+        </view>
+      </view>
+      <text v-if="failed" class="crop-hint" role="status">这张照片暂时无法裁剪。请重试或选择另一张。</text>
+      <text v-else class="crop-hint">拖动或双指缩放照片，头像将使用方框内的画面</text>
+    </view>
+    <view v-if="ready && !failed" class="crop-tools">
+      <button class="crop-button zoom-button" aria-label="缩小" @click="zoomBy(1 / 1.2)">−</button>
+      <button class="crop-button zoom-button" aria-label="放大" @click="zoomBy(1.2)">+</button>
+      <button class="crop-button" :class="{ 'crop-disabled': !changed }" :disabled="!changed" @click="resetCrop">重置</button>
+    </view>
+    <view class="crop-actions">
+      <button class="crop-button" @click="emit('cancel')">取消裁剪</button>
+      <button v-if="failed" class="crop-button crop-confirm" @click="load">重试裁剪</button>
+      <button v-else class="crop-button crop-confirm" :class="{ 'crop-disabled': !ready }" :disabled="!ready" @click="confirm">使用此裁剪</button>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref } from 'vue'
+import { avatarCrop, avatarSize, reframeAvatarCrop } from '@/features/profile/avatar-crop.uts'
+import type { AvatarCrop } from '@/features/profile/avatar-crop.uts'
+
+type Pointer = { x: number, y: number, span: number, count: number }
+type Gesture = { pointer: Pointer, crop: AvatarCrop }
+
+const props = defineProps<{ source: string }>()
+const emit = defineEmits<{ (event: 'cancel'): void, (event: 'confirm', value: string): void }>()
+const instance = getCurrentInstance()!.proxy
+const windowInfo = uni.getWindowInfo()
+const frameSize = Math.max(1, Math.min(windowInfo.windowWidth - 34, windowInfo.windowHeight - 160, 440))
+const ready = ref(false)
+const failed = ref(false)
+const changed = ref(false)
+let generation = 0
+let canvas: CanvasContext | null = null
+let picture: Image | null = null
+let photoWidth = 0
+let photoHeight = 0
+let initialCrop: AvatarCrop | null = null
+const crop = ref<AvatarCrop | null>(null)
+const photoStyle = computed(() => {
+  const region = crop.value
+  if (region == null) return {}
+  const scale = frameSize / region.side
+  return {
+    width: photoWidth * scale + 'px', height: photoHeight * scale + 'px',
+    left: -region.x * scale + 'px', top: -region.y * scale + 'px'
+  }
+})
+let gesture: Gesture | null = null
+let mouseDragging = false
+let lastTouch = 0
+
+onMounted(load)
+onBeforeUnmount(() => { generation++; canvas = null; picture = null; endGesture() })
+
+function load(): void {
+  const ticket = ++generation
+  ready.value = false
+  failed.value = false
+  endGesture()
+  uni.createCanvasContextAsync({
+    id: 'profile-avatar-crop', component: instance,
+    success: context => {
+      if (ticket !== generation) return
+      const drawable = context.getContext('2d')
+      if (drawable == null) { failed.value = true; return }
+      const image = context.createImage()
+      image.onload = () => {
+        if (ticket !== generation) return
+        if (image.width <= 0 || image.height <= 0) { failed.value = true; return }
+        drawable.canvas.width = avatarSize
+        drawable.canvas.height = avatarSize
+        canvas = context
+        picture = image
+        photoWidth = image.width
+        photoHeight = image.height
+        initialCrop = avatarCrop(photoWidth, photoHeight, 1, 50, 50)
+        resetCrop()
+        ready.value = true
+      }
+      image.onerror = () => { if (ticket === generation) failed.value = true }
+      image.src = props.source
+    },
+    fail: () => { if (ticket === generation) failed.value = true }
+  })
+}
+
+function draw(): boolean {
+  const context = canvas?.getContext('2d')
+  const image = picture
+  const region = crop.value
+  if (context == null || image == null || region == null) return false
+  try {
+    context.clearRect(0, 0, avatarSize, avatarSize)
+    context.drawImage(image, region.x, region.y, region.side, region.side, 0, 0, avatarSize, avatarSize)
+    return true
+  } catch (_) { failed.value = true; return false }
+}
+
+function resetCrop(): void {
+  if (initialCrop == null) return
+  crop.value = initialCrop
+  changed.value = false
+}
+
+function reframe(origin: AvatarCrop, scale: number, dx: number, dy: number): void {
+  const initial = initialCrop
+  if (initial == null || !ready.value) return
+  const next = reframeAvatarCrop(photoWidth, photoHeight, origin, scale, dx, dy, frameSize)
+  crop.value = next
+  changed.value = next.x !== initial.x || next.y !== initial.y || next.side !== initial.side
+}
+function zoomBy(scale: number): void {
+  const current = crop.value
+  if (current != null) reframe(current, scale, 0, 0)
+}
+
+function touchPointer(event: UniTouchEvent): Pointer | null {
+  const touches = event.touches
+  if (touches.length === 0) return null
+  const first = touches[0]
+  if (touches.length === 1) return { x: first.clientX, y: first.clientY, span: 0, count: 1 }
+  const second = touches[1]
+  const dx = first.clientX - second.clientX
+  const dy = first.clientY - second.clientY
+  return {
+    x: (first.clientX + second.clientX) / 2,
+    y: (first.clientY + second.clientY) / 2,
+    span: Math.max(1, Math.sqrt(dx * dx + dy * dy)), count: 2
+  }
+}
+function startTouch(event: UniTouchEvent): void {
+  lastTouch = Date.now()
+  mouseDragging = false
+  setPointer(touchPointer(event))
+}
+function moveTouch(event: UniTouchEvent): void {
+  lastTouch = Date.now()
+  const pointer = touchPointer(event)
+  if (pointer != null) movePointer(pointer)
+}
+function startMouse(event: UniMouseEvent): void {
+  if (Date.now() - lastTouch < 500) return
+  mouseDragging = true
+  setPointer({ x: event.clientX, y: event.clientY, span: 0, count: 1 })
+}
+function moveMouse(event: UniMouseEvent): void {
+  if (mouseDragging) movePointer({ x: event.clientX, y: event.clientY, span: 0, count: 1 })
+}
+function endMouse(): void { if (mouseDragging) endGesture() }
+function endGesture(): void { gesture = null; mouseDragging = false }
+
+function setPointer(pointer: Pointer | null): void {
+  const current = crop.value
+  gesture = pointer == null || current == null ? null : { pointer, crop: current }
+}
+function movePointer(pointer: Pointer): void {
+  const start = gesture
+  if (start == null || start.pointer.count !== pointer.count) {
+    setPointer(pointer)
+    return
+  }
+  const scale = pointer.count === 2 ? pointer.span / start.pointer.span : 1
+  reframe(start.crop, scale, pointer.x - start.pointer.x, pointer.y - start.pointer.y)
+}
+
+function confirm(): void {
+  if (!ready.value || !draw()) return
+  try {
+    const data = canvas?.toDataURL() ?? ''
+    if (!data.startsWith('data:image/png;base64,') || data.length > 1398104) throw new Error('INVALID_IMAGE')
+    emit('confirm', data)
+  } catch (_) { failed.value = true }
+}
+</script>
+
+<style scoped>
+.cropper { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 500; background: #101010; padding: 20px 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); touch-action: none; }
+.crop-stage { flex: 1; justify-content: center; align-items: center; gap: 18px; }
+.crop-frame { position: relative; background: #161616; cursor: grab; touch-action: none; }
+.crop-export { position: absolute; top: 0; left: -4096px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.crop-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden; pointer-events: none; }
+.crop-photo { position: absolute; }
+.crop-grid { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border: 1px solid #fff; pointer-events: none; }
+.crop-line { position: absolute; background: rgba(255, 255, 255, .55); }
+.line-left, .line-right { top: 0; bottom: 0; width: 1px; }
+.line-left { left: 33.333%; }
+.line-right { left: 66.667%; }
+.line-top, .line-bottom { left: 0; right: 0; height: 1px; }
+.line-top { top: 33.333%; }
+.line-bottom { top: 66.667%; }
+.crop-corner { position: absolute; width: 14px; height: 14px; border-color: #fff; border-style: solid; border-width: 0; }
+.corner-tl { top: -2px; left: -2px; border-top-width: 3px; border-left-width: 3px; }
+.corner-tr { top: -2px; right: -2px; border-top-width: 3px; border-right-width: 3px; }
+.corner-bl { bottom: -2px; left: -2px; border-bottom-width: 3px; border-left-width: 3px; }
+.corner-br { bottom: -2px; right: -2px; border-bottom-width: 3px; border-right-width: 3px; }
+.crop-hint { color: #ddd; font-size: 13px; text-align: center; }
+.crop-tools, .crop-actions { flex-direction: row; align-items: center; }
+.crop-tools { justify-content: center; gap: 10px; padding: 4px 0 14px; }
+.crop-actions { justify-content: space-between; }
+.crop-button { min-width: 44px; margin: 0; padding: 0 12px; height: 44px; line-height: 44px; border: 0; border-radius: 8px; font-size: 15px; color: #fff; background: #101010; }
+.crop-button::after { border: 0; }
+.zoom-button { font-size: 22px; background: #2d2d2d; }
+.crop-confirm { font-weight: bold; }
+.crop-disabled { color: #999; background: #101010; }
+</style>

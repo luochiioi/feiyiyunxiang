@@ -9,6 +9,9 @@
   "properties": {
     "_id": {
       "bsonType": "string"
+    },
+    "profileWrites": {
+      "bsonType": "long"
     }
   }
 }

@@ -1,7 +1,7 @@
 <template>
   <view class="screen">
     <AppPageHeader title="步数中心" :show-back="true" />
-    <view class="content"><StepPanel :visible="visible" :details="true" /></view>
+    <view class="content"><StepPanel :visible="visible" /></view>
   </view>
 </template>
 

@@ -1,0 +1,51 @@
+<template>
+  <view class="profile-avatar" :style="{ width: diameter + 'px', height: diameter + 'px' }">
+    <image class="photo" :src="source || '/static/ip/aomiao-wave.png'" :mode="source.length > 0 ? 'aspectFill' : 'aspectFit'" @error="imageFailed" />
+    <button v-if="failed && version.length > 0" class="retry" aria-label="重试头像" @click.stop="load">↻</button>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { avatarKey, invalidateProfileAvatar, loadProfileAvatar, releaseProfileAvatar, retainProfileAvatar } from '@/features/profile/profile-avatar.uts'
+const props = withDefaults(defineProps<{ code?: string, version?: string, legacy?: string, diameter?: number }>(),
+  { code: '', version: '', legacy: '', diameter: 38 })
+const source = ref(''), failed = ref(false)
+let ticket = 0, heldKey = ''
+function release(): void {
+  if (heldKey.length > 0) releaseProfileAvatar(heldKey)
+  heldKey = ''
+}
+function imageFailed(): void {
+  if (source.value.length === 0) return
+  if (heldKey.length > 0) invalidateProfileAvatar(heldKey)
+  source.value = ''
+  failed.value = true
+}
+async function load(): Promise<void> {
+  const request = ++ticket
+  release()
+  failed.value = false
+  source.value = ''
+  if (props.code.length === 0 || props.version.length === 0) {
+    if (/^https:\/\//i.test(props.legacy)) source.value = props.legacy
+    return
+  }
+  heldKey = avatarKey(props.code, props.version)
+  retainProfileAvatar(heldKey)
+  try {
+    const value = await loadProfileAvatar(props.code, props.version)
+    if (request === ticket) source.value = value
+  } catch (_) {
+    if (request === ticket) { release(); failed.value = true }
+  }
+}
+watch(() => props.code + '/' + props.version + '/' + props.legacy, () => { load() }, { immediate: true })
+onBeforeUnmount(() => { ticket++; release() })
+</script>
+
+<style scoped>
+.profile-avatar { position: relative; flex-shrink: 0; border-radius: 50%; background-color: #f6ecd8; }
+.photo { width: 100%; height: 100%; border-radius: 50%; }
+.retry { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; padding: 0; border: 1px solid #9b845f; border-radius: 11px; line-height: 19px; font-size: 14px; color: #593c20; background-color: #fffaf0; }
+</style>

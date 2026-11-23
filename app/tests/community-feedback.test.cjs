@@ -128,9 +128,12 @@ test('My page conditions remain safe while the account and Aomiao cloud state ar
   const conditions = [...template.matchAll(/v-(?:if|else-if)="([^"]+)"/g)].map(match => match[1])
   for (const session of [null, { uid: 'returning-member' }]) {
     for (const aomiao of [null, { claimed: false }, { claimed: true }]) {
-      for (const expression of conditions) {
-        const evaluate = new Function('session', 'aomiao', 'roleError', 'hasUnreadReview', 'hasUnreadNotifications', 'return (' + expression + ')')
-        assert.doesNotThrow(() => evaluate(session, aomiao, '', false), expression)
+      for (const myProfile of [null, { nickname: '旅伴', bio: '简介', code: 'ABCD2345' }]) {
+        for (const expression of conditions) {
+          const evaluate = new Function('session', 'aomiao', 'roleError', 'hasUnreadReview', 'hasUnreadNotifications',
+            'myProfile', 'tags', 'profileFailed', 'myPendingProfile', 'displayedBio', 'return (' + expression + ')')
+          assert.doesNotThrow(() => evaluate(session, aomiao, '', false, false, myProfile, '', false, null, myProfile?.bio ?? ''), expression)
+        }
       }
     }
   }

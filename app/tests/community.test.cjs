@@ -301,6 +301,7 @@ test('version retries keep one copy and an in-flight public image read checks vi
 
 test('feed cards use public profile fields and leave post body to detail', async () => {
   const f = fixture(), c = f.community
+  await f.repo.put('uni-id-users', author.uid, { status: 0 })
   const post = await f.post()
   await f.approve(post)
   const newAuthor = (await c.communityFeed(null, {})).items[0]
@@ -489,12 +490,18 @@ test('user accounts without profiles are listed; governance counts match their l
   assert.equal((await ops.communityUserDetail(admin, { targetUid: author.uid })).code, '')
   await assert.rejects(ops.communityUserDetail(reviewer, { targetUid: author.uid }), /FORBIDDEN/)
   assert.deepEqual((await ops.communityUsers(admin, { status: 'disabled' })).items.map(row => row.id), [stranger.uid])
+  const profile = { bio: '公开简介', displayCity: '澳门', interests: ['摄影'] }
+  await f.repo.put('fy-profiles', author.uid, { uid: author.uid, ...profile, pendingRevisionId: 'profile-candidate' })
+  await f.repo.put('fy-profile-revisions', 'profile-candidate', { uid: author.uid, status: 'pending', bio: '未审核简介' })
+  await f.repo.put('fy-profile-revisions', 'profile-history', { uid: author.uid, status: 'approved' })
+  assert.equal((await ops.communityOverview(reviewer)).pendingProfiles, 1)
   const published = await f.post()
   await f.approve(published)
   await f.post(author, { postId: published.postId, baseRevision: published.revisionId, requestId: 'pending-edit' })
   const report = await c.communityReport(friend, { ...published, reason: 'Review post' })
   await c.communityResolveReport(reviewer, { reportId: report.id, reason: 'Reviewed' })
   const detail = await ops.communityUserDetail(admin, { targetUid: author.uid })
+  for (const [field, value] of Object.entries(profile)) assert.deepEqual(detail[field], value)
   for (const [group, field] of [['pending', 'pendingPosts'], ['published', 'publishedPosts'],
     ['comments', 'pendingComments'], ['publicComments', 'publicComments'], ['reports', 'openReports'], ['resolvedReports', 'resolvedReports']]) {
     const page = await c.communityReviewList(admin, { group, targetUid: author.uid })
