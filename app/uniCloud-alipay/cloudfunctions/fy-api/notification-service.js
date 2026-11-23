@@ -52,7 +52,17 @@ function createNotificationService({repo,now=Date.now}) {
  return {
   async notificationsList(u,p={}) { member(u);validateCursor(p.cursor);const rows=await repo.page(collection,{recipientUid:u.uid},{field:'order',before:p.cursor||null,size:21});return {items:rows.slice(0,20).map(view),next:rows.length>20?rows[19].order:''} },
   async notificationsSummary(u) { member(u);return {unread:await repo.count(collection,{recipientUid:u.uid,readAt:0})} },
-  async notificationDetail(u,p) { const row=await own(u,p.id);if(Object.hasOwn(friendTitles,row.kind)) return {...view(row),reason:'',target:null,friend:await friendNotificationContext(repo,row,u.uid,now())};return {...view(row),reason:row.reason,target:await target(row)} },
+  async notificationDetail(u,p) {
+   const row=await own(u,p.id)
+   if (Object.hasOwn(friendTitles,row.kind)) return {...view(row),reason:'',target:null,friend:await friendNotificationContext(repo,row,u.uid,now())}
+   if (Object.hasOwn(profileTitles, row.kind)) {
+    const revision = identifier(row.profileRevisionId) ? await repo.get('fy-profile-revisions', row.profileRevisionId) : null
+    const profileTarget = revision?.uid === u.uid && 'profile.' + revision.status === row.kind
+      ? { revisionId: revision._id } : null
+    return { ...view(row), reason: row.reason, target: null, profileTarget }
+   }
+   return {...view(row),reason:row.reason,target:await target(row)}
+  },
   async notificationRead(u,p) { member(u);return repo.tx(async db=>{await markNotificationRead(db,u.uid,p.id,now());return {}}) }
  }
 }
