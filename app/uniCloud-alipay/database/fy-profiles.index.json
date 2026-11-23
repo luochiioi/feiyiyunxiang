@@ -1,0 +1,26 @@
+[
+  {
+    "IndexName": "profile_uid",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "uid",
+          "Direction": "1"
+        }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "profile_code",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "code",
+          "Direction": "1"
+        }
+      ],
+      "MgoIsUnique": true
+    }
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "IndexName": "uid_request",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "uid",
+          "Direction": "1"
+        },
+        {
+          "Name": "requestId",
+          "Direction": "1"
+        }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "expires_at",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "expiresAt",
+          "Direction": "1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

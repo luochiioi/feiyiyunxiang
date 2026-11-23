@@ -1,5 +1,7 @@
 const crypto=require('node:crypto')
 const {createNotificationService}=require('./notification-service')
+const {createProfileService}=require('./profile-service')
+const profileActions = new Set(['getMyProfile', 'profileStageAvatar', 'profileSubmit', 'profileRevision'])
 const notificationActions = new Set(['notificationsList','notificationsSummary','notificationDetail','notificationRead'])
 const {createService,key}=require('./service')
 const { createStepService } = require('./step-service')
@@ -114,6 +116,9 @@ exports.main=async(event,context)=>{
       data = await createStepService({ repo, verify: payload => verifyWechatRun(payload, {
         http: uniCloud.httpclient, appId: cfg.wechatAppId, secret: cfg.wechatSecret
       }) })[action](user, p)
+    } else if (profileActions.has(action)) {
+      const media = createCommunityMedia({ cloud: uniCloud, cfg, service, limited, namespace: 'profile-avatar' })
+      data = await createProfileService({ repo, media })[action](user, p)
     } else if (notificationActions.has(action)) {
       data = await createNotificationService({repo})[action](user,p)
     } else if (operationsActions.has(action)) {
