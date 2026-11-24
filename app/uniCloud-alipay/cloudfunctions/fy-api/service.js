@@ -3,7 +3,7 @@ const { validateCulture, cultureSummary, chapterGuide, completedActivities, acti
 const { createCultureService } = require('./culture-service')
 const { createCultureUpgrade } = require('./culture-upgrade')
 const { createAomiaoService } = require('./aomiao-service')
-const { seatNodes, seatActivities, seatOf } = require('./partnership-service')
+const { seatNodes, seatActivities, seatOf, usesMuseumRoute } = require('./partnership-service')
 const fail = code => { throw new Error(code) }
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const text = (v, max=120) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
@@ -111,9 +111,11 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     return {run,node:exhibit}
   }
   async function checkinWindow(db, run, runId) {
-    if (run.bottle === true) {
+    if (run.purpose === 'coop' && run.teamId != null) {
       const team = await db.get('fy-teams', run.teamId)
-      if (team?.status !== 'active' || team.runs?.[run.uid] !== runId) fail('NOT_PENDING')
+      if (team?.runs?.[run.uid] !== runId) fail('NOT_PENDING')
+      const canWrite = team.status === 'active' || (team.status === 'done' && !usesMuseumRoute(run))
+      if (!canWrite) fail('NOT_PENDING')
       return
     }
     if (run.purpose !== 'pk') return
@@ -122,7 +124,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     if (now() > match.startedAt + 24 * 3600 * 1000) fail('EXPIRED')
   }
   async function checkClueGate(db, run, runId, node) {
-    if (((run.purpose ?? 'solo') !== 'solo' && run.bottle !== true) || node.afterClue == null) return
+    if (((run.purpose ?? 'solo') !== 'solo' && !usesMuseumRoute(run)) || node.afterClue == null) return
     if (!await db.get('fy-checkins', key(runId, node.afterClue))) fail('CLUE_LOCKED')
   }
   async function runProgress(u, runId, run) {
@@ -130,7 +132,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     const checks = await repo.list('fy-checkins', { runId, uid: u.uid })
     const purpose = run.purpose ?? 'solo'
     const checked = checks.map(check => check.nodeId)
-    const snapshot = routeView(run.snapshot, run.version, checked, purpose === 'solo' || run.bottle === true)
+    const snapshot = routeView(run.snapshot, run.version, checked, purpose === 'solo' || usesMuseumRoute(run))
     if (purpose === 'coop') {
       const team = await repo.get('fy-teams', run.teamId)
       if (team?.runs?.[u.uid] !== runId) fail('NOT_FOUND')
@@ -247,7 +249,7 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
         if (old) return {id:cid,alreadyCompleted:true}
         await checkinWindow(db, run, p.runId)
         await checkClueGate(db, run, p.runId, node)
-        if (((run.purpose ?? 'solo') === 'solo' || run.bottle === true) && node.clue != null &&
+        if (((run.purpose ?? 'solo') === 'solo' || usesMuseumRoute(run)) && node.clue != null &&
           (!text(p.clueAnswer, 80) || p.clueAnswer.trim().normalize('NFKC') !== node.clue.answer)) fail('CLUE_INCORRECT')
         const exhibit = node === run.snapshot.exhibit
         if (!exhibit) {

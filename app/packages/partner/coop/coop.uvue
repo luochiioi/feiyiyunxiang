@@ -11,7 +11,7 @@
         <view class="card green">
           <text class="title">旅伴合作</text>
           <text class="body">各自完成所在地的节点与文化任务，双方完成后共同解锁成果。</text>
-          <text class="muted">状态 {{ statusText }}</text>
+          <text class="muted">状态 {{ statusText }} · 我的席位 {{ seatName(team.mySeat) }} · 旅伴 {{ seatName(team.partnerSeat ?? '') }}</text>
         </view>
         <view class="card">
           <text class="heading">旅伴</text>
@@ -38,6 +38,8 @@
         <button v-if="canSettle" class="primary" :disabled="busy" @click="settle">结算成果</button>
         <button v-if="canAnswer" class="primary" :disabled="busy" @click="answer(true)">接受邀请</button>
         <button v-if="canAnswer" class="secondary" :disabled="busy" @click="answer(false)">拒绝邀请</button>
+        <button v-if="status === 'invited' && team.invitedByMe" class="secondary" :disabled="busy" @click="confirmEnd(true)">撤回邀请</button>
+        <button v-if="status === 'active'" class="secondary" :disabled="busy" @click="confirmEnd(false)">退出合作</button>
         <button v-if="status === 'active' || status === 'invited'" class="secondary" :disabled="busy" @click="load">刷新合作</button>
         <button v-else class="secondary" :disabled="busy" @click="load">发起新合作</button>
       </template>
@@ -80,6 +82,8 @@ const statusText = computed(() => status.value === 'active' ? '进行中' : stat
 const canSettle = computed(() => status.value === 'active')
 const canAnswer = computed(() => status.value === 'invited' && team.value?.invitedByMe === false)
 const partnerText = computed(() => team.value?.partner?.nickname ?? '旅伴')
+
+function seatName(seat: string): string { return seat === 'macau' ? '澳门' : seat === 'hunan' ? '湖南' : '待分配' }
 
 function taskText(tasks: CoopTask[]): string {
   return tasks.length === 0 ? '全部文化任务' : tasks.map(task => task.title).join('、')
@@ -139,9 +143,12 @@ async function invite(code: string, routeId: string, seat: string, activities: s
   try {
     const result = await startCoop(code, routeId, seat, activities)
     team.value = await loadCoop(result.id)
-  } catch (_) {
+  } catch (error) {
     team.value = await loadMyCoop().catch(() => null)
-    if (team.value == null) showError()
+    if (team.value == null) {
+      if ((error as Error).message === 'INVALID_ROUTE') uni.showToast({ title: '两地路线暂未同时开放', icon: 'none' })
+      else showError()
+    }
   }
   finally { busy.value = false }
 }
@@ -149,6 +156,30 @@ async function invite(code: string, routeId: string, seat: string, activities: s
 function explore(): void {
   const value = team.value
   if (value != null && value.myRunId != null) openRouteDetail(value.routeId, value.myRunId)
+}
+
+function confirmEnd(withdraw: boolean): void {
+  const current = team.value
+  if (busy.value || current == null) return
+  uni.showModal({
+    title: withdraw ? '撤回合作邀请？' : '退出本次合作？',
+    content: withdraw ? '好友将无法接受这次邀请。' : '双方将结束本次合作，已保存的打卡记录仍可查看。',
+    success: result => { if (result.confirm) endCoop(current.id, withdraw) }
+  })
+}
+
+async function endCoop(teamId: string, withdraw: boolean): Promise<void> {
+  if (busy.value || team.value?.id !== teamId) return
+  busy.value = true
+  try {
+    await secured<UTSJSONObject>(withdraw ? 'withdrawCoop' : 'leaveCoop', { teamId })
+    uni.showToast({ title: withdraw ? '邀请已撤回' : '已退出合作', icon: 'success' })
+    await load()
+  } catch (error) {
+    const code = (error as Error).message
+    if (code === 'NOT_PENDING' || code === 'NOT_FOUND') await load()
+    else showError()
+  } finally { busy.value = false }
 }
 
 async function settle(): Promise<void> {

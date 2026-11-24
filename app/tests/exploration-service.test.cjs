@@ -403,7 +403,7 @@ test('legacy routes, cooperation and PK snapshots do not require solo exhibit cl
   const snapshot = await repo.get('fy-versions', version)
   const cooperation = { ...snapshot, culture: { tile: { after: ['n1'] }, quiz: { after: ['n2'] } } }
   await repo.put('fy-runs', 'coop-clue', { uid: a.uid, routeId: draft.id, version, snapshot: cooperation, purpose: 'coop', teamId: 'clue-team', revision: 0 })
-  await repo.put('fy-teams', 'clue-team', { seats: { macau: 'partner', hunan: a.uid }, runs: { [a.uid]: 'coop-clue' } })
+  await repo.put('fy-teams', 'clue-team', { status: 'active', seats: { macau: 'partner', hunan: a.uid }, runs: { [a.uid]: 'coop-clue' } })
 
   for (const [runId, nodeId] of [[legacy, first.id], ['pk-clue', 'n2'], ['coop-clue', 'n2']]) {
     const check = { runId, nodeId, requestId: 'check-' + runId }

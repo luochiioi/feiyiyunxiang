@@ -1,18 +1,19 @@
 <template>
   <view class="card">
     <text class="heading">{{ coop ? '发起合作' : '发起好友 PK' }}</text>
-    <text class="body">选择路线</text>
+    <text class="body">{{ coop ? '选择我的路线' : '选择路线' }}</text>
     <text v-if="routes.length === 0" class="muted">暂无已发布的路线。</text>
     <view v-for="item in routes" :key="item.id" class="choice">
       <button class="secondary" :class="{ selected: routeId === item.id }" :disabled="busy || !item.enabled" @click="chooseRoute(item.id)">{{ item.name }}</button>
-      <text v-if="!item.enabled" class="muted">该路线未配置两地席位</text>
+      <text v-if="!item.enabled" class="muted">该路线暂不可发起合作</text>
     </view>
     <text class="body">选择好友</text>
     <text v-if="friends.length === 0" class="muted">暂无好友，请先在旅伴页添加好友。</text>
     <button v-for="friend in friends" :key="friend.code" class="secondary" :class="{ selected: friendCode === friend.code }" :disabled="busy" @click="friendCode = friend.code">{{ friend.nickname }} · {{ friend.code }}</button>
     <template v-if="coop">
-      <text class="body">我的席位</text>
-      <view class="row">
+      <text v-if="fixedSeat.length > 0" class="muted">{{ fixedSeat === 'macau' ? '你走澳门上集，好友走湖南下集。' : '你走湖南下集，好友走澳门上集。' }}</text>
+      <text v-else class="body">我的席位</text>
+      <view v-if="fixedSeat.length === 0" class="row">
         <view class="seat-choice">
           <button class="secondary" :class="{ selected: seat === 'macau' }" :disabled="busy" @click="chooseSeat('macau')">澳门</button>
         </view>
@@ -33,7 +34,7 @@
 <script setup lang="uts">
 import { computed, ref } from 'vue'
 import { published } from '@/features/exploration/catalog.uts'
-import { coopRouteEnabled } from '@/features/partner/partner.uts'
+import { coopRouteEnabled, museumCoopSeat } from '@/features/partner/partner-view.uts'
 import type { CoopTask, PartnerFriend } from '@/features/partner/partner.uts'
 
 const props = defineProps<{ coop: boolean, friends: PartnerFriend[], busy: boolean, enabled: boolean }>()
@@ -44,11 +45,15 @@ const seat = ref('macau')
 const chosen = ref<string[]>([])
 const macauTasks = ['tile', 'tileQuiz']
 const hunanTasks = ['quiz', 'learning']
-const routes = computed(() => published.value.map(route => ({
-  id: route.id,
-  name: route.name,
-  enabled: !props.coop || coopRouteEnabled(route.activities ?? [])
-})))
+const fixedSeat = computed(() => museumCoopSeat(routeId.value))
+const routes = computed(() => {
+  const formalPair = published.value.some(route => !route.testOnly && museumCoopSeat(route.id) === 'macau') &&
+    published.value.some(route => !route.testOnly && museumCoopSeat(route.id) === 'hunan')
+  return published.value.map(route => ({
+    id: route.id, name: route.name,
+    enabled: !props.coop || (museumCoopSeat(route.id).length > 0 ? formalPair : coopRouteEnabled(route.activities ?? []))
+  }))
+})
 const taskOptions = computed((): CoopTask[] => {
   if (!props.coop) return []
   const route = published.value.find(item => item.id === routeId.value)
@@ -63,6 +68,8 @@ const canInvite = computed(() => !props.busy && props.enabled &&
 
 function chooseRoute(value: string): void {
   routeId.value = value
+  const assigned = museumCoopSeat(value)
+  if (assigned.length > 0) seat.value = assigned
   chosen.value = []
 }
 function chooseSeat(value: string): void {

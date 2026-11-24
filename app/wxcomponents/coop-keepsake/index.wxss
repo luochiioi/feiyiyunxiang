@@ -1,0 +1,9 @@
+.keepsake { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; background: #fffaf1; }
+.heading { color: #332b24; font-size: 17px; font-weight: 700; }
+.note { color: #625445; font-size: 13px; line-height: 1.5; }
+.art { position: absolute; left: -10000px; top: 0; width: 320px; height: 338px; }
+.preview { width: 100%; border-radius: 10px; }
+.actions { display: flex; gap: 8px; }
+.actions button { flex: 1; }
+button { margin: 0; min-height: 44px; border-radius: 12px; color: #30492d; background: #e5ecde; font-size: 14px; line-height: 44px; }
+button::after { border: 0; }

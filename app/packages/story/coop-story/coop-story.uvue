@@ -8,6 +8,9 @@
           <text v-if="story.full" class="body">已解锁湘澳六幕和双城终章。两位旅伴可分别续读。</text>
           <text v-else-if="story.pending" class="body">湘澳旅伴完成各自的点位和文化任务并结算后，解锁六幕与双城终章。</text>
         </view>
+        <!-- #ifdef MP-WEIXIN -->
+        <coop-keepsake v-if="story.keepsake != null" :pattern="story.keepsake.pattern" :palette="story.keepsake.palette" />
+        <!-- #endif -->
         <view class="card">
           <button class="secondary" @click="read(1)">第 1 幕 · 触碰海丝地图</button>
           <view v-for="chapter in story.chapters" :key="chapter.act" class="chapter">
@@ -28,15 +31,18 @@
 </template>
 
 <script setup lang="uts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { secured, session } from '@/features/api.uts'
 import { decodePageId, openPage } from '@/features/navigation.uts'
 
 type CoopChapter = { act: number, title: string, gateText: string, unlocked: boolean, started: boolean }
-type CoopStory = { full: boolean, pending: boolean, routeName: string, chapters: CoopChapter[] }
+type Keepsake = { pattern: string, palette: string }
+type CoopStory = { full: boolean, pending: boolean, routeName: string, chapters: CoopChapter[], keepsake?: Keepsake }
 const runId = ref<string | null>(null)
-const story = ref<CoopStory | null>(null)
+const loadedStory = ref<CoopStory | null>(null)
+const owner = ref('')
+const story = computed(() => owner.value === session.value?.uid ? loadedStory.value : null)
 const loading = ref(false)
 
 onLoad(query => { runId.value = decodePageId(query['runId'] ?? null) })
@@ -45,12 +51,14 @@ onShow(() => { load() })
 async function load(): Promise<void> {
   if (loading.value || runId.value == null) return
   loading.value = true
-  story.value = null
   const uid = session.value?.uid
   try {
     const value = await secured<CoopStory>('coopStory', { runId: runId.value! })
-    if (uid == null || session.value?.uid === uid) story.value = value
-  } catch (_) { story.value = null }
+    if (uid == null || session.value?.uid === uid) {
+      owner.value = session.value?.uid ?? ''
+      loadedStory.value = value
+    }
+  } catch (_) { loadedStory.value = null }
   finally { loading.value = false }
 }
 

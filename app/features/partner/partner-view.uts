@@ -28,6 +28,12 @@ export function partnerView(input: PartnerInput): PartnerView {
     partnerText: result == null ? '' : (member ? result.partnerNickname : result.partnerLabel)
   }
 }
+export function museumCoopSeat(routeId: string): string {
+  if (routeId === 'yinian-guiqi-macau') return 'macau'
+  if (routeId === 'yinian-guiqi-hunan') return 'hunan'
+  return ''
+}
+
 export function coopRouteEnabled(activities: ActivitySummary[]): boolean {
   const macau = activities.some(activity => ['tile', 'tileQuiz'].includes(activity.id) && (activity.after?.length ?? 0) > 0)
   const hunan = activities.some(activity => ['quiz', 'learning'].includes(activity.id) && (activity.after?.length ?? 0) > 0)

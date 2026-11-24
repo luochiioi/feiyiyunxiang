@@ -481,6 +481,80 @@ async function bottleReady() {
   return f
 }
 
+test('friends can invite from either formal museum, keep pinned versions, and receive an anonymous keepsake at settlement', async () => {
+  const f = await bottleReady()
+  await f.p.requestFriend(f.a, { code: f.codes.b, requestId: 'museum-friend' })
+  await f.p.respondFriend(f.b, { requestId: 'museum-friend', accept: true })
+  const { macau, hunan } = f.routes
+  const first = await f.p.inviteCoop(f.a, { code: f.codes.b, routeId: macau.id, seat: 'macau', requestId: 'macau-invite' })
+  assert.equal((await f.p.coopStatus(f.b, { teamId: first.id })).routeId, hunan.id)
+  assert.equal((await f.p.coopStatus(f.b, { teamId: first.id })).mySeat, 'hunan')
+  assert.deepEqual(await f.repo.list('fy-runs', {}), [])
+  await assert.rejects(f.p.withdrawCoop(f.b, { teamId: first.id }), /NOT_PENDING/)
+  await f.p.withdrawCoop(f.a, { teamId: first.id })
+  await assert.rejects(f.p.respondCoop(f.b, { teamId: first.id, accept: true }), /NOT_PENDING/)
+  await assert.rejects(f.p.inviteCoop(f.a, { code: f.codes.b, routeId: hunan.id, seat: 'macau', requestId: 'wrong-seat' }), /INVALID_REQUEST/)
+  const second = await f.p.inviteCoop(f.a, { code: f.codes.b, routeId: hunan.id, requestId: 'hunan-invite', activities: ['quiz'] })
+  const newMacau = { ...macau, revision: 1, name: '新澳门路线' }
+  await f.service.saveDraft(f.admin, newMacau)
+  const draft = await f.repo.get('fy-drafts', macau.id)
+  await f.repo.put('fy-drafts', macau.id, { ...draft, contentVerified: true })
+  assert.notEqual((await f.service.publish(f.admin, { id: macau.id, revision: 2 })).version, f.versions.macau)
+  await assert.rejects(f.p.respondCoop(f.c, { teamId: second.id, accept: true }), /NOT_FOUND/)
+  await f.p.respondCoop(f.b, { teamId: second.id, accept: true, activities: ['tile'] })
+  const runs = []
+  for (const [user, region] of [[f.a, 'hunan'], [f.b, 'macau']]) {
+    const local = f.routes[region]
+    const { myRunId: runId, routeId, version } = await f.p.myCoop(user)
+    assert.equal(routeId, local.id)
+    assert.equal(version, f.versions[region])
+    assert.equal((await f.service.coopStory(user, { runId })).keepsake, undefined)
+    const node = local.nodes[0]
+    const visit = { runId, nodeId: node.id, requestId: 'invite-' + region, latitude: node.latitude, longitude: node.longitude }
+    const mediaId = 'invite-photo-' + region
+    await f.service.registerMedia(user, { ...visit, id: mediaId, fileID: 'private' })
+    await assert.rejects(f.service.checkin(user, { ...visit, mediaId, clueAnswer: 'wrong' }), /CLUE_INCORRECT/)
+    await f.service.checkin(user, { ...visit, mediaId, clueAnswer: node.clue.answer })
+    if (region === 'macau') await f.service.saveTile(user, { runId, pattern: 'sail', palette: 'cobalt' })
+    else await f.service.answerQuiz(user, { runId, option: local.culture.quiz.answer })
+    runs.push([user, runId])
+  }
+  await f.p.settleCoop(f.a, { teamId: second.id })
+  for (const [user, runId] of runs) {
+    const story = await f.service.coopStory(user, { runId })
+    assert.equal(story.full, true)
+    assert.deepEqual(story.keepsake, { pattern: 'sail', palette: 'cobalt' })
+    await assert.rejects(f.service.coopStory(f.c, { runId }), /NOT_FOUND/)
+  }
+})
+
+test('leaving a formal friend team blocks new writes but keeps personal records', async () => {
+  const f = await bottleReady()
+  await f.p.requestFriend(f.a, { code: f.codes.b, requestId: 'leave-friend' })
+  await f.p.respondFriend(f.b, { requestId: 'leave-friend', accept: true })
+  const route = f.routes.macau
+  await f.repo.put('fy-routes', f.routes.hunan.id, { enabled: false })
+  await assert.rejects(f.p.inviteCoop(f.a, { code: f.codes.b, routeId: route.id, requestId: 'disabled' }), /INVALID_ROUTE/)
+  await f.repo.put('fy-routes', f.routes.hunan.id, { enabled: true, version: f.versions.hunan })
+  const invite = await f.p.inviteCoop(f.a, { code: f.codes.b, routeId: route.id, requestId: 'leave-invite' })
+  await f.p.respondCoop(f.b, { teamId: invite.id, accept: true })
+  const { myRunId: runId } = await f.p.myCoop(f.a)
+  const { myRunId: otherRun } = await f.p.myCoop(f.b)
+  const node = route.nodes[0]
+  const visit = { runId, nodeId: node.id, requestId: 'leave-visit', latitude: node.latitude, longitude: node.longitude }
+  await f.service.registerMedia(f.a, { ...visit, id: 'left-photo', fileID: 'private' })
+  await f.service.checkin(f.a, { ...visit, mediaId: 'left-photo', clueAnswer: node.clue.answer })
+  await f.p.leaveCoop(f.b, { teamId: invite.id })
+  assert.equal(await f.p.myCoop(f.a), null)
+  assert.equal(await f.p.myCoop(f.b), null)
+  await assert.rejects(f.service.mediaBinding(f.b, { runId: otherRun, nodeId: f.routes.hunan.nodes[0].id, requestId: 'late' }), /NOT_PENDING/)
+  await assert.rejects(f.service.saveTile(f.a, { runId, pattern: 'rose', palette: 'mist' }), /NOT_PENDING/)
+  assert.deepEqual((await f.service.progress(f.a, { runId })).completed, [node.id])
+  assert.equal((await f.service.readMedia(f.a, { id: 'left-photo' })).fileID, 'private')
+  assert.equal((await f.service.coopStory(f.a, { runId })).keepsake, undefined)
+  await assert.rejects(f.p.settleCoop(f.a, { teamId: invite.id }), /NOT_PENDING/)
+})
+
 test('cross-region bottles require both users and create separate private museum explorations once', async () => {
   const f = await bottleReady()
   const a = await f.p.joinBottle(f.a, { region: 'macau', mode: 'cross', requestId: 'bottle-a' })

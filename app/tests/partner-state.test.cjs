@@ -6,10 +6,10 @@ const path = require('node:path')
 const { stripTypeScriptTypes } = require('node:module')
 
 const source = fs.readFileSync(path.join(__dirname, '../features/partner/partner-view.uts'), 'utf8')
-const stripped = stripTypeScriptTypes(source).replace(/^export /gm, '') + '\nmodule.exports = { partnerView, coopRouteEnabled }\n'
+const stripped = stripTypeScriptTypes(source).replace(/^export /gm, '') + '\nmodule.exports = { partnerView, coopRouteEnabled, museumCoopSeat }\n'
 const tmp = path.join(os.tmpdir(), 'partner-view-stripped.cjs')
 fs.writeFileSync(tmp, stripped)
-const { partnerView, coopRouteEnabled } = require(tmp)
+const { partnerView, coopRouteEnabled, museumCoopSeat } = require(tmp)
 
 test('a coop route needs at least one check-in gate for each seat', () => {
   const macau = { id: 'tileQuiz', after: ['macau-point'] }
@@ -42,4 +42,10 @@ test('a settled coop shows the seat label, never the partner name, to outsiders'
 test('the logged-in detail keeps the partner public card', () => {
   const view = partnerView({ result: { partnerLabel: '湖南旅伴', partnerNickname: '小陈' }, audience: 'member' })
   assert.equal(view.partnerText, '小陈')
+})
+
+test('a formal museum fixes the inviter seat while legacy routes still use a choice', () => {
+  assert.equal(museumCoopSeat('yinian-guiqi-macau'), 'macau')
+  assert.equal(museumCoopSeat('yinian-guiqi-hunan'), 'hunan')
+  assert.equal(museumCoopSeat('combined'), '')
 })
