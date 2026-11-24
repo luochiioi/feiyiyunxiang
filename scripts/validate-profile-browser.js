@@ -52,6 +52,11 @@ async (page) => {
     const candidate = { ...rejected, revisionId: 'admin-case', nickname: '申请审核昵称', status: 'pending', hasAvatar: true, reason: '', createdAt: Date.now() }
     const defaultCandidate = { ...candidate, revisionId: 'default-avatar', nickname: '默认头像申请', hasAvatar: false }
     const disabledCandidate = { ...defaultCandidate, revisionId: 'disabled-case', nickname: '停用账户申请' }
+    const accounts = [
+      { ...approved, id: 'account-A', status: 0 },
+      { id: 'account-B', nickname: '旅伴', code: 'MUTE2345', status: 0, muteUntil: Date.now() + 3600000 },
+      { id: 'account-C', nickname: '停用账户', code: 'WXYZ2345', status: 1, suspendedByOps: true }
+    ]
     window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [], avatarContents: [], actions: [],
       adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0 }
     window.__mockCloud = async ({ data }) => {
@@ -64,12 +69,20 @@ async (page) => {
         case 'adminLogin': return ok({ uid: 'local-reviewer', username: payload.username, token: 'local-admin', expiresAt: Date.now() + 3600000, admin: payload.username !== 'fixture-review-only' })
         case 'communityOverview': return ok({ pendingPosts: 1, pendingComments: 1, openReports: 1, publishedPosts: 0, pendingProfiles: fixture.adminDecision ? 0 : 1 })
         case 'communityReviewList': return ok({ items: [], next: '' })
-        case 'communityUsers': return ok({ items: [
-          { ...approved, id: 'account-A', status: 0 },
-          { id: 'account-B', nickname: '旅伴', code: '', status: 0 },
-          { id: 'account-C', nickname: '停用账户', code: 'WXYZ2345', status: 1, suspendedByOps: true }
-        ], next: '' })
-        case 'communityUserDetail': return ok({ ...approved, id: 'account-A', status: 0, friendCount: 0, postCount: 0, commentCount: 0, reportCount: 0, pendingPosts: 0, publishedPosts: 0, pendingComments: 0, publicComments: 0, openReports: 0, resolvedReports: 0 })
+        case 'communityUsers':
+          if (fixture.failAccounts) { fixture.failAccounts = false; throw Error('ACCOUNTS_READ_FAILED') }
+          return ok({ items: accounts.filter(row => !payload.code || row.code === payload.code), next: '' })
+        case 'communityUserDetail':
+          if (fixture.failAccountDetail) { fixture.failAccountDetail = false; throw Error('ACCOUNT_DETAIL_READ_FAILED') }
+          return ok({ ...accounts.find(row => row.id === payload.targetUid), friendCount: 0, postCount: 0, commentCount: 0, reportCount: 0, pendingPosts: 0, publishedPosts: 0, pendingComments: 0, publicComments: 0, openReports: 0, resolvedReports: 0 })
+        case 'communityAccountStatus': {
+          const row = accounts.find(row => row.id === payload.targetUid)
+          row.status = payload.suspend ? 1 : 0
+          row.suspendedByOps = payload.suspend
+          fixture.failAccounts = true
+          fixture.failAccountDetail = true
+          return ok({})
+        }
         case 'drafts': return ok([])
         case 'profileReviewList':
           if (fixture.failQueue) { fixture.failQueue = false; throw Error('QUEUE_READ_FAILED') }
@@ -302,11 +315,44 @@ async (page) => {
     }))
     if (rows.some(row => Math.abs(row.right) > 1 || row.centerDelta > 1)) throw Error('Account details buttons do not align on each row at ' + width)
   }
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.locator('.account-row').first().getByText('详情', { exact: true }).click()
   await visible('探索非遗文化').waitFor()
+  const accountActions = page.locator('.account-operations')
+  if (await page.locator('.ops textarea').count()) throw Error('Account action draft is displayed before selecting an action')
+  await visible('禁言').click()
   await visible('禁言时长（分钟）').waitFor()
+  await accountActions.locator('textarea').fill('旧账户的操作原因')
+  await visible('取消').click()
+  await visible('禁言').click()
+  if (await accountActions.locator('textarea').inputValue()) throw Error('Cancelling kept the previous account action reason')
+  await page.locator('.account-row').nth(1).getByText('详情', { exact: true }).click()
+  await visible('解除禁言').waitFor()
+  if (await accountActions.locator('textarea').count()) throw Error('Switching accounts retained the previous action')
+  await page.locator('.account-row').nth(2).getByText('详情', { exact: true }).click()
+  await visible('恢复账户').waitFor()
+  if (await accountActions.getByText('停用账户', { exact: true }).count()) throw Error('An operator-disabled account offers suspend')
+  await page.locator('.main input').first().fill('ABCD2345')
+  await visible('查找').click()
+  await page.waitForFunction(() => document.querySelectorAll('.account-row').length === 1)
+  await page.locator('.account-row').first().getByText('详情', { exact: true }).click()
+  await visible('探索非遗文化').waitFor()
+  await visible('待审帖子（0）').click()
+  await page.getByText(/当前筛选用户 .*ABCD2345/).waitFor()
+  await visible('返回用户管理').click()
+  await visible('探索非遗文化').waitFor()
+  if (await page.locator('.account-row').count() !== 1) throw Error('Returning from review changed the account search')
   await screenshot('admin-user-detail')
+  await accountActions.getByText('停用账户', { exact: true }).click()
+  await accountActions.locator('textarea').fill('模拟账户停用')
+  await visible('确认停用').click()
+  await page.getByText(/ABCD2345.*现有会话将撤销/s).last().waitFor()
+  await visible('确定').click()
+  await visible('账户已停用，会话已撤销。').waitFor()
+  await visible('重试账户详情').click()
+  await visible('恢复账户').waitFor()
+  await visible('重试账户列表').click()
+  if (await page.evaluate(() => window.__profileFixture.actions.filter(action => action === 'communityAccountStatus').length) !== 1) throw Error('Account read retries repeated a confirmed write')
   await page.locator('.user-tabs .nav-dot').waitFor()
   await visible('资料待审').click()
   await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).click()
@@ -365,5 +411,5 @@ async (page) => {
     throw Error('Review-only access opened the accounts list')
   }
   if (uncaught.length > 0) throw Error(uncaught.join('; '))
-  return 'Verified gesture crop, 256px avatar and retry, owner-only preview, isolated steps navigation, moderation badges and access'
+  return 'Verified 256px avatar crop, private profile preview, dashboard queues, account operations, avatar approval gate and moderation badges'
 }
