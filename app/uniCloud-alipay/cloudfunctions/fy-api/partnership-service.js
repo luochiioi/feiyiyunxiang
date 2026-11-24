@@ -4,7 +4,7 @@ const { createHash } = require('node:crypto')
 const key = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 const fail = code => { throw new Error(code) }
 const { pkMethods } = require('./pk-service')
-const { bottleMethods } = require('./bottle-service')
+const { bottleMethods, museumRoute, museumRouteIds } = require('./bottle-service')
 const { completedActivities } = require('./culture')
 const HOUR = 3600 * 1000
 const expiredInvite = (team, at) => team.status === 'invited' && team.expiresAt <= at
@@ -53,7 +53,7 @@ function createPartnershipService({ repo, now = Date.now }) {
     const snapshot = await repo.get('fy-versions', local?.version ?? team.version)
     const partnerSnapshot = remote == null ? snapshot : await repo.get('fy-versions', remote.version)
     const view = { id: team._id, status, mySeat: mine, partnerSeat: otherSeat, routeId: local?.routeId ?? team.routeId, version: local?.version ?? team.version,
-      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: local == null ? card(partnerProfile) : partnerProfile,
+      invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: team.invitedBy == null ? partnerProfile : card(partnerProfile),
       myTasks: taskLabels(snapshot, taskSelection(snapshot, mine, team.tasks?.[uid])),
       partnerTasks: taskLabels(partnerSnapshot, taskSelection(partnerSnapshot, otherSeat, team.tasks?.[other])),
       myTaskOptions: taskLabels(snapshot, seatActivitiesOf(snapshot, mine)) }
@@ -215,21 +215,36 @@ function createPartnershipService({ repo, now = Date.now }) {
         if (!friendship || friendship.status !== 'accepted') fail('NOT_FRIENDS')
         const at = now()
         if (await activeTeam(db, u.uid, at) || await activeTeam(db, target.uid, at)) fail('CONFLICT')
-        const route = await db.get('fy-routes', p.routeId)
-        if (!route?.enabled) fail('NOT_FOUND')
-        const snapshot = await db.get('fy-versions', route.version)
-        const plan = seatPlan(snapshot)
-        if (!plan) fail('INVALID_ROUTE')
-        const mySeat = p.seat ?? 'macau'
-        if (mySeat !== 'macau' && mySeat !== 'hunan') fail('INVALID_REQUEST')
-        const tasks = taskSelection(snapshot, mySeat, p.activities ?? null)
-        const seats = { ...plan, macau: mySeat === 'macau' ? u.uid : target.uid, hunan: mySeat === 'hunan' ? u.uid : target.uid }
+        const museumSeat = Object.keys(museumRouteIds).find(region => museumRouteIds[region] === p.routeId)
+        const mySeat = p.seat ?? museumSeat ?? 'macau'
+        if ((mySeat !== 'macau' && mySeat !== 'hunan') || (museumSeat != null && mySeat !== museumSeat)) fail('INVALID_REQUEST')
+        let version, tasks, placement
+        if (museumSeat != null) {
+          const local = await museumRoute(db, mySeat, fail)
+          const remote = await museumRoute(db, mySeat === 'macau' ? 'hunan' : 'macau', fail)
+          if (!seatActivitiesOf(local.snapshot, local.region).length || !seatActivitiesOf(remote.snapshot, remote.region).length) fail('INVALID_ROUTE')
+          version = local.version
+          tasks = taskSelection(local.snapshot, mySeat, p.activities ?? null)
+          placement = { memberRoutes: {
+            [u.uid]: { region: local.region, routeId: local.routeId, version: local.version },
+            [target.uid]: { region: remote.region, routeId: remote.routeId, version: remote.version }
+          } }
+        } else {
+          const route = await db.get('fy-routes', p.routeId)
+          if (!route?.enabled) fail('NOT_FOUND')
+          version = route.version
+          const snapshot = await db.get('fy-versions', version)
+          const plan = seatPlan(snapshot)
+          if (!plan) fail('INVALID_ROUTE')
+          tasks = taskSelection(snapshot, mySeat, p.activities ?? null)
+          placement = { seats: { ...plan, macau: mySeat === 'macau' ? u.uid : target.uid, hunan: mySeat === 'hunan' ? u.uid : target.uid } }
+        }
         const teamId = key('team', u.uid, p.requestId)
         await lockCoopSlots(db, pair, at)
         await db.put('fy-teams', teamId, {
-          members: pair, a: pair[0], b: pair[1], seats, routeId: p.routeId, version: route.version, status: 'invited',
+          members: pair, a: pair[0], b: pair[1], ...placement, routeId: p.routeId, version, status: 'invited',
           tasks: { [u.uid]: tasks },
-          invitedBy: u.uid, invitedAt: now(), expiresAt: now() + 24 * HOUR
+          invitedBy: u.uid, invitedAt: at, expiresAt: at + 24 * HOUR
         })
         await db.put('fy-requests', requestKey, { teamId })
         await db.put('fy-requests', key(target.uid, 'coop', p.requestId), { teamId })
@@ -252,13 +267,17 @@ function createPartnershipService({ repo, now = Date.now }) {
         }
         if (!p.accept) { await db.put('fy-teams', p.teamId, { ...team, status: 'declined' }); return { id: p.teamId, status: 'declined' } }
         if (await activeTeam(db, u.uid, at, p.teamId)) fail('CONFLICT')
-        const snapshot = await db.get('fy-versions', team.version)
-        const tasks = taskSelection(snapshot, seatOf(team, u.uid), p.activities ?? null)
         const runs = {}
+        let tasks
         for (const uid of team.members) {
+          const { routeId, version } = team.memberRoutes?.[uid] ?? team
+          const snapshot = await db.get('fy-versions', version)
+          if (snapshot == null) fail('INVALID_ROUTE')
+          if (uid === u.uid) tasks = taskSelection(snapshot, seatOf(team, uid), p.activities ?? null)
           const runId = key(uid, 'coop', p.teamId)
           await db.put('fy-runs', runId, {
-            uid, routeId: team.routeId, version: team.version, snapshot, purpose: 'coop', teamId: p.teamId, createdAt: now(), revision: 0
+            uid, routeId, version, snapshot, purpose: 'coop', teamId: p.teamId, createdAt: at, revision: 0,
+            ...(team.memberRoutes == null ? {} : { museumCoop: true })
           })
           runs[uid] = runId
         }
@@ -355,8 +374,12 @@ function seatPlan(snapshot) {
   return { macauNodes: macau, hunanNodes: hunan }
 }
 
+function usesMuseumRoute(run) {
+  return run.bottle === true || run.museumCoop === true
+}
+
 function seatNodes(run, seat) {
-  if (run.bottle === true) return run.snapshot.nodes.map(node => node.id)
+  if (usesMuseumRoute(run)) return run.snapshot.nodes.map(node => node.id)
   const plan = seatPlan(run.snapshot)
   return seat === 'macau' ? plan.macauNodes : plan.hunanNodes
 }
@@ -387,4 +410,4 @@ function seatActivities(run, seat) {
   return seatActivitiesOf(run.snapshot, seat)
 }
 
-module.exports = { createPartnershipService, seatNodes, seatActivities, seatOf }
+module.exports = { createPartnershipService, seatNodes, seatActivities, seatOf, usesMuseumRoute }

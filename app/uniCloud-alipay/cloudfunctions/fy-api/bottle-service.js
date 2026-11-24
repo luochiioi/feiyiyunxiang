@@ -1,5 +1,14 @@
-const routeIds = { macau: 'yinian-guiqi-macau', hunan: 'yinian-guiqi-hunan' }
+const museumRouteIds = { macau: 'yinian-guiqi-macau', hunan: 'yinian-guiqi-hunan' }
 const ttl = 24 * 60 * 60 * 1000
+
+async function museumRoute(db, region, fail) {
+  const routeId = museumRouteIds[region]
+  const current = await db.get('fy-routes', routeId)
+  if (!current?.enabled || current.testOnly) fail('INVALID_ROUTE')
+  const snapshot = await db.get('fy-versions', current.version)
+  if (snapshot?.id !== routeId || snapshot.testOnly || snapshot.nodes.length === 0) fail('INVALID_ROUTE')
+  return { region, routeId, version: current.version, snapshot }
+}
 
 function bottleMethods({ repo, now, key, fail, member, requestOf, activeTeam, lockCoopSlots }) {
   const bottleId = uid => key('bottle', uid)
@@ -22,12 +31,8 @@ function bottleMethods({ repo, now, key, fail, member, requestOf, activeTeam, lo
   }
 
   async function routeFor(db, region) {
-    const routeId = routeIds[region]
-    const current = await db.get('fy-routes', routeId)
-    if (!current?.enabled || current.testOnly) fail('INVALID_ROUTE')
-    const snapshot = await db.get('fy-versions', current.version)
-    if (!snapshot || snapshot.testOnly || snapshot.nodes.length === 0) fail('INVALID_ROUTE')
-    return { region, routeId, version: current.version }
+    const { routeId, version } = await museumRoute(db, region, fail)
+    return { region, routeId, version }
   }
 
   return {
@@ -38,7 +43,7 @@ function bottleMethods({ repo, now, key, fail, member, requestOf, activeTeam, lo
 
     async joinBottle(u, p) {
       member(u)
-      if (!requestOf(p.requestId) || !Object.hasOwn(routeIds, p.region) ||
+      if (!requestOf(p.requestId) || !Object.hasOwn(museumRouteIds, p.region) ||
         (p.mode !== 'same' && p.mode !== 'cross')) fail('INVALID_REQUEST')
       const at = now()
       const region = p.mode === 'same' ? p.region : (p.region === 'macau' ? 'hunan' : 'macau')
@@ -137,4 +142,4 @@ function bottleMethods({ repo, now, key, fail, member, requestOf, activeTeam, lo
   }
 }
 
-module.exports = { bottleMethods }
+module.exports = { bottleMethods, museumRoute, museumRouteIds }

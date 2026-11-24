@@ -42,6 +42,7 @@
 import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { api, login, session, requestId } from '@/features/api.uts'
+import { decodePageId } from '@/features/navigation.uts'
 import { communityError, postPath, savePreview, removePreview } from '@/features/community/community.uts'
 import type { DiaryPhoto } from '@/features/community/community.uts'
 type Photo = { slot: string, path: string, source: string, diaryId: string, uploadId: string }
@@ -57,6 +58,11 @@ let pendingDiaryId = '', submitId = requestId(), submittedDraft = '', disposed =
 onUnload(() => { disposed = true; photos.value.forEach(photo => removePreview(photo.path)) })
 onLoad(query => {
   pendingDiaryId = query['diaryId'] ?? ''
+  const keepsake = decodePageId(query['keepsake'] ?? null) ?? ''
+  if (keepsake.startsWith('wxfile://tmp') || keepsake.startsWith('http://tmp/')) {
+    title.value = '海丝瓷绣 · 双城纪念'
+    photos.value = [{ slot: requestId(), source: 'upload', path: keepsake, diaryId: '', uploadId: '' }]
+  }
   initialize()
 })
 async function requireDraftAccount(): Promise<void> {

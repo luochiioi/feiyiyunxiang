@@ -35,7 +35,9 @@ async function coopChapters(db, run, runId, key) {
   const combined = new Map([...(partnerRun.snapshot.culture?.chapters ?? []), ...own].map(chapter => [chapter.act, chapter]))
   const mainStory = [2, 3, 4, 5, 6].map(act => combined.get(act))
   if (mainStory.some(chapter => !chapter)) return local
-  return { chapters: [...mainStory, finale], full: true }
+  const pattern = ['rose', 'sail', 'geometry'].includes(result.work?.pattern) ? result.work.pattern : ''
+  const palette = ['indigo', 'cobalt', 'mist'].includes(result.work?.palette) ? result.work.palette : ''
+  return { chapters: [...mainStory, finale], full: true, keepsake: { pattern, palette } }
 }
 
 module.exports = { coopChapters }

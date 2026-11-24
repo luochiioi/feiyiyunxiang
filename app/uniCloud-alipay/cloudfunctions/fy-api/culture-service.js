@@ -34,7 +34,7 @@ function createCultureService({ repo, owned, key, now, attachCulture, checkinWin
   }
 
   async function setCulture(db, run, runId, value) {
-    if (run.bottle === true) await checkinWindow(db, run, runId)
+    if (run.purpose === 'coop') await checkinWindow(db, run, runId)
     await db.put('fy-runs', runId, { ...run, culture: { ...run.culture, ...value }, revision: run.revision + 1 })
   }
 
@@ -158,7 +158,8 @@ function createCultureService({ repo, owned, key, now, attachCulture, checkinWin
         const guide = unlocked ? { act: chapter.act, title: chapter.title, gateText: '' } : chapterGuide(run.snapshot.culture, chapter)
         return { ...guide, unlocked, started: !!run.story?.[chapter.act] }
       }))
-      return { full: access.full, pending: access.pending === true, routeName: run.snapshot.name, chapters }
+      return { full: access.full, pending: access.pending === true, routeName: run.snapshot.name, chapters,
+        ...(access.full ? { keepsake: access.keepsake } : {}) }
     },
     async coopStoryHistory(u) {
       requireValue(u?.uid, 'AUTH_REQUIRED')

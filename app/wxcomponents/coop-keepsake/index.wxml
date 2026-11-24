@@ -1,0 +1,15 @@
+<view class="keepsake">
+  <text class="heading">双城纪念图</text>
+  <button wx:if="{{!path}}" disabled="{{busy}}" loading="{{busy}}" bindtap="generate">生成纪念图</button>
+  <canvas wx:if="{{busy && !path}}" type="2d" id="art" class="art" aria-hidden="true"/>
+  <block wx:if="{{path}}">
+    <image class="preview" src="{{path}}" mode="widthFix" bindtap="preview" aria-label="澳门瓷砖与湖南湘绣纪念图"/>
+    <view class="actions">
+      <button bindtap="save">保存到相册</button>
+      <button bindtap="share">分享图片</button>
+    </view>
+    <button bindtap="compose">带图发帖</button>
+    <text class="note">发帖会进入社区审核。</text>
+  </block>
+  <text wx:if="{{message}}" class="note">{{message}}</text>
+</view>
