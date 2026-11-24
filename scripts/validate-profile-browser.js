@@ -58,7 +58,7 @@ async (page) => {
       { id: 'account-C', nickname: '停用账户', code: 'WXYZ2345', status: 1, suspendedByOps: true }
     ]
     window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [], avatarContents: [], actions: [],
-      adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0 }
+      adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0, decisions: [] }
     window.__mockCloud = async ({ data }) => {
       const { action, token, payload = {} } = data, fixture = window.__profileFixture
       fixture.actions.push(action)
@@ -105,7 +105,9 @@ async (page) => {
           if (!payload.current && fixture.brokenSelected) { fixture.brokenSelected = false; return ok({ src: 'data:image/png;base64,AAAA' }) }
           return ok({ src: payload.current ? png : proposedPng })
         case 'profileReview':
+          if (fixture.loseDecision) { fixture.loseDecision = false; throw Error('REVIEW_UNCONFIRMED') }
           fixture.adminWrites++
+          fixture.decisions.push(payload)
           fixture.adminDecision = payload.decision
           fixture.failQueue = true
           return ok({ status: 'rejected' })
@@ -449,6 +451,69 @@ async (page) => {
   if (await visible('账户列表').count() || await page.evaluate(() => window.__profileFixture.actions.includes('communityUsers'))) {
     throw Error('Review-only access opened the accounts list')
   }
+  const profileReview = page.locator('.profile-review')
+  const queueItem = label => profileReview.locator('.queue-item').filter({ hasText: label })
+  const focused = control => control.evaluate(node => node === document.activeElement)
+  const tabTo = async (control, key = 'Tab') => {
+    await control.waitFor()
+    for (let i = 0; i < 24 && !await focused(control); i++) await page.keyboard.press(key)
+    if (!await focused(control)) throw Error('Cannot reach ' + (await control.textContent()) + ' with ' + key)
+    if (!await control.evaluate(node => getComputedStyle(node.closest('.reject-reason') ?? node).outlineStyle !== 'none')) {
+      throw Error('Missing visible keyboard focus on ' + (await control.textContent()))
+    }
+  }
+  const activate = async (control, key = 'Enter') => { await tabTo(control); await page.keyboard.press(key) }
+  const dashboard = sidebar.getByText('运营工作台', { exact: true })
+  const reviewTask = todo.locator('uni-button').filter({ hasText: '待审资料' })
+  const refreshQueue = profileReview.getByRole('button', { name: '刷新队列' })
+  for (const [width, height, decision] of [[1440, 900, 'approve'], [1024, 768, 'reject']]) {
+    await page.setViewportSize({ width, height })
+    await dashboard.click()
+    await page.evaluate(() => Object.assign(window.__profileFixture, {
+      adminDecision: '', failSelected: true, adminWrites: 0, decisions: [], loseDecision: false
+    }))
+    await activate(reviewTask)
+    const defaultItem = queueItem('默认头像申请')
+    await activate(defaultItem, 'Space')
+    await visible('默认头像').waitFor()
+    if (await approvalDisabled()) throw Error('Default avatar application cannot be approved by keyboard')
+    const candidateItem = queueItem('申请审核昵称')
+    await tabTo(candidateItem, 'Shift+Tab')
+    await page.keyboard.press('Enter')
+    await visible('申请头像无法读取').waitFor()
+    const approveButton = approve()
+    if (!await approvalDisabled()) throw Error('Approval enabled without a loaded application avatar')
+    await approveButton.click({ force: true })
+    await approveButton.dispatchEvent('keydown', { key: 'Enter' })
+    await approveButton.dispatchEvent('keydown', { key: ' ' })
+    if (await page.evaluate(() => window.__profileFixture.adminWrites)) throw Error('Disabled approval wrote a decision')
+    if (decision === 'approve') {
+      await activate(profileReview.getByRole('button', { name: '重试申请头像' }), 'Space')
+      await page.waitForFunction(() => !document.querySelector('.decision .primary')?.hasAttribute('disabled'))
+      await activate(approve())
+      await visible('资料已通过。 队列刷新失败，可单独刷新。').waitFor()
+    } else {
+      const reject = () => profileReview.getByRole('button', { name: '驳回…' })
+      await activate(reject(), 'Space')
+      await activate(profileReview.getByRole('button', { name: '取消' }))
+      await activate(reject())
+      await tabTo(reason)
+      await page.keyboard.insertText('键盘验收的驳回理由')
+      await page.evaluate(() => { window.__profileFixture.loseDecision = true })
+      await activate(profileReview.getByRole('button', { name: '确认驳回' }), 'Space')
+      await visible('未收到审核确认，可重试同一决定。').waitFor()
+      await activate(profileReview.getByRole('button', { name: '重试确认审核结果' }))
+      await visible('资料已驳回。 队列刷新失败，可单独刷新。').waitFor()
+    }
+    await activate(refreshQueue, 'Space')
+    await visible('当前没有待审资料。').waitFor()
+    const decisions = await page.evaluate(() => window.__profileFixture.decisions)
+    if (decisions.length !== 1 || decisions[0].decision !== decision || decisions[0].revisionId !== 'admin-case' ||
+        (decision === 'reject' && decisions[0].reason !== '键盘验收的驳回理由')) throw Error('Unexpected keyboard review writes')
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw Error('Profile review overflows at ' + width)
+  }
+  await activate(dashboard, 'Space')
+  await reviewTask.waitFor()
   if (uncaught.length > 0) throw Error(uncaught.join('; '))
-  return 'Verified 256px avatar crop, private profile preview, dashboard queues, account operations, avatar approval gate and moderation badges'
+  return 'Verified profile, dashboard and account regressions, plus keyboard approval and rejection at 1440×900 and 1024×768'
 }

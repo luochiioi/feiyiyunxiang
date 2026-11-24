@@ -4,9 +4,11 @@
       <view class="brand-row"><image src="/static/aomiao-wave.png" mode="aspectFit" class="pet" /><text class="brand">非遗云享</text></view>
       <template v-if="session != null">
         <view class="sidebar-nav">
-          <button :class="{ active: section === 'overview' }" @click="goTo('overview')">运营工作台</button>
+          <button role="button" tabindex="0" :class="{ active: section === 'overview' }" @click="goTo('overview')"
+            @keydown="activateNavigation($event, () => goTo('overview'))">运营工作台</button>
           <button :class="{ active: section === 'review' }" @click="openQueue('pending')">社区审核与治理<view v-if="hasCommunityWork" class="nav-dot" aria-label="有待处理的社区事项" /></button>
-          <button :class="{ active: section === 'users' }" @click="openUsers()">用户管理<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>
+          <button role="button" tabindex="0" :class="{ active: section === 'users' }" @click="openUsers()"
+            @keydown="activateNavigation($event, () => openUsers())">用户管理<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>
           <button v-if="session?.admin === true" :class="{ active: section === 'routes' }" @click="openRoutes">路线与博物馆</button>
         </view>
         <view class="sidebar-footer">
@@ -29,8 +31,10 @@
         <template v-if="section !== 'routes'">
           <CommunityOverview v-if="section === 'overview'" :show-account-metrics="session?.admin === true" @review="openQueue" />
           <view v-if="section === 'users' && session?.admin === true" class="toolbar user-tabs">
-            <button :class="{ active: userTab === 'accounts' }" @click="userTab = 'accounts'">账户列表</button>
-            <button :class="{ active: userTab === 'profiles' }" @click="userTab = 'profiles'">资料待审<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>
+            <button role="button" tabindex="0" :class="{ active: userTab === 'accounts' }" @click="switchUserTab('accounts')"
+              @keydown="activateNavigation($event, () => switchUserTab('accounts'))">账户列表</button>
+            <button role="button" tabindex="0" :class="{ active: userTab === 'profiles' }" @click="switchUserTab('profiles')"
+              @keydown="activateNavigation($event, () => switchUserTab('profiles'))">资料待审<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>
           </view>
           <CommunityUsers v-if="usersOpened && session?.admin === true" v-show="section === 'users' && userTab === 'accounts'" :visible="section === 'users' && userTab === 'accounts'" @review="openReview" />
           <ProfileReview v-if="section === 'users' && userTab === 'profiles'" />
@@ -163,6 +167,12 @@ function sectionTitle(): string {
   }
 }
 const usersOpened = ref(false)
+function activateNavigation(event: KeyboardEvent, action: () => void): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  if (!event.repeat) action()
+}
+function switchUserTab(value: string): void { userTab.value = value }
 function goTo(value: string): void {
   if (busy.value || section.value === value) return
   if (section.value === 'settings') closeAccountForm()
@@ -404,6 +414,8 @@ page { background:#f3f4ed; color:#35452d; font-size:14px; }
 .sidebar button { background:transparent; color:#e2ede5; text-align:left; padding:3px 10px; border:none; border-radius:8px; }
 .sidebar button::after { border:none; }
 .sidebar button:hover,.sidebar button.active { color:#fff; background:#ffffff22; }
+.sidebar button:focus-visible { outline:2px solid #f4e7b8; outline-offset:2px; }
+.user-tabs button:focus-visible { outline:2px solid #426240; outline-offset:2px; }
 .nav-dot { display:inline-block; width:8px; height:8px; margin-left:8px; vertical-align:middle; border-radius:50%; background:#d7454a; }
 .sidebar .nav-dot { background:#ff8588; }
 .user-tabs button.active { background:#426240; color:#fff; }

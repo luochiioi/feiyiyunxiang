@@ -5,14 +5,17 @@
     <view class="queue">
       <view class="actions queue-heading">
         <text class="heading">待审队列</text>
-        <button :disabled="busy" @click="load(false)">刷新队列</button>
+        <button role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="load(false)"
+          @keydown="activate($event, () => load(false))">刷新队列</button>
       </view>
       <text v-if="!busy && items.length === 0 && message.length === 0" class="muted">当前没有待审资料。</text>
-      <button v-for="item in items" :key="item.revisionId" class="queue-item" :class="{ active: selectedId === item.revisionId }" :disabled="busy"
-        @click="select(item.revisionId)">
+      <button v-for="item in items" :key="item.revisionId" class="queue-item" :class="{ active: selectedId === item.revisionId }"
+        role="button" :tabindex="busy ? -1 : 0" :aria-pressed="selectedId === item.revisionId" :disabled="busy"
+        @click="select(item.revisionId)" @keydown="activate($event, () => select(item.revisionId))">
         <text class="heading">{{ item.nickname }}</text><text class="muted">{{ new Date(item.createdAt).toLocaleString() }}</text>
       </button>
-      <button v-if="next.length > 0" :disabled="busy" @click="load(true)">加载更多</button>
+      <button v-if="next.length > 0" role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="load(true)"
+        @keydown="activate($event, () => load(true))">加载更多</button>
     </view>
 
     <view v-if="detail != null" :key="selectedId" class="inspector">
@@ -20,7 +23,8 @@
         <view class="version">
           <text class="heading">当前公开资料</text>
           <image class="thumb" :src="currentSrc || defaultAvatar" mode="aspectFit" @error="imageFailed(true)" />
-          <button v-if="currentError" :disabled="busy" @click="loadAvatar(true)">重试当前头像</button>
+          <button v-if="currentError" role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="loadAvatar(true)"
+            @keydown="activate($event, () => loadAvatar(true))">重试当前头像</button>
           <text>{{ detail?.current.nickname }}</text>
           <text class="muted">{{ detail?.current.bio || '未填写简介' }}</text>
           <text class="muted">{{ detail?.current.displayCity || '未填写城市标签' }}</text>
@@ -37,7 +41,8 @@
             <image class="thumb" :src="defaultAvatar" mode="aspectFit" />
             <text class="muted">默认头像</text>
           </template>
-          <button v-if="selectedError" :disabled="busy" @click="loadAvatar(false)">重试申请头像</button>
+          <button v-if="selectedError" role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="loadAvatar(false)"
+            @keydown="activate($event, () => loadAvatar(false))">重试申请头像</button>
           <text>昵称{{ detail?.selected.nickname !== detail?.current.nickname ? '（已修改）' : '' }}　{{ detail?.selected.nickname }}</text>
           <text class="muted">简介{{ detail?.selected.bio !== detail?.current.bio ? '（已修改）' : '' }}　{{ detail?.selected.bio || '未填写简介' }}</text>
           <text class="muted">城市{{ detail?.selected.displayCity !== detail?.current.displayCity ? '（已修改）' : '' }}　{{ detail?.selected.displayCity || '未填写城市标签' }}</text>
@@ -47,18 +52,21 @@
       </view>
       <text v-if="detail?.accountActive === false">账号停用中，恢复后可继续审核。</text>
       <view v-if="canDecide" class="decision">
-        <button v-if="attempted != null" :disabled="busy" @click="review(attempted ?? '')">重试确认审核结果</button>
+        <button v-if="attempted != null" role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="review(attempted ?? '')"
+          @keydown="activate($event, () => review(attempted ?? ''))">重试确认审核结果</button>
         <template v-else-if="rejecting">
           <text class="heading">驳回原因</text>
-          <textarea v-model="reason" :disabled="busy" placeholder="填写 1–300 字，申请人将在消息中看到" />
+          <textarea v-model="reason" class="reject-reason" aria-label="驳回原因" :disabled="busy" placeholder="填写 1–300 字，申请人将在消息中看到" />
           <view class="actions decision-actions">
-            <button :disabled="busy" @click="cancelReject">取消</button>
-            <button class="danger" :disabled="busy" @click="review('reject')">确认驳回</button>
+            <button role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="cancelReject" @keydown="activate($event, cancelReject)">取消</button>
+            <button class="danger" role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="review('reject')"
+              @keydown="activate($event, () => review('reject'))">确认驳回</button>
           </view>
         </template>
         <view v-else class="actions decision-actions">
-          <button :disabled="busy" @click="rejecting = true">驳回…</button>
-          <button class="primary" :disabled="busy || (needsSelectedAvatar && !selectedReady)" @click="review('approve')">通过资料</button>
+          <button role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="beginReject" @keydown="activate($event, beginReject)">驳回…</button>
+          <button class="primary" role="button" :tabindex="approvalDisabled ? -1 : 0" :disabled="approvalDisabled" :aria-disabled="approvalDisabled"
+            @click="review('approve')" @keydown="activate($event, () => review('approve'))">通过资料</button>
         </view>
       </view>
     </view>
@@ -86,6 +94,7 @@ const selectedError = ref(false), currentError = ref(false)
 const attempted = ref<string | null>(null), decided = ref(false), busy = ref(false)
 let attemptedReason = ''
 const canDecide = computed(() => detail.value?.accountActive === true && detail.value?.selected.status === 'pending' && !decided.value)
+const approvalDisabled = computed(() => busy.value || (needsSelectedAvatar.value && !selectedReady.value))
 let generation = 0
 let avatarSerial = 0
 let closed = false
@@ -127,6 +136,12 @@ async function select(id: string): Promise<void> {
   finally { busy.value = false }
 }
 
+function activate(event: KeyboardEvent, action: () => void): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  if (!busy.value && !event.repeat) action()
+}
+function beginReject(): void { rejecting.value = true }
 function cancelReject(): void { rejecting.value = false; reason.value = '' }
 
 function imageFailed(current: boolean): void {
@@ -171,7 +186,7 @@ function loadAvatar(current: boolean): void {
 async function review(decision: string): Promise<void> {
   const value = detail.value
   if (value == null || busy.value || !canDecide.value) return
-  if (attempted.value == null && decision === 'approve' && needsSelectedAvatar.value && !selectedReady.value) return
+  if (attempted.value == null && decision === 'approve' && approvalDisabled.value) return
   if (attempted.value != null && attempted.value !== decision) return
   const explanation = attempted.value == null ? reason.value.trim() : attemptedReason
   if (decision === 'reject' && (explanation.length === 0 || Array.from(explanation).length > 300)) {
@@ -212,6 +227,7 @@ async function review(decision: string): Promise<void> {
 .queue-item { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:3px; padding:10px 12px; background: #f4f7f3; border-radius:8px; line-height:1.45; word-break:break-word; }
 .queue-item.active { background:#e1ede2; box-shadow: inset 3px 0 #426240; }
 .queue-item::after { border:none; }
+.profile-review button:focus-visible, .reject-reason:focus-within { outline:2px solid #426240; outline-offset:2px; }
 .comparison { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:12px; }
 .version { padding: 14px; border-radius: 10px; background:#f6f7f3; overflow-wrap: anywhere; }
 .heading { color:#244132; font-weight:700; }
