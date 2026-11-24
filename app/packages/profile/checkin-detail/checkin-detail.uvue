@@ -1,0 +1,114 @@
+<template>
+  <view class="screen">
+    <AppPageHeader title="打卡详情" :show-back="true" />
+    <view class="content">
+      <text v-if="loading" class="muted" role="status">正在读取打卡详情…</text>
+      <view v-else-if="entry == null" class="card">
+        <text class="body">{{ message }}</text>
+        <button v-if="retryEntry" class="secondary" @click="load">重试</button>
+      </view>
+      <template v-else>
+        <view class="card green">
+          <text class="title">{{ entry?.title }}</text>
+          <text v-if="entry?.museumName" class="body">{{ entry?.museumName }}</text>
+          <text class="muted">{{ date }} · {{ diaryKind(entry?.kind ?? null) }} · 仅自己可见</text>
+        </view>
+        <view v-if="entry?.mediaId" class="card">
+          <text class="heading">打卡照片</text>
+          <text v-if="photoUnavailable" class="muted">原照片未保存在云端。</text>
+          <text v-else-if="photoLoading" class="muted" role="status">正在读取照片…</text>
+          <template v-else-if="photoFailed">
+            <text class="muted">照片暂时无法显示。</text>
+            <button class="secondary" @click="loadPhoto">重试照片</button>
+          </template>
+          <image v-if="photoSrc.length > 0" class="photo" :src="photoSrc" mode="widthFix" aria-label="本次打卡照片"
+            @load="photoReady = true" @error="imageError" />
+        </view>
+        <view v-if="entry?.note" class="card">
+          <text class="heading">我的备注</text>
+          <text class="body note">{{ entry?.note }}</text>
+        </view>
+        <view v-if="entry?.routeId || photoReady" class="row actions">
+          <button v-if="entry?.routeId" class="secondary" @click="openRoute">查看原路线</button>
+          <button v-if="photoReady" class="primary" @click="compose">用这张图发帖</button>
+        </view>
+      </template>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import { computed, ref, watch } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.uvue'
+import { api, session } from '@/features/api.uts'
+import { decodePageId, openPage, openRouteDetail } from '@/features/navigation.uts'
+import { composePath } from '@/features/community/community.uts'
+import { diaryKind } from '@/features/profile/checkin-archive.uts'
+import type { DiaryEntry } from '@/features/profile/checkin-archive.uts'
+
+const id = ref(''), entry = ref<DiaryEntry | null>(null)
+const loading = ref(false), retryEntry = ref(false)
+const message = ref('请从探索档案打开打卡详情。')
+const photoSrc = ref('')
+const photoReady = ref(false), photoLoading = ref(false), photoFailed = ref(false), photoUnavailable = ref(false)
+const date = computed(() => entry.value == null ? '' : new Date(entry.value!.createdAt).toLocaleString())
+let sequence = 0
+
+onLoad(query => { id.value = decodePageId(query['id'] ?? null) ?? ''; load() })
+onUnload(() => { sequence++; clearPhoto() })
+watch(() => session.value?.uid, () => { sequence++; entry.value = null; loading.value = false; clearPhoto(); load() }, { flush: 'sync' })
+
+function clearPhoto(): void {
+  photoSrc.value = ''; photoReady.value = false; photoLoading.value = false
+  photoFailed.value = false; photoUnavailable.value = false
+}
+async function load(): Promise<void> {
+  const uid = session.value?.uid
+  retryEntry.value = false
+  if (uid == null) { message.value = '请登录后查看打卡详情。'; return }
+  if (id.value.length === 0 || loading.value) return
+  const ticket = ++sequence
+  loading.value = true
+  try {
+    const result = await api<DiaryEntry>('explorationArchiveDetail', { id: id.value })
+    if (ticket !== sequence || uid !== session.value?.uid) return
+    entry.value = result
+    if (result.mediaId) loadPhoto()
+  } catch (error) {
+    if (ticket !== sequence || uid !== session.value?.uid) return
+    retryEntry.value = (error as Error | null)?.message !== 'NOT_FOUND'
+    message.value = retryEntry.value ? '打卡详情暂时无法读取。' : '这条打卡当前不可访问。'
+  } finally { if (ticket === sequence) loading.value = false }
+}
+async function loadPhoto(): Promise<void> {
+  const uid = session.value?.uid, mediaId = entry.value?.mediaId, ticket = sequence
+  if (uid == null || !mediaId || photoLoading.value) return
+  clearPhoto()
+  photoLoading.value = true
+  try {
+    const result = await api<{ src: string }>('readMedia', { id: mediaId })
+    if (ticket !== sequence || uid !== session.value?.uid) return
+    if (!result.src) { imageError(); return }
+    photoSrc.value = result.src
+  } catch (error) {
+    if (ticket !== sequence || uid !== session.value?.uid) return
+    photoUnavailable.value = (error as Error | null)?.message === 'PHOTO_UNAVAILABLE'
+    photoFailed.value = !photoUnavailable.value
+  } finally { if (ticket === sequence) photoLoading.value = false }
+}
+function imageError(): void {
+  photoSrc.value = ''; photoReady.value = false; photoFailed.value = true
+}
+function openRoute(): void {
+  const record = entry.value
+  if (record?.routeId) openRouteDetail(record.routeId!, record.runId ?? null)
+}
+function compose(): void {
+  if (photoReady.value && entry.value != null) openPage(composePath + '?diaryId=' + encodeURIComponent(entry.value!._id))
+}
+</script>
+<style scoped>
+@import '@/styles/page.css';
+.photo { width: 100%; border-radius: 12px; background: #f8f0e5; }
+.note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.actions > button { width: auto; flex: 1; }
+</style>

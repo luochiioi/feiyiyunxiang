@@ -90,6 +90,11 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
       purpose: run.purpose ?? 'solo'
     }
   }
+  async function archiveRecord(record, uid, readRun) {
+    if (record.kind != null || !record.runId) return record
+    const run = await readRun(record.runId)
+    return run?.uid === uid ? { ...record, ...diaryContext(run, record.nodeId) } : record
+  }
   async function owned(db,u,runId) {
     if (!u?.uid || !id(runId)) fail('NOT_FOUND')
     const run=await db.get('fy-runs',runId)
@@ -297,12 +302,17 @@ function createService({repo,now=Date.now,allowTestContent=true}) {
     async explorationArchive(user) {
       const records = await diary(user)
       const snapshots = new Map()
-      return Promise.all(records.map(async record => {
-        if (record.kind != null) return record
-        if (!snapshots.has(record.runId)) snapshots.set(record.runId, repo.get('fy-runs', record.runId))
-        const run = await snapshots.get(record.runId)
-        return run?.uid === user.uid ? { ...record, ...diaryContext(run, record.nodeId) } : record
-      }))
+      const readRun = runId => {
+        if (!snapshots.has(runId)) snapshots.set(runId, repo.get('fy-runs', runId))
+        return snapshots.get(runId)
+      }
+      return Promise.all(records.map(record => archiveRecord(record, user.uid, readRun)))
+    },
+    async explorationArchiveDetail(user, p) {
+      if (!user?.uid || user.admin || user.reviewer) fail('AUTH_REQUIRED')
+      const record = id(p?.id) ? await repo.get('fy-diary', p.id) : null
+      if (!record || record.uid !== user.uid) fail('NOT_FOUND')
+      return archiveRecord(record, user.uid, runId => repo.get('fy-runs', runId))
     }
   }
 }

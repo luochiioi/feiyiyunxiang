@@ -56,6 +56,10 @@ test('archive reads indoor and outdoor diary entries against each owned snapshot
   await repo.put('fy-diary', 'first', { ...base, nodeId: 'entrance', createdAt: 10 })
   await repo.put('fy-diary', 'second', { ...base, nodeId: 'exhibit', createdAt: 20 })
   const archive = await s.explorationArchive(a)
+  assert.deepEqual(await s.explorationArchiveDetail(a, { id: 'second' }), archive[0])
+  await assert.rejects(s.explorationArchiveDetail(b, { id: 'second' }), /NOT_FOUND/)
+  await assert.rejects(s.explorationArchiveDetail(a, { id: 'missing' }), /NOT_FOUND/)
+  await assert.rejects(s.explorationArchiveDetail(null, { id: 'second' }), /AUTH_REQUIRED/)
   assert.deepEqual(archive.map(item => [item.kind, item.museumName, item.note, item.createdAt]), [
     ['indoor', '澳门博物馆', '今日参观', 20], ['outdoor', '澳门博物馆', '今日参观', 10]
   ])

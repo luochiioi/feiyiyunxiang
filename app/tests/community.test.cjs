@@ -6,6 +6,7 @@ const { createCommunityMedia, sanitize } = require('../uniCloud-alipay/cloudfunc
 const { createCommunityOperations } = require('../uniCloud-alipay/cloudfunctions/fy-api/community-operations')
 const { encrypt, decrypt, authenticate } = require('../uniCloud-alipay/cloudfunctions/fy-api/security')
 const { createService, key } = require('../uniCloud-alipay/cloudfunctions/fy-api/service')
+const { createNotificationService } = require('../uniCloud-alipay/cloudfunctions/fy-api/notification-service')
 
 const author = { uid: 'author' }, friend = { uid: 'friend' }, stranger = { uid: 'stranger' }
 const reviewer = { uid: 'reviewer', reviewer: true }, admin = { uid: 'admin', admin: true }
@@ -99,6 +100,52 @@ function fixture() {
   async function approve(version) { await community.communityReviewPost(reviewer, { ...version, decision: 'approve' }) }
   return { repo, community, media, service, cloud, post, approve, mediaKey, files, failNextCommit: () => { failCommit = true }, loseNextResponse: () => { loseResponse = true }, conflicts: () => conflicts, tick: value => { clock += value } }
 }
+
+test('a public post share creates a private and retry-safe friend message that opens the public post', async () => {
+  const f = fixture(), c = f.community
+  const messages = createNotificationService({ repo: f.repo })
+  const friendCode = 'FRIEND23', strangerCode = 'OTHER234'
+  for (const [user, code] of [[author, 'AUTHOR23'], [friend, friendCode], [stranger, strangerCode]]) {
+    await f.repo.put('uni-id-users', user.uid, { status: 0 })
+    await f.repo.put('fy-profiles', user.uid, { uid: user.uid, code, nickname: user.uid })
+  }
+  const relation = key('friend', ...[author.uid, friend.uid].sort())
+  const pair = { from: friend.uid, to: author.uid }
+  const post = await f.post(author, { title: '分享测试' })
+  const args = { postId: post.postId, code: friendCode }
+  await assert.rejects(c.communityShareToFriend(null, args), /AUTH_REQUIRED/)
+  await assert.rejects(c.communityShareToFriend(author, args), /NOT_FOUND/)
+  await f.approve(post)
+  await f.repo.put('fy-friends', relation, { ...pair, status: 'pending' })
+  await assert.rejects(c.communityShareToFriend(author, args), /NOT_FRIENDS/)
+  await assert.rejects(c.communityShareToFriend(author, { ...args, code: strangerCode }), /NOT_FRIENDS/)
+  await f.repo.put('fy-friends', relation, { ...pair, status: 'accepted' })
+  await f.repo.put('uni-id-users', friend.uid, { status: 1 })
+  await assert.rejects(c.communityShareToFriend(author, args), /NOT_FRIENDS/)
+  await f.repo.put('uni-id-users', friend.uid, { status: 0 })
+  const sends = await Promise.all([c.communityShareToFriend(author, args), c.communityShareToFriend(author, args)])
+  assert.deepEqual(sends.map(value => value.alreadyShared).sort(), [false, true])
+  const { items } = await messages.notificationsList(friend)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, '好友分享了帖子')
+  assert.equal(items[0].preview, author.uid)
+  assert.equal((await messages.notificationsSummary(friend)).unread, 1)
+  const id = items[0].id
+  await assert.rejects(messages.notificationDetail(stranger, { id }), /NOT_FOUND/)
+  assert.deepEqual((await messages.notificationDetail(friend, { id })).target,
+    { postId: post.postId, revisionId: post.revisionId, commentId: '', preview: false })
+  await messages.notificationRead(friend, { id })
+  assert.equal((await c.communityShareToFriend(author, args)).alreadyShared, true)
+  assert.equal((await messages.notificationsSummary(friend)).unread, 0)
+  const newer = await f.post(author, { postId: post.postId, baseRevision: post.revisionId, requestId: 'updated-share', title: '新版' })
+  await f.approve(newer)
+  const updated = await messages.notificationDetail(friend, { id })
+  assert.equal(updated.target.revisionId, newer.revisionId)
+  assert.equal(updated.sharedTitle, '新版')
+  await c.communityRemoveOwn(author, newer)
+  assert.equal((await messages.notificationDetail(friend, { id })).target, null)
+  await assert.rejects(c.communityShareToFriend(author, args), /NOT_FOUND/)
+})
 
 test('guessed IDs cannot read pending posts, private images or someone else’s diary', async () => {
   const f = fixture(), c = f.community

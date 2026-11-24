@@ -55,6 +55,9 @@
         },
         {
           "path": "my-checkins/my-checkins"
+        },
+        {
+          "path": "checkin-detail/checkin-detail"
         }
       ]
     },

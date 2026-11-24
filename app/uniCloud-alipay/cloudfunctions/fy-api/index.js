@@ -21,10 +21,10 @@ const reviewActions = new Set(['communityReviewList', 'communityReviewDetail', '
 const operationsActions = new Set(['communityOverview', 'communityUsers', 'communityUserDetail', 'communityAccountStatus'])
 const adminActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'adminLogout', 'adminChangePassword', 'adminUpdateCredentials', 'cancelPk', ...reviewActions, ...operationsActions, ...profileReviewActions])
 const guestActions = new Set(['communityFeed', 'communityPost', 'communityImage', 'communityShare', 'communityComments'])
-const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment',
+const communityActions = new Set([...guestActions, ...reviewActions, 'communityStageImage', 'communitySubmit', 'communitySubmitGallery', 'communityReaction', 'communityComment', 'communityShareToFriend',
   'communityReport', 'communityRanking', 'communityRemoveOwn', 'communityReviewNotices', 'communityReadReview'])
 const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts', 'start', 'checkin', 'progress', 'routeProgress',
-  'aomiaoStatus', 'claimAomiao', 'selectAomiao', 'explorationArchive',
+  'aomiaoStatus', 'claimAomiao', 'selectAomiao', 'explorationArchive', 'explorationArchiveDetail',
   'diary', 'nodeRecord', 'saveTile', 'works', 'activityStatus', 'answerQuiz', 'readCard', 'storyLibrary', 'storyChapter', 'saveReading', 'coopStory', 'coopStoryHistory',
   'ensureProfile', 'findByCode', 'requestFriend', 'respondFriend', 'withdrawFriend', 'friends',
   'bottleStatus', 'joinBottle', 'respondBottle', 'cancelBottle',
@@ -128,6 +128,7 @@ exports.main=async(event,context)=>{
     } else if (communityActions.has(action)) {
       const media = createCommunityMedia({ cloud: uniCloud, cfg, service, limited })
       const community = createCommunityService({ repo, media })
+      if (action === 'communityShareToFriend') await limited('share-post:' + user.uid, 20)
       if (action === 'communitySubmitGallery' && !Array.isArray(p.images)) throw new Error('INVALID_IMAGES')
       data = await community[action === 'communitySubmitGallery' ? 'communitySubmit' : action](user, p)
     } else {

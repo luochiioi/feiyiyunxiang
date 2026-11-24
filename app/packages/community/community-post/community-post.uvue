@@ -33,9 +33,13 @@
           <view class="row actions">
             <button class="secondary" :disabled="busy" @click="react('like')">{{ post.liked ? '取消点赞' : '点赞' }}</button>
             <button class="secondary" :disabled="busy" @click="react('favorite')">{{ post.saved ? '取消收藏' : '收藏' }}</button>
-            <button class="secondary" open-type="share">分享</button>
+            <button class="secondary" :disabled="busy || sharing" @click="sharing = true">分享给好友</button>
+            <!-- #ifdef MP-WEIXIN -->
+            <button class="secondary" open-type="share">微信分享</button>
+            <!-- #endif -->
             <button class="secondary" :disabled="busy" @click="beginReport('')">举报</button>
           </view>
+          <FriendSharePicker v-if="sharing" :post-id="postId" @close="sharing = false" />
           <view v-if="reporting" class="card">
             <text class="heading">{{ reportId.length > 0 ? '举报评论' : '举报帖子' }}</text>
             <textarea v-model="reason" :maxlength="300" placeholder="填写举报原因" />
@@ -70,6 +74,7 @@ import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PostCard from '../components/PostCard.uvue'
+import FriendSharePicker from '../components/FriendSharePicker.uvue'
 import { requestId, secured, session } from '@/features/api.uts'
 import { openPage } from '@/features/navigation.uts'
 import { readReview } from '@/features/community/review-notices.uts'
@@ -81,12 +86,13 @@ const post = computed(() => loadedOwner.value.length > 0 && loadedOwner.value !=
 const comments = ref<Comment[]>([]), mine = ref<Comment[]>([]), next = ref('')
 const visibleMine = computed(() => commentOwner.value === session.value?.uid ? mine.value : [])
 const readFailed = ref(false)
+const sharing = ref(false)
 const message = ref(''), busy = ref(false), visible = ref(false)
 const body = ref(''), replyId = ref(''), replyName = ref(''), reason = ref(''), reportId = ref(''), reporting = ref(false)
 let commentRequest = '', commentDraft = ''
 onLoad(query => { postId.value = query['postId'] ?? ''; revisionId.value = query['revisionId'] ?? '' })
 onShow(() => { visible.value = true; refresh() })
-onHide(() => { visible.value = false; loadedPost.value = null })
+onHide(() => { visible.value = false; sharing.value = false; loadedPost.value = null })
 onShareAppMessage(() => {
   const fallback = { title: '非遗云享社区', path: communityPath, imageUrl: '/static/ip/aomiao-wave.png' }
   if (post.value?.publicView !== true) return fallback
