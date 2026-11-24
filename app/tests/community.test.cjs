@@ -101,6 +101,43 @@ function fixture() {
   return { repo, community, media, service, cloud, post, approve, mediaKey, files, failNextCommit: () => { failCommit = true }, loseNextResponse: () => { loseResponse = true }, conflicts: () => conflicts, tick: value => { clock += value } }
 }
 
+test('mine filters the latest author view while paginating the unfiltered owner records', async () => {
+  const f = fixture(), c = f.community
+  const create = async id => { f.tick(1); return f.post(author, { requestId: id }) }
+  const first = await create('old-pending')
+  const approved = await create('historical')
+  await c.communityReviewPost(reviewer, { ...approved, decision: 'reject', reason: 'Old reason' })
+  const replacement = await f.post(author, { ...approved, baseRevision: approved.revisionId, requestId: 'replacement' })
+  await f.approve(replacement)
+  const removed = await create('removed')
+  await f.approve(removed)
+  await c.communityReviewPost(reviewer, { ...removed, decision: 'remove', reason: 'Removed' })
+  const deleted = await create('deleted')
+  await c.communityRemoveOwn(author, deleted)
+  for (let i = 0; i < 20; i++) await f.approve(await create('public-' + i))
+  const latest = await create('new-pending')
+  await f.post(friend, { requestId: 'other-owner' })
+
+  const mine = (statusFilter, cursor) => c.communityFeed(author, { tab: 'mine', statusFilter, cursor })
+  const top = await mine('pending')
+  assert.equal(top.appliedStatusFilter, 'pending')
+  assert.deepEqual(top.items.map(item => item.id), [latest.postId])
+  const tail = await mine('pending', top.next)
+  assert.deepEqual(tail.items.map(item => item.id), [first.postId])
+  assert.equal(tail.next, '')
+  assert.deepEqual(await mine('pending', top.next), tail)
+  const empty = await mine('inactive')
+  assert.deepEqual(empty.items, [])
+  assert.ok(empty.next)
+  assert.deepEqual((await mine('inactive', empty.next)).items.map(item => item.status).sort(), ['deleted', 'removed'])
+  assert.deepEqual((await mine('rejected', top.next)).items, [])
+  assert.ok((await mine('approved', top.next)).items.some(item => item.revisionId === replacement.revisionId))
+  assert.deepEqual(await mine(undefined), await mine('all'))
+  await assert.rejects(mine('public'), /INVALID_REQUEST/)
+  await assert.rejects(c.communityFeed(null, { tab: 'mine', statusFilter: 'pending' }), /AUTH_REQUIRED/)
+  assert.equal((await c.communityFeed(friend, { tab: 'mine', statusFilter: 'pending' })).items.length, 1)
+})
+
 test('public post detail counts active favorites from distinct users, including existing records', async () => {
   const f = fixture(), c = f.community
   const post = await f.post()

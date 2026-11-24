@@ -11,8 +11,12 @@
         <button class="secondary" :class="{ active: tab === 'mine' }" @click="select('mine')">我的帖子<view v-if="hasUnreadReview" class="review-dot" aria-label="有未读驳回理由" /></button>
         <button class="secondary" :class="{ active: tab === 'saved' }" @click="select('saved')">我的收藏</button>
       </view>
+      <view v-if="tab === 'mine'" class="row filters status-filters" aria-label="审核状态">
+        <button v-for="option in statusOptions" :key="option.id" class="secondary" :class="{ active: statusFilter === option.id }"
+          :aria-pressed="statusFilter === option.id" @click="selectStatus(option.id)">{{ option.label }}</button>
+      </view>
       <text v-if="message.length > 0" class="body">{{ message }}</text>
-      <button v-if="message.length > 0" class="secondary" :disabled="busy" @click="load(retryMore)">{{ retryMore ? '重试加载更多' : '重试' }}</button>
+      <button v-if="message.length > 0 && !unsupportedFilter" class="secondary" :disabled="busy" @click="load(retryMore)">{{ retryMore ? '重试加载更多' : '重试' }}</button>
       <text v-if="busy && !loaded" class="muted">正在加载…</text>
       <template v-if="tab === 'ranking'">
         <view class="card">
@@ -29,7 +33,7 @@
         <text v-if="tab === 'mine'" class="muted">这里仅你可见。打开帖子查看审核结果及可用操作。</text>
         <PostCard v-for="post in visiblePosts" :key="post.revisionId" :post="post" :detail="false" :preview="tab === 'mine'" :visible="visible" @open="showPost(post)" />
         <view v-if="loaded && message.length === 0 && visiblePosts.length === 0 && next.length === 0" class="card"><text class="body">{{ emptyMessage }}</text></view>
-        <button v-if="next.length > 0 && !retryMore" class="secondary" :disabled="busy" @click="load(true)">加载更多</button>
+        <button v-if="next.length > 0 && !retryMore && !unsupportedFilter" class="secondary" :disabled="busy" @click="load(true)">{{ tab === 'mine' && statusFilter !== 'all' && visiblePosts.length === 0 ? '继续查找' : '加载更多' }}</button>
       </template>
       <button class="primary compose" @click="openPage(composePath)">发帖</button>
     </view>
@@ -52,12 +56,17 @@ const next = ref(''), message = ref(''), busy = ref(false), visible = ref(false)
 const mineOnly = ref(false)
 const loaded = ref(false), retryMore = ref(false)
 const visiblePosts = posts, visibleRanks = ranks
+const statusFilter = ref('all'), unsupportedFilter = ref(false)
+const statusOptions = [
+  { id: 'all', label: '全部' }, { id: 'pending', label: '待审核' }, { id: 'approved', label: '已通过' },
+  { id: 'rejected', label: '未通过' }, { id: 'inactive', label: '已下架或撤下' }
+]
 const feedCache = new Map<string, PostPage>()
 let rankingCache: Ranking[] | null = null
 const emptyMessage = computed(() => {
   if (tab.value === 'friends') return '暂无好友动态。'
   if (tab.value === 'saved') return '还没有收藏帖子。打开帖子详情，点星标即可收藏。'
-  if (tab.value === 'mine') return '还没有发过帖子。'
+  if (tab.value === 'mine') return statusFilter.value === 'all' ? '还没有发过帖子。' : '该状态下暂无帖子。'
   return '暂无帖子。'
 })
 let sequence = 0
@@ -75,13 +84,15 @@ watch(() => session.value?.uid, uid => {
   sequence++
   feedCache.clear()
   rankingCache = null
+  statusFilter.value = 'all'
   restore()
-  busy.value = false; message.value = ''; retryMore.value = false
+  busy.value = false; message.value = ''; retryMore.value = false; unsupportedFilter.value = false
   if (visible.value && (uid != null || tab.value === 'latest')) load(false)
   else if (visible.value) message.value = '请先微信登录。'
 }, { flush: 'sync' })
+function cacheKey(): string { return tab.value === 'mine' ? 'mine/' + statusFilter.value : tab.value }
 function restore(): void {
-  const cached = feedCache.get(tab.value)
+  const cached = feedCache.get(cacheKey())
   posts.value = cached?.items ?? []
   next.value = cached?.next ?? ''
   ranks.value = rankingCache ?? []
@@ -90,10 +101,18 @@ function restore(): void {
 function select(value: string): void {
   if (tab.value !== value) { tab.value = value; restore(); load(false) }
 }
+function selectStatus(value: string): void {
+  if (statusFilter.value === value) return
+  statusFilter.value = value
+  feedCache.delete(cacheKey())
+  restore()
+  load(false)
+}
 async function load(append: boolean): Promise<void> {
   const call = ++sequence, active = tab.value
+  const filter = statusFilter.value, key = cacheKey()
   const uid = session.value?.uid
-  busy.value = true; message.value = ''; retryMore.value = false
+  busy.value = true; message.value = ''; retryMore.value = false; unsupportedFilter.value = false
   try {
     if (active === 'ranking') {
       const result = await secured<Ranking[]>('communityRanking')
@@ -102,10 +121,16 @@ async function load(append: boolean): Promise<void> {
       }
     } else {
       const payload: UTSJSONObject = { tab: active, cursor: append ? next.value : '' }
+      if (active === 'mine' && filter !== 'all') payload['statusFilter'] = filter
       const result = active === 'latest' ? await publicRead<PostPage>('communityFeed', payload) : await secured<PostPage>('communityFeed', payload)
-      if (call === sequence && uid === session.value?.uid && active === tab.value) {
+      if (call === sequence && uid === session.value?.uid && key === cacheKey()) {
+        if (active === 'mine' && filter !== 'all' && result.appliedStatusFilter !== filter) {
+          unsupportedFilter.value = true
+          message.value = '状态筛选暂不可用，请切回全部。'
+          return
+        }
         if (active === 'mine') refreshReviewNotices()
-        feedCache.set(active, { items: append ? posts.value.concat(result.items) : result.items, next: result.next } as PostPage)
+        feedCache.set(key, { items: append ? posts.value.concat(result.items) : result.items, next: result.next } as PostPage)
         restore()
       }
     }
@@ -123,6 +148,8 @@ function showPost(post: Post): void {
 .review-dot { position: absolute; top: 4px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: #c73535; border: 2px solid #fffaf4; }
 .filters .secondary { position: relative; flex: 1; white-space: nowrap; }
 .filters .active { background: #426240; color: #fff; }
+.status-filters { flex-wrap: wrap; }
+.status-filters .secondary { flex: unset; width: auto; padding: 0 12px; }
 .compose { position: fixed; width: auto; right: 16px; bottom: calc(15px + env(safe-area-inset-bottom)); box-shadow: 0 3px 12px #35503138; }
 .screen { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
 </style>

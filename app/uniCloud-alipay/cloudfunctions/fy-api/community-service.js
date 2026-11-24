@@ -333,8 +333,11 @@ function createCommunityService({ repo, media, now = Date.now }) {
 
     async communityFeed(u, p) {
       let query = { status: 'public' }
+      let statusFilter = 'all'
       if (p.tab === 'mine') {
         member(u)
+        statusFilter = p.statusFilter === undefined ? 'all' : p.statusFilter
+        if (!['all', 'pending', 'approved', 'rejected', 'inactive'].includes(statusFilter)) fail('INVALID_REQUEST')
         query = { uid: u.uid }
       } else if (p.tab === 'friends') {
         member(u)
@@ -361,7 +364,10 @@ function createCommunityService({ repo, media, now = Date.now }) {
           return { post, version }
         } catch (error) { if (error.message !== 'NOT_FOUND') throw error; return null }
       }))
-      return { items: await feedViews(items, u), next }
+      const views = await feedViews(items, u)
+      if (statusFilter === 'all') return { items: views, next }
+      const statuses = statusFilter === 'inactive' ? ['removed', 'deleted'] : [statusFilter]
+      return { items: views.filter(item => statuses.includes(item.status)), next, appliedStatusFilter: statusFilter }
     },
 
     async communityReviewNotices(u) {
