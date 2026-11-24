@@ -7,6 +7,12 @@ if (saved != null && saved.length > 0) {
   try { session.value = JSON.parse<Session>(saved) } catch (_) { uni.removeStorageSync('fy-session') }
 }
 export function clearSession(): void { session.value = null; uni.removeStorageSync('fy-session') }
+export async function revokeSession(token: string): Promise<void> {
+  const reply = await uniCloud.callFunction<Reply<UTSJSONObject>>({
+    name: 'fy-api', timeout: 8000, data: { action: 'logout', payload: {}, token }
+  })
+  if (reply.result.code !== 'OK') throw new Error(reply.result.code)
+}
 export async function api<T>(action: string, payload: UTSJSONObject = {}, timeout = 60000): Promise<T> {
   const requestUid = session.value?.uid, requestToken = session.value?.token ?? ''
   const name = action.startsWith('guess') ? 'fy-guess' : 'fy-api'
