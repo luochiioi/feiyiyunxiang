@@ -313,6 +313,47 @@ async function pkStarted(start = true, draft = coopDraft) {
   return f
 }
 
+for (const [label, act] of [
+  ['accept', (f, matchId) => f.p.respondPk(f.b, { matchId, accept: true })],
+  ['decline', (f, matchId) => f.p.respondPk(f.b, { matchId, accept: false })],
+  ['ready', (f, matchId) => f.p.readyPk(f.b, { matchId })]
+]) {
+  test(`expired PK ${label} persists the expiry and frees both participants`, async () => {
+    const f = await pkStarted(false)
+    if (label === 'ready') await f.p.respondPk(f.b, { matchId: f.match.id, accept: true })
+    f.advance(24 * 3600 * 1000)
+    await assert.rejects(act(f, f.match.id), /EXPIRED/)
+    assert.equal((await f.repo.get('fy-matches', f.match.id)).status, 'expired')
+    assert.equal(await f.p.myPk(f.a), null)
+    assert.equal(await f.p.myPk(f.b), null)
+    const [sender, code] = label === 'decline' ? [f.a, f.codes.b] : [f.b, f.codes.a]
+    const next = await f.p.invitePk(sender, { code, routeId: 'combined', requestId: 'next-pk' })
+    assert.equal((await f.p.myPk(f.a)).id, next.id)
+    assert.equal((await f.p.myPk(f.b)).id, next.id)
+  })
+}
+
+for (const status of ['invited', 'preparing']) {
+  test(`PK ${status} occupies a slot up to its deadline, even without a late action`, async () => {
+    const f = await pkStarted(false)
+    if (status === 'preparing') await f.p.respondPk(f.b, { matchId: f.match.id, accept: true })
+    const nextInvite = () => f.p.invitePk(f.b, { code: f.codes.a, routeId: 'combined', requestId: 'next-pk' })
+    f.advance(24 * 3600 * 1000 - 1)
+    assert.equal((await f.p.myPk(f.a)).status, status)
+    await assert.rejects(nextInvite(), /CONFLICT/)
+    f.advance(1)
+    assert.equal(await f.p.myPk(f.a), null)
+    assert.equal(await f.p.myPk(f.b), null)
+    const next = await nextInvite()
+    if (status === 'preparing') await assert.rejects(f.p.readyPk(f.b, { matchId: f.match.id }), /EXPIRED/)
+    else await assert.rejects(f.p.respondPk(f.b, { matchId: f.match.id, accept: true }), /EXPIRED/)
+    assert.equal((await f.p.myPk(f.a)).id, next.id)
+    assert.equal((await f.p.myPk(f.b)).id, next.id)
+    assert.equal(await f.p.assignment(f.b), null)
+    assert.equal(await f.p.assignment(f.a), null)
+  })
+}
+
 test('PK discovery exposes only the running member run and keeps solo progress separate', async () => {
   const f = await pkStarted(false)
   assert.equal(await f.p.myPk(f.c), null)
@@ -436,6 +477,8 @@ test('a failure task can be cleared by answering the published culture quiz', as
 test('an unfinished match expires after 24 hours without an assignment', async () => {
   const f = await pkStarted()
   f.advance(24 * 3600 * 1000 + 1)
+  assert.equal((await f.p.myPk(f.a)).status, 'running')
+  await assert.rejects(f.p.invitePk(f.a, { code: f.codes.b, routeId: 'combined', requestId: 'pk-2' }), /CONFLICT/)
   const r = await f.p.settlePk(f.a, { matchId: f.match.id })
   assert.equal(r.expired, true)
   assert.equal(await f.p.assignment(f.b), null)

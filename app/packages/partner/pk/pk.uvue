@@ -118,7 +118,7 @@ async function answer(accept: boolean): Promise<void> {
   try {
     await answerPk(id, accept)
     await load()
-  } catch (error) { showPkError(error as Error) }
+  } catch (error) { await handleInvitationError(error as Error) }
   finally { busy.value = false }
 }
 
@@ -129,8 +129,15 @@ async function ready(): Promise<void> {
   try {
     await markReady(id)
     await load()
-  } catch (error) { showPkError(error as Error) }
+  } catch (error) { await handleInvitationError(error as Error) }
   finally { busy.value = false }
+}
+
+async function handleInvitationError(error: Error): Promise<void> {
+  if (error.message === 'EXPIRED') {
+    uni.showToast({ title: '邀请或准备已超时，可重新发起', icon: 'none' })
+    await load()
+  } else showPkError(error)
 }
 
 function explore(): void {

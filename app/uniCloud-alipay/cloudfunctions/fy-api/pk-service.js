@@ -12,9 +12,17 @@ function routeEggs(snapshot) {
 }
 
 function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
+  function isInvitationExpired(match, at) {
+    return ['invited', 'preparing'].includes(match.status) && match.expiresAt <= at
+  }
   async function activeMatch(db, uid, except) {
     const rows = [...await db.list('fy-matches', { a: uid }), ...await db.list('fy-matches', { b: uid })]
-    return rows.find(row => ['invited', 'preparing', 'running'].includes(row.status) && row._id !== except) ?? null
+    const at = now()
+    return rows.find(row => row._id !== except && ['invited', 'preparing', 'running'].includes(row.status) && !isInvitationExpired(row, at)) ?? null
+  }
+  async function expireInvitation(db, matchId, match) {
+    await db.put('fy-matches', matchId, { ...match, status: 'expired' })
+    return { id: matchId, status: 'expired' }
   }
   async function loadMatch(db, matchId, uid) {
     if (typeof matchId !== 'string') fail('NOT_FOUND')
@@ -108,11 +116,11 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
     async respondPk(u, p) {
       member(u)
       if (!requestOf(p.matchId) || typeof p.accept !== 'boolean') fail('INVALID_REQUEST')
-      return repo.tx(async db => {
+      const result = await repo.tx(async db => {
         const match = await loadMatch(db, p.matchId, u.uid)
         if (match.invitedBy === u.uid) fail('NOT_FOUND')
         if (match.status !== 'invited') fail('NOT_PENDING')
-        if (match.expiresAt <= now()) { await db.put('fy-matches', p.matchId, { ...match, status: 'expired' }); fail('EXPIRED') }
+        if (isInvitationExpired(match, now())) return expireInvitation(db, p.matchId, match)
         if (!p.accept) { await db.put('fy-matches', p.matchId, { ...match, status: 'declined' }); return { id: p.matchId, status: 'declined' } }
         await assertNoAssignment(db, u.uid)
         if (await activeMatch(db, u.uid, p.matchId)) fail('CONFLICT')
@@ -128,14 +136,16 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
         await db.put('fy-matches', p.matchId, { ...match, status: 'preparing', runs })
         return { id: p.matchId, status: 'preparing' }
       })
+      if (result.status === 'expired') fail('EXPIRED')
+      return result
     },
 
     async readyPk(u, p) {
       member(u)
-      return repo.tx(async db => {
+      const result = await repo.tx(async db => {
         const match = await loadMatch(db, p.matchId, u.uid)
         if (match.status !== 'preparing') fail('NOT_PENDING')
-        if (match.expiresAt <= now()) { await db.put('fy-matches', p.matchId, { ...match, status: 'expired' }); fail('EXPIRED') }
+        if (isInvitationExpired(match, now())) return expireInvitation(db, p.matchId, match)
         const ready = [...new Set([...match.ready, u.uid])]
         const started = ready.length === match.uids.length
         await db.put('fy-matches', p.matchId, {
@@ -143,6 +153,8 @@ function pkMethods({ repo, now, key, fail, member, codeOf, requestOf }) {
         })
         return { id: p.matchId, status: started ? 'running' : 'preparing', startedAt: started ? now() : null }
       })
+      if (result.status === 'expired') fail('EXPIRED')
+      return result
     },
 
     async settlePk(u, p) {
