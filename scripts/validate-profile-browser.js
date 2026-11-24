@@ -50,6 +50,8 @@ async (page) => {
       queueMicrotask(() => this.dispatchEvent(new Event('change', { bubbles: true })))
     }
     const candidate = { ...rejected, revisionId: 'admin-case', nickname: '申请审核昵称', status: 'pending', hasAvatar: true, reason: '', createdAt: Date.now() }
+    const defaultCandidate = { ...candidate, revisionId: 'default-avatar', nickname: '默认头像申请', hasAvatar: false }
+    const disabledCandidate = { ...defaultCandidate, revisionId: 'disabled-case', nickname: '停用账户申请' }
     window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [], avatarContents: [], actions: [],
       adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0 }
     window.__mockCloud = async ({ data }) => {
@@ -71,10 +73,17 @@ async (page) => {
         case 'drafts': return ok([])
         case 'profileReviewList':
           if (fixture.failQueue) { fixture.failQueue = false; throw Error('QUEUE_READ_FAILED') }
-          return ok({ items: fixture.adminDecision ? [] : [candidate], next: '' })
-        case 'profileReviewDetail': return ok({ current: approved, selected: candidate, accountActive: true })
+          return ok({ items: fixture.adminDecision ? [] : [candidate, defaultCandidate, disabledCandidate], next: '' })
+        case 'profileReviewDetail':
+          return ok({ current: approved, selected: [candidate, defaultCandidate, disabledCandidate].find(row => row.revisionId === payload.revisionId),
+            accountActive: payload.revisionId !== disabledCandidate.revisionId })
         case 'profileReviewAvatar':
           if (!payload.current && fixture.failSelected) { fixture.failSelected = false; return fail('PHOTO_UNAVAILABLE') }
+          if (!payload.current && fixture.delaySelected) {
+            await new Promise(resolve => { fixture.finishSelected = resolve })
+            fixture.delaySelected = false
+          }
+          if (!payload.current && fixture.brokenSelected) { fixture.brokenSelected = false; return ok({ src: 'data:image/png;base64,AAAA' }) }
           return ok({ src: payload.current ? png : proposedPng })
         case 'profileReview':
           fixture.adminWrites++
@@ -129,7 +138,7 @@ async (page) => {
   page.setDefaultTimeout(10000)
   const go = route => page.goto(origin + '/#' + route)
   const visible = label => page.getByText(label, { exact: true }).last()
-  const screenshot = (name, fullPage = true) => page.screenshot({ path: 'docs/validation/evidence/profile-and-my-page/' + name + '.png', fullPage })
+  const screenshot = (name, fullPage = true) => page.screenshot({ path: '.superpowers/profile-browser-' + name + '.png', fullPage })
   const approvedAvatar = scope => scope.locator('.profile-avatar img[src^="data:image/"]').first()
   const back = () => page.locator('.app-page-header-return:visible').click()
   const account = '/packages/profile/account/account'
@@ -302,9 +311,30 @@ async (page) => {
   await visible('资料待审').click()
   await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).click()
   await visible('当前公开资料').waitFor()
+  await visible('重试申请头像').waitFor()
+  const approve = () => page.locator('.decision-actions').getByText('通过资料', { exact: true })
+  const approvalDisabled = () => approve().evaluate(button => button.hasAttribute('disabled'))
+  if (!await approvalDisabled()) throw Error('An unreadable application avatar can be approved')
+  await page.evaluate(() => { window.__profileFixture.brokenSelected = true })
+  await visible('重试申请头像').click()
+  await visible('申请头像无法读取').waitFor()
+  if (!await approvalDisabled()) throw Error('Image decode failure unlocked application approval')
+  await page.evaluate(() => { window.__profileFixture.delaySelected = true })
+  await visible('重试申请头像').click()
+  await page.waitForFunction(() => typeof window.__profileFixture.finishSelected === 'function')
+  await page.locator('.queue-item').filter({ hasText: '默认头像申请' }).click()
+  await visible('默认头像').waitFor()
+  if (await approvalDisabled()) throw Error('Default avatar application is blocked')
+  await page.locator('.queue-item').filter({ hasText: '停用账户申请' }).click()
+  await visible('账号停用中，恢复后可继续审核。').waitFor()
+  await page.evaluate(() => window.__profileFixture.finishSelected())
+  if (await approve().count()) throw Error('A late avatar enabled approval on a disabled account')
+  await page.evaluate(() => { window.__profileFixture.failSelected = true })
+  await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).click()
   await visible('重试申请头像').click()
   await visible('重试申请头像').waitFor({ state: 'hidden' })
-  await page.waitForFunction(() => document.querySelectorAll('.comparison img[src^="data:image/"]').length === 2)
+  await page.waitForFunction(() => [...document.querySelectorAll('.comparison img[src^="data:image/"]')].filter(image => image.naturalWidth > 0).length === 2)
+  if (await approvalDisabled()) throw Error('Successful avatar retry did not unlock approval')
   await screenshot('admin-review')
   await page.setViewportSize({ width: 768, height: 900 })
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw Error('Admin review overflows at tablet width')

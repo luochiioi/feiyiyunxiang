@@ -15,7 +15,7 @@
       <button v-if="next.length > 0" :disabled="busy" @click="load(true)">加载更多</button>
     </view>
 
-    <view v-if="detail != null" class="inspector">
+    <view v-if="detail != null" :key="selectedId" class="inspector">
       <view class="comparison">
         <view class="version">
           <text class="heading">当前公开资料</text>
@@ -28,12 +28,20 @@
         </view>
         <view class="version">
           <text class="heading">申请资料</text>
-          <image class="thumb" :src="selectedSrc || defaultAvatar" mode="aspectFit" @error="imageFailed(false)" />
+          <template v-if="needsSelectedAvatar">
+            <image v-for="image in selectedImages" :key="image.serial" class="thumb" :src="image.src" mode="aspectFit"
+              @load="selectedImageLoaded(image)" @error="selectedImageFailed(image)" />
+            <text v-if="!selectedReady" class="muted" role="status">{{ selectedError ? '申请头像无法读取' : '正在读取申请头像…' }}</text>
+          </template>
+          <template v-else>
+            <image class="thumb" :src="defaultAvatar" mode="aspectFit" />
+            <text class="muted">默认头像</text>
+          </template>
           <button v-if="selectedError" :disabled="busy" @click="loadAvatar(false)">重试申请头像</button>
-          <text>{{ detail?.selected.nickname }}</text>
-          <text class="muted">{{ detail?.selected.bio || '未填写简介' }}</text>
-          <text class="muted">{{ detail?.selected.displayCity || '未填写城市标签' }}</text>
-          <text class="muted">{{ detail?.selected.interests.join(' · ') || '未选择文化兴趣' }}</text>
+          <text>昵称{{ detail?.selected.nickname !== detail?.current.nickname ? '（已修改）' : '' }}　{{ detail?.selected.nickname }}</text>
+          <text class="muted">简介{{ detail?.selected.bio !== detail?.current.bio ? '（已修改）' : '' }}　{{ detail?.selected.bio || '未填写简介' }}</text>
+          <text class="muted">城市{{ detail?.selected.displayCity !== detail?.current.displayCity ? '（已修改）' : '' }}　{{ detail?.selected.displayCity || '未填写城市标签' }}</text>
+          <text class="muted">兴趣{{ detail?.selected.interests.join(' · ') !== detail?.current.interests.join(' · ') ? '（已修改）' : '' }}　{{ detail?.selected.interests.join(' · ') || '未选择文化兴趣' }}</text>
           <text v-if="detail?.selected.reason">{{ detail?.selected.reason }}</text>
         </view>
       </view>
@@ -50,7 +58,7 @@
         </template>
         <view v-else class="actions decision-actions">
           <button :disabled="busy" @click="rejecting = true">驳回…</button>
-          <button class="primary" :disabled="busy" @click="review('approve')">通过资料</button>
+          <button class="primary" :disabled="busy || (needsSelectedAvatar && !selectedReady)" @click="review('approve')">通过资料</button>
         </view>
       </view>
     </view>
@@ -70,11 +78,16 @@ const items = ref<ProfileReviewItem[]>([]), next = ref('')
 const detail = ref<ProfileReviewDetail | null>(null)
 const selectedId = ref(''), rejecting = ref(false)
 const message = ref(''), reason = ref('')
-const selectedSrc = ref(''), currentSrc = ref('')
+type ReviewAvatar = { serial: number, generation: number, uid: string, src: string }
+const selectedImages = ref<ReviewAvatar[]>([]), currentSrc = ref('')
+const selectedReady = ref(false)
+const needsSelectedAvatar = computed(() => detail.value?.selected.hasAvatar === true || (detail.value?.selected.avatar ?? '').length > 0)
 const selectedError = ref(false), currentError = ref(false)
 const attempted = ref<string | null>(null), decided = ref(false), busy = ref(false)
+let attemptedReason = ''
 const canDecide = computed(() => detail.value?.accountActive === true && detail.value?.selected.status === 'pending' && !decided.value)
 let generation = 0
+let avatarSerial = 0
 let closed = false
 onMounted(() => { load(false) })
 onBeforeUnmount(() => { closed = true; generation++ })
@@ -102,15 +115,14 @@ async function select(id: string): Promise<void> {
   generation++
   detail.value = null
   selectedId.value = id
-  currentSrc.value = ''; selectedSrc.value = ''
+  currentSrc.value = ''; selectedImages.value = []; selectedReady.value = false
   currentError.value = false; selectedError.value = false
-  attempted.value = null; decided.value = false; cancelReject(); message.value = ''
+  attempted.value = null; attemptedReason = ''; decided.value = false; cancelReject(); message.value = ''
   try {
     detail.value = await api<ProfileReviewDetail>('profileReviewDetail', { revisionId: id })
     currentSrc.value = detail.value?.current.avatar ?? ''
-    selectedSrc.value = detail.value?.selected.avatar ?? ''
     if (detail.value?.current.avatarVersion) loadAvatar(true)
-    if (detail.value?.selected.hasAvatar === true) loadAvatar(false)
+    if (needsSelectedAvatar.value) loadAvatar(false)
   } catch (_) { message.value = '未能读取资料详情，请重试。' }
   finally { busy.value = false }
 }
@@ -119,25 +131,39 @@ function cancelReject(): void { rejecting.value = false; reason.value = '' }
 
 function imageFailed(current: boolean): void {
   if (current && currentSrc.value.length > 0) { currentSrc.value = ''; currentError.value = true }
-  if (!current && selectedSrc.value.length > 0) { selectedSrc.value = ''; selectedError.value = true }
 }
 
+function isCurrentImage(image: ReviewAvatar): boolean {
+  return !closed && image.generation === generation && image.serial === avatarSerial && image.uid === (session.value?.uid ?? '')
+}
+function selectedImageLoaded(image: ReviewAvatar): void {
+  if (isCurrentImage(image)) selectedReady.value = true
+}
+function selectedImageFailed(image: ReviewAvatar): void {
+  if (!isCurrentImage(image)) return
+  selectedImages.value = []; selectedReady.value = false; selectedError.value = true
+}
 function loadAvatar(current: boolean): void {
   const ticket = generation
-  const uid = session.value?.uid
+  const uid = session.value?.uid ?? ''
+  const serial = current ? 0 : ++avatarSerial
+  if (!current) { selectedImages.value = []; selectedReady.value = false; selectedError.value = false }
   scheduleProfileImage(async () => {
     const value = detail.value
-    if (closed || ticket !== generation || uid !== session.value?.uid || value == null) return
-    const source = current ? currentSrc : selectedSrc
+    if (closed || ticket !== generation || uid !== (session.value?.uid ?? '') || value == null) return
     const failure = current ? currentError : selectedError
     failure.value = false
     try {
-      const image = await api<{ src: string }>('profileReviewAvatar', {
+      const legacy = !current && !value.selected.hasAvatar ? value.selected.avatar ?? '' : ''
+      const src = legacy || (await api<{ src: string }>('profileReviewAvatar', {
         revisionId: value.selected.revisionId, current, avatarVersion: value.current.avatarVersion
-      })
-      if (!closed && ticket === generation && uid === session.value?.uid) source.value = image.src
+      })).src
+      if (closed || ticket !== generation || uid !== (session.value?.uid ?? '') || (!current && serial !== avatarSerial)) return
+      if (!src) throw new Error('PHOTO_UNAVAILABLE')
+      if (current) currentSrc.value = src
+      else selectedImages.value = [{ serial, generation: ticket, uid, src } as ReviewAvatar]
     } catch (_) {
-      if (!closed && ticket === generation && uid === session.value?.uid) failure.value = true
+      if (!closed && ticket === generation && uid === (session.value?.uid ?? '') && (current || serial === avatarSerial)) failure.value = true
     }
   })
 }
@@ -145,12 +171,15 @@ function loadAvatar(current: boolean): void {
 async function review(decision: string): Promise<void> {
   const value = detail.value
   if (value == null || busy.value || !canDecide.value) return
-  const explanation = reason.value.trim()
+  if (attempted.value == null && decision === 'approve' && needsSelectedAvatar.value && !selectedReady.value) return
+  if (attempted.value != null && attempted.value !== decision) return
+  const explanation = attempted.value == null ? reason.value.trim() : attemptedReason
   if (decision === 'reject' && (explanation.length === 0 || Array.from(explanation).length > 300)) {
     message.value = '请填写 1–300 字的驳回原因。'
     return
   }
   attempted.value = decision
+  attemptedReason = explanation
   busy.value = true
   try {
     await api<UTSJSONObject>('profileReview', { revisionId: value.selected.revisionId, decision, reason: explanation })
