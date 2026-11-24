@@ -66,8 +66,14 @@ async (page) => {
       const fail = result => ({ result: { code: result, data: null } })
       switch (action) {
         case 'catalog': return ok([])
-        case 'adminLogin': return ok({ uid: 'local-reviewer', username: payload.username, token: 'local-admin', expiresAt: Date.now() + 3600000, admin: payload.username !== 'fixture-review-only' })
-        case 'communityOverview': return ok({ pendingPosts: 1, pendingComments: 1, openReports: 1, publishedPosts: 0, pendingProfiles: fixture.adminDecision ? 0 : 1 })
+        case 'adminLogin':
+          fixture.asAdmin = payload.username !== 'fixture-review-only'
+          return ok({ uid: 'local-reviewer', username: payload.username, token: 'local-admin', expiresAt: Date.now() + 3600000, admin: fixture.asAdmin })
+        case 'communityOverview':
+          if (fixture.failOverview) { fixture.failOverview = false; throw Error('OVERVIEW_READ_FAILED') }
+          return ok({ pendingPosts: 1, pendingComments: 1, openReports: 0, publishedPosts: 0,
+            pendingProfiles: fixture.missingProfiles ? undefined : fixture.adminDecision ? 0 : 1,
+            ...(fixture.asAdmin ? { activeAccounts: 3, activeCoops: 0, activePk: 0 } : {}) })
         case 'communityReviewList': return ok({ items: [], next: '' })
         case 'communityUsers':
           if (fixture.failAccounts) { fixture.failAccounts = false; throw Error('ACCOUNTS_READ_FAILED') }
@@ -288,6 +294,37 @@ async (page) => {
   await page.getByRole('textbox').nth(0).fill('local-reviewer')
   await page.getByRole('textbox').nth(1).fill('fixture-password')
   await visible('登录工作台').click()
+  const todo = page.locator('.overview-tasks')
+  const metrics = page.locator('.overview-statistics')
+  await todo.getByText('待审帖子', { exact: true }).waitFor()
+  if (await todo.locator('uni-button').count() !== 4 || await metrics.locator('uni-button').count()) throw Error('Tasks and read-only statistics are mixed')
+  await todo.locator('uni-button').filter({ hasText: '待处理举报' }).getByText('已清空', { exact: true }).waitFor()
+  await metrics.locator('.metric').filter({ hasText: '启用路线' }).getByText('—', { exact: true }).waitFor()
+  await page.evaluate(() => { window.__profileFixture.failOverview = true })
+  await visible('刷新').click()
+  await visible('刷新失败，保留上次读取的指标。').waitFor()
+  await todo.getByText('待审帖子', { exact: true }).waitFor()
+  await page.evaluate(() => { window.__profileFixture.missingProfiles = true })
+  await visible('重试刷新').click()
+  await todo.locator('uni-button').filter({ hasText: '待审资料' }).getByText('暂无数据', { exact: true }).waitFor()
+  await page.evaluate(() => { window.__profileFixture.missingProfiles = false })
+  await visible('刷新').click()
+  for (const [label, group] of [['待审帖子', 'pending'], ['待审评论', 'comments'], ['待处理举报', 'reports'], ['待审资料', 'profiles']]) {
+    const button = todo.locator('uni-button').filter({ hasText: label })
+    await button.focus()
+    if (!await button.evaluate(control => control === document.activeElement)) throw Error('Cannot focus the ' + label + ' task')
+    await button.press('Enter')
+    if (group === 'profiles') {
+      await page.locator('.profile-review').waitFor()
+      if (await page.locator('.governance').isVisible()) throw Error('Profile review opened in community governance')
+    } else {
+      await page.locator('.tabs .selected').getByText(group === 'reports' ? '待处理' : label, { exact: true }).waitFor()
+    }
+    await page.locator('.sidebar-nav').getByText('运营工作台', { exact: true }).click()
+  }
+  await page.setViewportSize({ width: 768, height: 900 })
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw Error('Overview overflows at 768px')
+  await page.setViewportSize({ width: 1440, height: 900 })
   await visible('账号设置').click()
   await visible('修改管理员登录信息').waitFor()
   await visible('路线与博物馆').click()
@@ -404,6 +441,8 @@ async (page) => {
   await page.getByRole('textbox').nth(0).fill('fixture-review-only')
   await page.getByRole('textbox').nth(1).fill('fixture-password')
   await visible('登录工作台').click()
+  await todo.getByText('待审资料', { exact: true }).waitFor()
+  if (await metrics.getByText('正常账户', { exact: true }).count()) throw Error('Review-only overview exposes admin statistics')
   await profileDot.waitFor()
   await sidebar.getByText('用户管理', { exact: true }).click()
   await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).waitFor()

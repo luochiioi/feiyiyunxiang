@@ -39,7 +39,7 @@
           <text v-if="!busy && queueState === 'ready' && rows.length === 0 && next.length === 0" class="muted">当前没有记录。</text>
           <button v-for="row in rows" :key="row.id" class="result" :class="{ 'selected-row': selected?.id === row.id }"
             role="button" :tabindex="busy ? -1 : 0" :aria-pressed="selected?.id === row.id" :disabled="busy" @click="select(row)"
-            @keydown.enter.prevent="select(row)" @keydown.space.prevent="select(row)">
+            @keydown="activate($event, () => select(row))">
             <text class="heading">{{ row.title || row.action || row.author || (row.commentId ? '评论举报' : '帖子举报') }}</text>
             <text v-if="group !== 'audit' && group !== 'mutes'" class="muted">{{ objectLabel(row) }} · {{ statusName(row.status ?? '') }} · {{ timeLabel(row.createdAt ?? 0) }}<template v-if="row.imageCount != null || row.hasImage"> · {{ row.imageCount ?? 1 }} 张图片</template></text>
             <text class="excerpt">{{ row.body ?? row.reason ?? '' }}</text>
@@ -128,15 +128,15 @@
             <textarea v-if="rejecting" v-model="rejectionReason" :disabled="busy" :maxlength="300" placeholder="填写驳回原因" />
             <view v-if="rejecting" class="tools decision-buttons">
               <button role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="cancelReject"
-                @keydown.enter.prevent="cancelReject" @keydown.space.prevent="cancelReject">取消</button>
+                @keydown="activate($event, cancelReject)">取消</button>
               <button class="danger" role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="submitReview('reject')"
-                @keydown.enter.prevent="submitReview('reject')" @keydown.space.prevent="submitReview('reject')">确认驳回</button>
+                @keydown="activate($event, () => submitReview('reject'))">确认驳回</button>
             </view>
             <view v-else class="tools decision-buttons">
-              <button role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="rejecting = true"
-                @keydown.enter.prevent="rejecting = true" @keydown.space.prevent="rejecting = true">{{ canReviewPost ? '驳回所选版本' : '驳回评论' }}</button>
+              <button role="button" :tabindex="busy ? -1 : 0" :disabled="busy" @click="beginReject"
+                @keydown="activate($event, beginReject)">{{ canReviewPost ? '驳回所选版本' : '驳回评论' }}</button>
               <button class="primary" role="button" :tabindex="canApprove ? 0 : -1" :disabled="!canApprove" @click="submitReview('approve')"
-                @keydown.enter.prevent="submitReview('approve')" @keydown.space.prevent="submitReview('approve')">{{ canReviewPost ? '通过所选版本' : '通过评论' }}</button>
+                @keydown="activate($event, () => submitReview('approve'))">{{ canReviewPost ? '通过所选版本' : '通过评论' }}</button>
             </view>
           </view>
         </view>
@@ -260,6 +260,12 @@ function clearDetail(): void {
   auditText.value = ''; detailFailed.value = false; reviewFinished.value = false; cancelReject()
 }
 function cancelReject(): void { rejecting.value = false; rejectionReason.value = '' }
+function beginReject(): void { rejecting.value = true }
+function activate(event: KeyboardEvent, action: () => void): void {
+  if (busy.value || (event.key !== 'Enter' && event.key !== ' ')) return
+  event.preventDefault()
+  action()
+}
 function submitReview(decision: string): void {
   if (canReviewPost.value) reviewPost(decision)
   else if (canReviewComment.value && (decision !== 'approve' || currentVersion.value != null)) reviewComment(decision)
