@@ -418,7 +418,10 @@ function createCommunityService({ repo, media, now = Date.now }) {
       return repo.tx(async db => {
         const at = now()
         await writable(db, u.uid, at)
-        const { post, version } = await visible(db, null, { postId: p.postId })
+        const { post, version } = await visible(db, null, { postId: p.postId }).catch(error => {
+          if (error.message === 'NOT_FOUND') fail('SHARE_POST_UNAVAILABLE')
+          throw error
+        })
         const target = (await db.list('fy-profiles', { code: p.code }))[0]
         if (!target?.uid || target.uid === u.uid) fail('NOT_FRIENDS')
         const pair = [u.uid, target.uid].sort()

@@ -114,7 +114,7 @@ test('a public post share creates a private and retry-safe friend message that o
   const post = await f.post(author, { title: '分享测试' })
   const args = { postId: post.postId, code: friendCode }
   await assert.rejects(c.communityShareToFriend(null, args), /AUTH_REQUIRED/)
-  await assert.rejects(c.communityShareToFriend(author, args), /NOT_FOUND/)
+  await assert.rejects(c.communityShareToFriend(author, args), /SHARE_POST_UNAVAILABLE/)
   await f.approve(post)
   await f.repo.put('fy-friends', relation, { ...pair, status: 'pending' })
   await assert.rejects(c.communityShareToFriend(author, args), /NOT_FRIENDS/)
@@ -144,7 +144,7 @@ test('a public post share creates a private and retry-safe friend message that o
   assert.equal(updated.sharedTitle, '新版')
   await c.communityRemoveOwn(author, newer)
   assert.equal((await messages.notificationDetail(friend, { id })).target, null)
-  await assert.rejects(c.communityShareToFriend(author, args), /NOT_FOUND/)
+  await assert.rejects(c.communityShareToFriend(author, args), /SHARE_POST_UNAVAILABLE/)
 })
 
 test('guessed IDs cannot read pending posts, private images or someone else’s diary', async () => {

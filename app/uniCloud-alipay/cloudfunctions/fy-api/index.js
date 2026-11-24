@@ -33,6 +33,8 @@ const serviceActions = new Set(['saveDraft', 'previewDraft', 'publish', 'drafts'
 const known=new Set(['FORBIDDEN','AUTH_REQUIRED','NOT_FOUND','CONFLICT','REQUEST_CONFLICT','OUTSIDE_RANGE','CLUE_LOCKED','CLUE_INCORRECT','MEDIA_MISMATCH','MEDIA_UPLOAD_FAILED','PHOTO_UNAVAILABLE','TEST_CONTENT_DISABLED','CONTENT_REVIEW_REQUIRED','CONFIG_REQUIRED','INVALID_IMAGE','RATE_LIMITED','LOGIN_FAILED','INVALID_PASSWORD','PASSWORD_INCORRECT','PASSWORD_UNCHANGED','USERNAME_TAKEN','CREDENTIALS_UNCHANGED','ACTIVITY_LOCKED','EXPIRED','NOT_PENDING','NOT_FRIENDS','NOT_READY','ASSIGNMENT_PENDING','TOO_EARLY','STALE_VERSION','COMMENT_REJECTED','DUPLICATE_COMMENT','COMMUNITY_MUTED','UPLOAD_NOT_AVAILABLE','UPLOAD_STAGING_UNAVAILABLE','ACCOUNT_DISABLED'])
 known.add('APPEARANCE_LOCKED')
 known.add('PROFILE_STORAGE_UNAVAILABLE')
+known.add('SHARE_POST_UNAVAILABLE')
+known.add('POST_EDIT_DISABLED')
 for (const code of ['WERUN_SESSION_FAILED', 'WERUN_ACCOUNT_MISMATCH', 'WERUN_DAY_CHANGED', 'WECHAT_LOGIN_CONFIG']) known.add(code)
 exports.main=async(event,context)=>{
   try {
@@ -126,6 +128,7 @@ exports.main=async(event,context)=>{
     } else if (operationsActions.has(action)) {
       data = await createCommunityOperations({ repo })[action](user, p)
     } else if (communityActions.has(action)) {
+      if (p.postId && ['communityStageImage', 'communitySubmit', 'communitySubmitGallery'].includes(action)) throw new Error('POST_EDIT_DISABLED')
       const media = createCommunityMedia({ cloud: uniCloud, cfg, service, limited })
       const community = createCommunityService({ repo, media })
       if (action === 'communityShareToFriend') await limited('share-post:' + user.uid, 20)

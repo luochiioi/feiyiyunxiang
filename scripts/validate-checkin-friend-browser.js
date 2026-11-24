@@ -17,7 +17,8 @@ async page => {
     const post = { id: 'public-post', revisionId: 'approved', title: '示例帖子', body: '这里是公开正文', author: '朋友',
       status: 'approved', hasImage: false, owner: false, publicView: true, latestRevision: '', commentCount: 0, likeCount: 0 }
     const notification = { id: 'shared-1', kind: 'community.post.shared', title: '好友分享了帖子', preview: '分享旅伴', createdAt: date }
-    window.__fixture = { sent: false, read: false, hidden: false, mediaReads: 0, sends: 0 }
+    window.__fixture = { sent: false, read: false, hidden: false, mediaReads: 0, sends: 0,
+      liked: false, saved: false, comment: '', shareAttempts: 0 }
     window.__mockCloud = async ({ data: { action, payload = {}, token } }) => {
       const state = window.__fixture
       const ok = data => ({ result: { code: 'OK', data } })
@@ -26,11 +27,22 @@ async page => {
         case 'explorationArchive': return ok(rows)
         case 'explorationArchiveDetail': { const item = rows.find(row => row._id === payload.id); return item ? ok(item) : notFound() }
         case 'readMedia': state.mediaReads++; return ok({ src })
-        case 'communityPost': return state.hidden ? notFound() : ok(post)
+        case 'communityPost': return state.hidden ? notFound() : ok({
+          ...post, owner: token === 'sender', latestRevision: token === 'sender' ? post.revisionId : '',
+          liked: state.liked, saved: state.saved, likeCount: Number(state.liked)
+        })
+        case 'communityReaction':
+          if (payload.kind === 'like') state.liked = payload.active
+          if (payload.kind === 'favorite') state.saved = payload.active
+          return ok({})
+        case 'communityComment':
+          state.comment = payload.body
+          return ok({ status: 'pending' })
         case 'communityComments': return ok({ items: [], mine: [], next: '' })
         case 'friends': return ok([{ code: 'FRIEND23', nickname: '已添加好友' }, { code: 'PEND2345', nickname: '待同意好友', kind: 'incoming' }])
         case 'communityShareToFriend':
           if (token !== 'sender' || payload.code !== 'FRIEND23' || payload.postId !== post.id) return notFound()
+          if (state.shareAttempts++ === 0) return notFound()
           state.sends++
           if (state.sent) return ok({ alreadyShared: true })
           state.sent = true
@@ -86,10 +98,33 @@ async page => {
   if (!listPosition) throw Error('Archive lost its previous scroll position')
   const postPath = '/packages/community/community-post/community-post?postId=public-post'
   await go(postPath)
+  await page.locator('.author-actions').getByText('已通过', { exact: true }).waitFor()
+  await page.locator('.author-actions').getByLabel('撤下帖子').waitFor()
+  if (await text('编辑最新版本').count() || await page.locator('.comment-input').count()) throw Error('Post detail still exposes edit or an oversized idle composer')
+  for (const label of ['点赞', '收藏', '查看评论']) {
+    const image = page.getByLabel(label, { exact: true }).locator('img')
+    await image.waitFor()
+    await page.waitForFunction(label => document.querySelector('uni-button[aria-label="' + label + '"] img')?.naturalWidth > 0, label)
+  }
+  await page.getByLabel('点赞', { exact: true }).click()
+  await page.getByLabel('取消点赞', { exact: true }).waitFor()
+  await page.getByLabel('收藏', { exact: true }).click()
+  await page.getByLabel('取消收藏', { exact: true }).waitFor()
+  await text('写评论…').click()
+  await page.locator('.comment-input textarea').fill('评论验收')
+  await text('收起').click()
+  await text('继续写评论…').click()
+  if (await page.locator('.comment-input textarea').inputValue() !== '评论验收') throw Error('Closing the comment composer discarded the draft')
+  await text('发送').click()
+  await text('评论已提交审核。').waitFor()
+  if ((await page.evaluate(() => window.__fixture.comment)) !== '评论验收') throw Error('Comment payload was lost')
+  await page.getByLabel('分享与更多操作').click()
   await text('分享给好友').click()
   await text('已添加好友').waitFor()
   if (await text('待同意好友').count()) throw Error('Pending friends appeared in the picker')
   await page.locator('.choice').filter({ hasText: '已添加好友' }).click()
+  await text('发送给好友').click()
+  await text('分享服务未能确认发送，请刷新帖子后重试。').waitFor()
   await text('发送给好友').click()
   await text('已发送给好友').waitFor()
   await user('receiver')
@@ -103,5 +138,5 @@ async page => {
   await go('/packages/profile/message-detail/message-detail?id=shared-1')
   await text('这条帖子当前不可查看。').waitFor()
   if (await text('查看帖子').count()) throw Error('An unavailable post still had a link')
-  return 'Archive details, filter and scroll retention, no-photo and friend share message flow verified'
+  return 'Verified archive, post actions, compact comment composer, and friend share retry and message link'
 }

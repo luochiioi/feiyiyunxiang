@@ -26,7 +26,7 @@ import { api, secured, session } from '@/features/api.uts'
 import { communityError } from '@/features/community/community.uts'
 
 type Friend = { code: string, nickname: string, avatarVersion?: string, avatar?: string, kind?: string }
-const props = defineProps<{ postId: string }>()
+const props = defineProps<{ target: string }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 const friends = ref<Friend[]>([]), selected = ref(''), owner = ref('')
 const loading = ref(false), loadFailed = ref(false), sending = ref(false), message = ref('')
@@ -57,16 +57,22 @@ async function load(): Promise<void> {
 
 async function send(): Promise<void> {
   if (sending.value || !selected.value || owner.value !== session.value?.uid) return
+  const postId = props.target
+  if (!postId) { message.value = '未能识别这条帖子，请返回后重新打开。'; return }
   const ticket = generation
   sending.value = true; message.value = ''
   try {
-    const result = await api<{ alreadyShared: boolean }>('communityShareToFriend', { postId: props.postId, code: selected.value })
+    const result = await api<{ alreadyShared: boolean }>('communityShareToFriend', { postId, code: selected.value })
     if (ticket !== generation) return
     uni.showToast({ title: result.alreadyShared ? '已分享过这个版本' : '已发送给好友', icon: 'none' })
     emit('close')
   } catch (error) {
     if (ticket !== generation) return
-    message.value = (error as Error | null)?.message === 'NOT_FRIENDS' ? '对方当前无法接收好友分享。' : communityError(error)
+    const code = (error as Error | null)?.message
+    if (code === 'NOT_FRIENDS') message.value = '对方当前无法接收好友分享。'
+    else if (code === 'SHARE_POST_UNAVAILABLE') message.value = '这条帖子当前未公开，无法分享。'
+    else if (code === 'NOT_FOUND') message.value = '分享服务未能确认发送，请刷新帖子后重试。'
+    else message.value = communityError(error)
   } finally { if (ticket === generation) sending.value = false }
 }
 </script>

@@ -83,6 +83,7 @@ export function statusLabel(status: string): string {
 export function communityError(error: any, submitting = false): string {
   switch ((error as Error).message) {
     case 'NOT_FOUND': return submitting ? '图片来源已失效，或社区接口尚未更新。' : '内容已不可访问。'
+    case 'POST_EDIT_DISABLED': return '已提交的帖子无法编辑，可以发布一条新帖子。'
     case 'RATE_LIMITED': return '操作太频繁，请稍后再试。'
     case 'DUPLICATE_COMMENT': return '近期已提交相同评论。'
     case 'COMMENT_REJECTED': return '这条评论未通过发布规则，请修改后再试。'

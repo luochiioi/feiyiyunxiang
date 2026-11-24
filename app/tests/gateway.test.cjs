@@ -44,6 +44,15 @@ function gateway({configured=true,validCode=true,wechatError=40029,privateStorag
  return {main:(event)=>sandbox.exports.main(event,{CLIENTIP:'fixture-ip',APPID:'fixture-app'}),rows,counts:()=>({exchanges,uploads})}
 }
 test('gateway exchanges WeChat code on server and never returns session_key or secret',async()=>{const g=gateway();const r=await g.main({action:'wxLogin',payload:{code:'wx-code'}});assert.equal(r.code,'OK');assert.equal(r.data.token,'issued-token');assert.equal(g.counts().exchanges,1);assert.doesNotMatch(JSON.stringify(r),/never-return|server-fixture|openid/);})
+test('member endpoints reject resubmitting a post through old clients', async () => {
+  const g = gateway()
+  g.rows.set('uni-id-usersmember', { status: 0, token: ['fixture-token'], role: [] })
+  for (const action of ['communityStageImage', 'communitySubmit', 'communitySubmitGallery']) {
+    const result = await g.main({ action, token: 'fixture-token', payload: { postId: 'existing' } })
+    assert.equal(result.code, 'POST_EDIT_DISABLED')
+  }
+  assert.equal(g.counts().uploads, 0)
+})
 test('gateway rejects invalid code and missing configuration without pretending login',async()=>{assert.equal((await gateway({validCode:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'LOGIN_FAILED');assert.equal((await gateway({configured:false}).main({action:'wxLogin',payload:{code:'wx-code'}})).code,'CONFIG_REQUIRED');})
 test('gateway identifies rejected WeChat app credentials without creating an account', async () => {
   const g = gateway({ validCode: false, wechatError: 40125 })
