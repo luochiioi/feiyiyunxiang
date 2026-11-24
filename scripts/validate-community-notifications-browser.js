@@ -100,6 +100,7 @@ async (page) => {
   }));
  }
  if(await page.locator('.versions .version').count()!==1)throw Error('First submission still displays an empty public panel');
+ await page.screenshot({path:'.superpowers/admin-nine-images-browser.png'});
  await approve.focus();
  if(!await approve.evaluate(button=>button===document.activeElement))throw Error('Keyboard focus did not reach approval');
  await approve.press('Enter');
@@ -163,6 +164,5 @@ async (page) => {
  await page.setViewportSize({width:1440,height:1000});
  const logout=await page.getByText('退出登录',{exact:true}).boundingBox();
  if(!logout||logout.x>260||logout.y<800)throw Error('sidebar footer lost');
- await page.screenshot({path:'.superpowers/admin-nine-images-browser.png',fullPage:true});
  return 'Verified message pagination and read retry, nine-image review, consecutive post and comment review, report evidence and separate resolution';
 }

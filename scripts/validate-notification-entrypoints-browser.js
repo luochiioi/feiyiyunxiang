@@ -15,19 +15,19 @@ async (page) => {
   }
  })
  await page.setViewportSize({ width: 390, height: 844 })
+ await page.clock.install()
+ const apiResponse = page.waitForResponse(/\/assets\/api\.[^/]+\.js$/)
  await page.goto('http://127.0.0.1:8421/#/pages/index/index')
  await page.getByText('非遗云享', { exact: true }).waitFor()
  const badge = page.locator('.home-message-dot')
  if (await badge.count()) throw Error('Guest sees an unread badge')
- await page.evaluate(async () => {
-  const entry = performance.getEntriesByType('resource').find(x => /\/api\.[^/]+\.js/.test(x.name))
-  const api = await import(entry.name)
+ await page.evaluate(async url => {
+  const api = await import(url)
   window.__memberSession = api.s
   api.s.value = { uid: 'local-B', token: 'local-only', expiresAt: Date.now() + 3600000 }
- })
+ }, (await apiResponse).url())
  await badge.waitFor({ state: 'visible' })
  await page.screenshot({ path: '.superpowers/home-unread-browser.png', fullPage: true })
- await page.clock.install()
  await page.evaluate(() => { window.__unread = 0 })
  await page.clock.fastForward(30000)
  await badge.waitFor({ state: 'hidden' })

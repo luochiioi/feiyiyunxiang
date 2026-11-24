@@ -3,7 +3,7 @@ const {stripTypeScriptTypes}=require('node:module')
 function script(file,globals={}) {
  let source=fs.readFileSync(path.join(__dirname,'..',file),'utf8');if(file.endsWith('.uvue'))source=source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1]
  source=source.replace(/^import .+$/gm,'').replace(/export /g,'')
- const watches=[];const context=vm.createContext({ref:value=>({value}),computed:fn=>({get value(){return fn()}}),watch:(fn,cb)=>watches.push(cb),nextTick:async()=>{},onShow(){},onLoad(){},...globals})
+ const watches=[];const context=vm.createContext({ref:value=>({value}),computed:fn=>({get value(){return fn()}}),watch:(fn,cb)=>watches.push(cb),nextTick:async()=>{},onShow(){},onHide(){},onLoad(){},...globals})
  vm.runInContext(stripTypeScriptTypes(source),context)
  return {run:code=>vm.runInContext(code,context),change:()=>watches.forEach(cb=>cb())}
 }
@@ -28,6 +28,22 @@ test('detail renders before read, retries only failed receipt and hides prior-ac
  s.run("id.value='id'");await s.run('loadDetail()');assert.equal(s.run('detail.value.reason'),'原因');assert.equal(s.run('readError.value.length>0'),true)
  fail=false;await s.run('markRead()');assert.equal(loads,1);assert.equal(receipts,2);assert.equal(s.run('detail.value.read'),true)
  session.value={uid:'B'};s.change();assert.equal(s.run('detail.value'),null)
+})
+
+test('an old notifications API does not display the unfiltered response in a category', async () => {
+ const session = { value: { uid: 'A' } }
+ const s = script('packages/profile/messages/messages.uvue', {
+  session,
+  listNotifications: async () => ({ items: [{ id: 'mixed' }], next: '' }),
+  refreshNotificationsSummary: async () => {}
+ })
+ s.run("selectFilter('friends')")
+ await new Promise(resolve => setImmediate(resolve))
+ assert.equal(s.run('items.value.length'), 0)
+ assert.equal(s.run('unsupported.value'), true)
+ s.run("selectFilter('all')")
+ await new Promise(resolve => setImmediate(resolve))
+ assert.equal(s.run('items.value[0].id'), 'mixed')
 })
 
 test('comment notifications open the public post while author versions retain exact preview links',()=>{

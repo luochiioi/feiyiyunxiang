@@ -21,7 +21,7 @@ async page => {
       title: '我的未通过帖子', reason: '请补充故事出处', owner: true, status: 'rejected', hasImage: false, imageCount: 0, publicView: false }
     const notification = { id: 'shared-1', kind: 'community.post.shared', title: '好友分享了帖子', preview: '分享旅伴', createdAt: date }
     window.__fixture = { sent: false, read: false, hidden: false, mediaReads: 0, imageReads: 0, feedTabs: [], sends: 0,
-      liked: false, saved: false, comment: '', shareAttempts: 0 }
+      liked: false, saved: false, comment: '', shareAttempts: 0, checkPagination: location.search.includes('paginationFixture=1') }
     window.__mockCloud = async ({ data: { action, payload = {}, token } }) => {
       const state = window.__fixture
       const ok = data => ({ result: { code: 'OK', data } })
@@ -37,6 +37,25 @@ async page => {
           if (state.failFeed) {
             await new Promise(resolve => { state.finishFeed = resolve })
             return { result: { code: 'SERVICE_UNAVAILABLE' } }
+          }
+          if (state.checkPagination) {
+            const entry = { ...post, hasImage: false, imageCount: 0 }
+            if (payload.tab === 'friends') {
+              if (!state.finishOldFriends) {
+                await new Promise(resolve => { state.finishOldFriends = resolve })
+                return ok({ items: [{ ...entry, title: '迟到的好友帖子' }], next: '' })
+              }
+              return ok({ items: [], next: '' })
+            }
+            if (payload.cursor) {
+              if (!state.appendFailed) {
+                state.appendFailed = true
+                return { result: { code: 'SERVICE_UNAVAILABLE' } }
+              }
+              return ok({ items: [{ ...entry, revisionId: 'page-2', title: '第二页帖子' }], next: '' })
+            }
+            if (!state.finishInitialFeed) await new Promise(resolve => { state.finishInitialFeed = resolve })
+            return ok({ items: [{ ...entry, title: '第一页帖子' }], next: 'page-2' })
           }
           if (payload.tab === 'saved') return ok({ items: [], next: '' })
           if (payload.tab === 'mine') {
@@ -258,5 +277,23 @@ async page => {
   await go('/packages/profile/message-detail/message-detail?id=shared-1')
   await text('这条帖子当前不可查看。').waitFor()
   if (await text('查看帖子').count()) throw Error('An unavailable post still had a link')
+  await page.goto(origin + '/?paginationFixture=1#/packages/community/community/community')
+  await text('正在加载…').waitFor()
+  await page.waitForFunction(() => typeof window.__fixture.finishInitialFeed === 'function')
+  await page.evaluate(() => window.__fixture.finishInitialFeed())
+  await text('第一页帖子').waitFor()
+  await user('receiver')
+  await page.locator('.filters').getByText('好友', { exact: true }).click()
+  await page.waitForFunction(() => typeof window.__fixture.finishOldFriends === 'function')
+  await text('最新').click()
+  await text('第一页帖子').waitFor()
+  await page.evaluate(() => window.__fixture.finishOldFriends())
+  await text('加载更多').click()
+  await text('重试加载更多').waitFor()
+  if (!await text('第一页帖子').isVisible() || await text('迟到的好友帖子').isVisible()) throw Error('Pagination failure or an old tab response replaced the current cards')
+  await text('重试加载更多').click()
+  await text('第二页帖子').waitFor()
+  await page.locator('.filters').getByText('好友', { exact: true }).click()
+  await text('暂无好友动态。').waitFor()
   return 'Verified community refresh, photo reuse, post status pages and owner isolation, favorite counts, archive, and friend share with message filters'
 }
