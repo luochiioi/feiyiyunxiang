@@ -1,0 +1,30 @@
+export type DiaryEntry = {
+  _id: string, title: string, createdAt: number, note: string, mediaId: string,
+  routeId?: string, runId?: string, museumName?: string, kind?: string, purpose?: string
+}
+
+export type DiaryDay = { date: string, entries: DiaryEntry[] }
+
+export function groupDiary(entries: DiaryEntry[], kind: string): DiaryDay[] {
+  const days: DiaryDay[] = []
+  const ordered = entries.filter(entry => kind.length === 0 || entry.kind === kind)
+    .sort((a, b) => b.createdAt - a.createdAt)
+  ordered.forEach(entry => {
+    const date = new Date(entry.createdAt).toLocaleDateString()
+    const last = days[days.length - 1]
+    if (last != null && last.date === date) last.entries.push(entry)
+    else days.push({ date, entries: [entry] })
+  })
+  return days
+}
+
+export function diaryKind(kind: string | null = null): string {
+  if (kind === 'indoor') return '馆内'
+  if (kind === 'outdoor') return '馆外'
+  return '打卡'
+}
+
+export function diaryTime(at: number): string {
+  const date = new Date(at)
+  return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0')
+}

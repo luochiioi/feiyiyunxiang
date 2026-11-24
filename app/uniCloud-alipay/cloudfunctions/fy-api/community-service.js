@@ -1,4 +1,4 @@
-const { writeNotification, markNotificationRead, notificationId } = require('./notification-service')
+const { writeNotification, writePostShare, markNotificationRead, notificationId } = require('./notification-service')
 const { pendingRevisions, validateCursor } = require('./community-review-queue')
 const { key } = require('./service')
 const { createPartnershipService } = require('./partnership-service')
@@ -400,8 +400,11 @@ function createCommunityService({ repo, media, now = Date.now }) {
       const view = { ...baseView(post, version, u, author), body: version.body }
       if (!view.publicView) return { ...view, liked: false, saved: false }
       const state = async kind => u?.uid && (await repo.get(reactions, key(u.uid, post._id, kind)))?.active === true
-      const [liked, saved] = await Promise.all([state('like'), state('favorite')])
-      return { ...view, liked: !!liked, saved: !!saved }
+      const [liked, saved, favoriteCount] = await Promise.all([
+        state('like'), state('favorite'),
+        repo.count(reactions, { postId: post._id, kind: 'favorite', active: true })
+      ])
+      return { ...view, liked: !!liked, saved: !!saved, favoriteCount }
     },
 
     async communityImage(u, p) { return readImage(u, p, false) },
@@ -410,6 +413,27 @@ function createCommunityService({ repo, media, now = Date.now }) {
     async communityShare(u, p) {
       const { post, version } = await visible(repo, null, { postId: p.postId })
       return { postId: post._id, title: version.title || (mediaItems(version).length ? '图片动态' : '文字动态') }
+    },
+
+    async communityShareToFriend(u, p) {
+      member(u)
+      if (typeof p.code !== 'string' || !/^[A-Z2-9]{8}$/.test(p.code)) fail('INVALID_REQUEST')
+      return repo.tx(async db => {
+        const at = now()
+        await writable(db, u.uid, at)
+        const { post, version } = await visible(db, null, { postId: p.postId }).catch(error => {
+          if (error.message === 'NOT_FOUND') fail('SHARE_POST_UNAVAILABLE')
+          throw error
+        })
+        const target = (await db.list('fy-profiles', { code: p.code }))[0]
+        if (!target?.uid || target.uid === u.uid) fail('NOT_FRIENDS')
+        const pair = [u.uid, target.uid].sort()
+        const friendship = await db.get('fy-friends', key('friend', ...pair))
+        if (friendship?.status !== 'accepted' || (await db.get('uni-id-users', target.uid))?.status !== 0) fail('NOT_FRIENDS')
+        const sender = profileSummary(await findProfile(db, u.uid))
+        return writePostShare(db, { senderUid: u.uid, recipientUid: target.uid, postId: post._id,
+          revisionId: version._id, actorNickname: sender.nickname, createdAt: at })
+      })
     },
 
     async communityReaction(u, p) {

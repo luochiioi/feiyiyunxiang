@@ -4,7 +4,7 @@
     <view class="content">
       <view v-if="session == null" class="card"><text class="body">微信登录后查看本人的消息。</text><button class="primary" @click="signIn">微信登录</button></view>
       <template v-else>
-        <view class="card"><text class="muted">这里保留社区审核结果和好友申请动态。历史驳回可在我的帖子查看。</text><button class="secondary" @click="openMine">我的帖子</button></view>
+        <view class="card"><text class="muted">查看好友分享、好友申请和审核结果。</text><button class="secondary" @click="openMine">我的帖子</button></view>
         <view v-for="item in items" :key="item.id" class="card" @click="openMessage(item.id)">
           <view class="row spread"><text class="heading">{{ item.title }}</text><text v-if="!item.read" class="unread">未读</text></view>
           <text v-if="item.preview.length > 0" class="body">{{ item.preview }}</text><text class="muted">{{ formatTime(item.createdAt) }}</text>

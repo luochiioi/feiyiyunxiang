@@ -4,7 +4,7 @@ export type Post = {
   id: string, revisionId: string, latestRevision: string, title: string, body?: string, author: string,
   authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string,
   hasImage: boolean, imageCount?: number, owner: boolean, publicView: boolean, reviewUnread?: boolean, hasPublicVersion?: boolean, status: string, reason: string,
-  commentCount: number, likeCount: number, liked?: boolean, saved?: boolean
+  commentCount: number, likeCount: number, favoriteCount?: number, liked?: boolean, saved?: boolean
 }
 export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string, authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string }
 export type PostPage = { items: Post[], next: string }
@@ -38,23 +38,45 @@ export function schedulePhoto(work: () => Promise<void>): Promise<void> {
   })
 }
 
-export function savePreview(src: string): Promise<string> {
+const previewPrefix = 'fy-community-preview-'
+const cachePrefix = 'fy-community-cache-'
+let cacheCleanup: Promise<void> | null = null
+
+export function savePreview(src: string, shared: boolean = false): Promise<string> {
   const prefix = src.startsWith('data:image/png;base64,') ? 'data:image/png;base64,' : 'data:image/jpeg;base64,'
   if (!src.startsWith(prefix)) return Promise.reject(new Error('PHOTO_UNAVAILABLE'))
   const extension = prefix.includes('png') ? '.png' : '.jpg'
-  const path = uni.env.USER_DATA_PATH + '/fy-community-preview-' + requestId() + extension
-  return new Promise<string>((resolve, reject) => {
-    uni.getFileSystemManager().writeFile({
+  // #ifdef WEB
+  return Promise.resolve(src)
+  // #endif
+  // #ifndef WEB
+  const directory = uni.env.USER_DATA_PATH
+  const fs = uni.getFileSystemManager()
+  if (shared && cacheCleanup == null) cacheCleanup = new Promise<void>(resolve => {
+    fs.readdir({ dirPath: directory, success: result => {
+      const stale = result.files.filter(file => file.startsWith(cachePrefix))
+      Promise.all(stale.map(file => new Promise<void>(done => {
+        fs.unlink({ filePath: directory + '/' + file, complete: () => done() })
+      }))).then(() => resolve())
+    }, fail: () => resolve() })
+  })
+  const path = directory + '/' + (shared ? cachePrefix : previewPrefix) + requestId() + extension
+  return (shared ? cacheCleanup! : Promise.resolve()).then(() => new Promise<string>((resolve, reject) => {
+    fs.writeFile({
       filePath: path, data: src.slice(prefix.length), encoding: 'base64',
       success: () => resolve(path), fail: () => reject(new Error('PHOTO_UNAVAILABLE'))
     })
-  })
+  }))
+  // #endif
 }
 
 export function removePreview(path: string): void {
-  if (path.startsWith(uni.env.USER_DATA_PATH + '/fy-community-preview-')) {
+  // #ifndef WEB
+  const directory = uni.env.USER_DATA_PATH + '/'
+  if (path.startsWith(directory + previewPrefix) || path.startsWith(directory + cachePrefix)) {
     uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} })
   }
+  // #endif
 }
 
 export async function publicRead<T>(action: string, payload: UTSJSONObject, timeout = 60000): Promise<T> {
@@ -83,6 +105,7 @@ export function statusLabel(status: string): string {
 export function communityError(error: any, submitting = false): string {
   switch ((error as Error).message) {
     case 'NOT_FOUND': return submitting ? '图片来源已失效，或社区接口尚未更新。' : '内容已不可访问。'
+    case 'POST_EDIT_DISABLED': return '已提交的帖子无法编辑，可以发布一条新帖子。'
     case 'RATE_LIMITED': return '操作太频繁，请稍后再试。'
     case 'DUPLICATE_COMMENT': return '近期已提交相同评论。'
     case 'COMMENT_REJECTED': return '这条评论未通过发布规则，请修改后再试。'

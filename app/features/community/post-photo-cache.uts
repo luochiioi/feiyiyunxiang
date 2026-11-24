@@ -1,0 +1,80 @@
+import { watch } from 'vue'
+import { session } from '@/features/api.uts'
+import { publicRead, removePreview, savePreview, schedulePhoto } from './community.uts'
+
+const maxCachedPhotos = 27
+const photoLifetime = 5 * 60 * 1000
+
+export type PostPhoto = {
+  key: string, postId: string, revisionId: string, index: number, generation: number,
+  path: string, expiresAt: number, users: number, pending: Promise<string> | null
+}
+
+const cache = new Map<string, PostPhoto>()
+let generation = 0
+
+watch(() => session.value?.uid, () => {
+  generation++
+  cache.forEach(photo => removePreview(photo.path))
+  cache.clear()
+}, { flush: 'sync' })
+
+function discard(photo: PostPhoto): void {
+  if (cache.get(photo.key) === photo) cache.delete(photo.key)
+  if (photo.users === 0) removePreview(photo.path)
+}
+
+function touch(photo: PostPhoto): void {
+  cache.delete(photo.key)
+  cache.set(photo.key, photo)
+}
+
+export function retainPostPhoto(postId: string, revisionId: string, index: number): PostPhoto {
+  const now = Date.now()
+  cache.forEach(photo => { if (photo.expiresAt > 0 && photo.expiresAt <= now) discard(photo) })
+  const key = postId + '/' + revisionId + '/' + index
+  let photo = cache.get(key)
+  if (photo == null) {
+    photo = { key, postId, revisionId, index, generation, path: '', expiresAt: 0, users: 0, pending: null }
+  }
+  photo.users++
+  touch(photo)
+  return photo
+}
+
+export function releasePostPhoto(photo: PostPhoto): void {
+  photo.users--
+  if (photo.users === 0 && cache.get(photo.key) !== photo) removePreview(photo.path)
+}
+
+export function invalidatePostPhoto(photo: PostPhoto): void { discard(photo) }
+
+export function loadPostPhoto(photo: PostPhoto): Promise<string> {
+  if (photo.generation !== generation) return Promise.reject(new Error('ACCOUNT_CHANGED'))
+  if (photo.path.length > 0) return Promise.resolve(photo.path)
+  if (photo.pending != null) return photo.pending!
+  photo.pending = schedulePhoto(async () => {
+    if (photo.generation !== generation) throw new Error('ACCOUNT_CHANGED')
+    if (photo.users === 0) throw new Error('PHOTO_UNUSED')
+    const image = await publicRead<{ src: string }>('communityImage', {
+      postId: photo.postId, revisionId: photo.revisionId, preview: false, index: photo.index
+    }, 18000)
+    if (photo.generation !== generation) throw new Error('ACCOUNT_CHANGED')
+    const path = await savePreview(image.src, true)
+    if (photo.generation !== generation) {
+      removePreview(path)
+      throw new Error('ACCOUNT_CHANGED')
+    }
+    photo.path = path
+    photo.expiresAt = Date.now() + photoLifetime
+    if (cache.get(photo.key) === photo) {
+      touch(photo)
+      const ready = Array.from(cache.values()).filter(item => item.path.length > 0)
+      ready.slice(0, Math.max(0, ready.length - maxCachedPhotos)).forEach(discard)
+    } else if (photo.users === 0) removePreview(path)
+  }).then(() => photo.path).catch(error => {
+    discard(photo)
+    throw error
+  }).finally(() => { photo.pending = null })
+  return photo.pending!
+}

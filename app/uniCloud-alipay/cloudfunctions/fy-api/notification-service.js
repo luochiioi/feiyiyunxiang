@@ -4,6 +4,7 @@ const { key } = require('./service')
 const { fail, identifier } = require('./community-policy')
 const { validateCursor } = require('./community-review-queue')
 const collection = 'fy-notifications'
+const postShareKind = 'community.post.shared'
 const titles = {
  'community.post.approved': '帖子审核通过', 'community.post.rejected': '帖子审核未通过', 'community.post.removed': '帖子已下架',
  'community.comment.approved': '评论审核通过', 'community.comment.rejected': '评论审核未通过', 'community.comment.removed': '评论已下架'
@@ -18,6 +19,15 @@ async function writeNotification(db, event) {
  if (!await db.get(collection,id)) await db.put(collection,id,{...value,order:String(createdAt).padStart(13,'0')+'-'+id,readAt:0})
  return id
 }
+async function writePostShare(db, { senderUid, recipientUid, postId, revisionId, actorNickname, createdAt }) {
+ const id = key('post-share', senderUid, recipientUid, postId, revisionId)
+ if (await db.get(collection, id)) return { alreadyShared: true }
+ await db.put(collection, id, {
+  recipientUid, kind: postShareKind, postId, revisionId, actorNickname, commentId: '', reason: '',
+  createdAt, order: String(createdAt).padStart(13, '0') + '-' + id, readAt: 0
+ })
+ return { alreadyShared: false }
+}
 async function markNotificationRead(db, uid, id, at) {
  if (!identifier(id)) fail('NOT_FOUND')
  const row = await db.get(collection,id)
@@ -28,7 +38,7 @@ async function markNotificationRead(db, uid, id, at) {
   if (version?.uid === uid && version.postId === row.postId && version.status === 'rejected' && version.reviewSeen !== true) await db.put('fy-community-versions',version._id,{...version,reviewSeen:true})
  }
 }
-const view = row => ({id:row._id,kind:row.kind,title:titles[row.kind] ?? friendTitles[row.kind] ?? profileTitles[row.kind],preview:Object.hasOwn(friendTitles,row.kind) ? (row.actorNickname || '旅伴') : (row.reason ?? '').slice(0,60),createdAt:row.createdAt,read:row.readAt>0})
+const view = row => ({id:row._id,kind:row.kind,title:row.kind === postShareKind ? '好友分享了帖子' : titles[row.kind] ?? friendTitles[row.kind] ?? profileTitles[row.kind],preview:row.kind === postShareKind || Object.hasOwn(friendTitles,row.kind) ? (row.actorNickname || '旅伴') : (row.reason ?? '').slice(0,60),createdAt:row.createdAt,read:row.readAt>0})
 function createNotificationService({repo,now=Date.now}) {
  async function own(u,id) {
   member(u);if(!identifier(id)) fail('NOT_FOUND')
@@ -49,11 +59,23 @@ function createNotificationService({repo,now=Date.now}) {
   if(post.uid!==row.recipientUid || version?.uid!==row.recipientUid || version.postId!==post._id) return null
   return {postId:row.postId,revisionId:row.revisionId,commentId:'',preview:true}
  }
+ async function sharedPost(row) {
+  const post = await repo.get('fy-community-posts', row.postId)
+  if (post?.status !== 'public' || !post.publicRevision) return null
+  const version = await repo.get('fy-community-versions', post.publicRevision)
+  if (version?.status !== 'approved' || version.postId !== post._id || version.uid !== post.uid) return null
+  return version
+ }
  return {
   async notificationsList(u,p={}) { member(u);validateCursor(p.cursor);const rows=await repo.page(collection,{recipientUid:u.uid},{field:'order',before:p.cursor||null,size:21});return {items:rows.slice(0,20).map(view),next:rows.length>20?rows[19].order:''} },
   async notificationsSummary(u) { member(u);return {unread:await repo.count(collection,{recipientUid:u.uid,readAt:0})} },
   async notificationDetail(u,p) {
    const row=await own(u,p.id)
+   if (row.kind === postShareKind) {
+    const version = await sharedPost(row)
+    return { ...view(row), reason: '', sharedTitle: version?.title ?? '',
+      target: version ? { postId: row.postId, revisionId: version._id, commentId: '', preview: false } : null }
+   }
    if (Object.hasOwn(friendTitles,row.kind)) return {...view(row),reason:'',target:null,friend:await friendNotificationContext(repo,row,u.uid,now())}
    if (Object.hasOwn(profileTitles, row.kind)) {
     const revision = identifier(row.profileRevisionId) ? await repo.get('fy-profile-revisions', row.profileRevisionId) : null
@@ -66,4 +88,4 @@ function createNotificationService({repo,now=Date.now}) {
   async notificationRead(u,p) { member(u);return repo.tx(async db=>{await markNotificationRead(db,u.uid,p.id,now());return {}}) }
  }
 }
-module.exports={createNotificationService,writeNotification,markNotificationRead,notificationId}
+module.exports={createNotificationService,writeNotification,writePostShare,markNotificationRead,notificationId}

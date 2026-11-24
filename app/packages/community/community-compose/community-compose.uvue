@@ -1,6 +1,6 @@
 <template>
   <view class="screen">
-    <AppPageHeader :title="postId.length > 0 ? '编辑帖子' : '发帖'" :show-back="true" />
+    <AppPageHeader title="发帖" :show-back="true" />
     <view class="content">
       <button v-if="!ready && !busy" class="secondary" @click="initialize">重新加载</button>
       <text v-if="accountChanged" class="body">微信账号已切换，请返回后重新打开。</text>
@@ -9,14 +9,13 @@
         <button class="secondary" :disabled="busy" @click="resumeDraft">重新登录</button>
       </view>
       <view v-else-if="ready" class="card">
-        <text class="muted">{{ postId.length > 0 && hasPublicVersion ? '修改需重新审核，期间继续展示已通过版本。' : '帖子及图片审核通过后公开。' }}</text>
+        <text class="muted">帖子及图片审核通过后公开。</text>
         <input class="title-input" v-model="title" :disabled="busy" :maxlength="80" placeholder="标题（选填）" />
         <textarea v-model="body" :disabled="busy" :maxlength="2000" placeholder="想和旅伴分享什么？（选填）" />
         <view class="row spread"><text class="heading">照片</text><text class="muted">{{ photos.length }}/9</text></view>
         <view v-if="photos.length > 0" class="photo-grid">
           <view v-for="photo in photos" :key="photo.slot" class="photo-tile">
-            <image v-if="photo.path.length > 0" class="photo" :src="photo.path" mode="aspectFill" @click="previewPhoto(photo.path)" />
-            <button v-else class="photo photo-fallback" :disabled="busy" @click="loadOriginal(photo)">查看原图 {{ photo.keepIndex + 1 }}</button>
+            <image class="photo" :src="photo.path" mode="aspectFill" @click="previewPhoto(photo.path)" />
             <button class="remove-photo" :disabled="busy" @click="removePhoto(photo.slot)" aria-label="移除这张照片">×</button>
             <text v-if="failedPhotoSlot === photo.slot" class="photo-status photo-error">上传失败</text>
           </view>
@@ -43,14 +42,13 @@
 import { computed, ref } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import { api, login, session, requestId } from '@/features/api.uts'
-import { communityError, postPath, savePreview, removePreview, imageCount } from '@/features/community/community.uts'
-import type { Post, DiaryPhoto } from '@/features/community/community.uts'
-type Photo = { slot: string, path: string, source: string, diaryId: string, keepIndex: number, uploadId: string }
+import { communityError, postPath, savePreview, removePreview } from '@/features/community/community.uts'
+import type { DiaryPhoto } from '@/features/community/community.uts'
+type Photo = { slot: string, path: string, source: string, diaryId: string, uploadId: string }
 const maxPhotos = 9
-const postId = ref(''), revisionId = ref(''), title = ref(''), body = ref('')
+const title = ref(''), body = ref('')
 const photos = ref<Photo[]>([]), showDiary = ref(false), records = ref<DiaryPhoto[]>([])
 const busy = ref(false), submitting = ref(false), ready = ref(false), message = ref(''), phase = ref('')
-const hasPublicVersion = ref(false)
 const failedPhotoSlot = ref(''), retrySubmit = ref(false)
 const draftOwner = ref(session.value?.uid ?? '')
 const sessionMissing = computed(() => draftOwner.value.length > 0 && session.value == null)
@@ -58,7 +56,7 @@ const accountChanged = computed(() => draftOwner.value.length > 0 && session.val
 let pendingDiaryId = '', submitId = requestId(), submittedDraft = '', disposed = false
 onUnload(() => { disposed = true; photos.value.forEach(photo => removePreview(photo.path)) })
 onLoad(query => {
-  postId.value = query['postId'] ?? ''; revisionId.value = query['revisionId'] ?? ''; pendingDiaryId = query['diaryId'] ?? ''
+  pendingDiaryId = query['diaryId'] ?? ''
   initialize()
 })
 async function requireDraftAccount(): Promise<void> {
@@ -86,17 +84,6 @@ async function resumeDraft(): Promise<void> {
 async function initialize(): Promise<void> {
   busy.value = true; message.value = ''
   try {
-    if (postId.value.length > 0) {
-      const post = await draftRequest<Post>('communityPost', { postId: postId.value, revisionId: revisionId.value, preview: true })
-      if (!post.owner || post.revisionId !== post.latestRevision || post.status === 'removed' || post.status === 'deleted') throw new Error('STALE_VERSION')
-      hasPublicVersion.value = post.hasPublicVersion === true
-      title.value = post.title; body.value = post.body ?? ''
-      const originals: Photo[] = []
-      for (let index = 0; index < imageCount(post); index++) {
-        originals.push({ slot: requestId(), source: 'keep', path: '', diaryId: '', keepIndex: index, uploadId: '' })
-      }
-      photos.value = originals
-    }
     ready.value = true
     if (pendingDiaryId.length > 0) {
       const items = await draftRequest<DiaryPhoto[]>('diary')
@@ -123,7 +110,7 @@ function choosePhoto(): void {
   uni.chooseImage({ count: remaining, sourceType: ['album'], sizeType: ['compressed'], success: result => {
     if (disposed) return
     const additions = result.tempFilePaths.slice(0, remaining).map((path): Photo =>
-      ({ slot: requestId(), source: 'upload', path, diaryId: '', keepIndex: -1, uploadId: '' }))
+      ({ slot: requestId(), source: 'upload', path, diaryId: '', uploadId: '' }))
     photos.value = [...photos.value, ...additions]
     showDiary.value = false
     if (failedPhotoSlot.value.length === 0) message.value = ''
@@ -147,26 +134,13 @@ async function addDiaryPhoto(item: DiaryPhoto): Promise<void> {
   if (disposed) return
   const path = await savePreview(result.src)
   if (disposed) { removePreview(path); return }
-  photos.value = [...photos.value, { slot: requestId(), source: 'diary', path, diaryId: item._id, keepIndex: -1, uploadId: '' }]
+  photos.value = [...photos.value, { slot: requestId(), source: 'diary', path, diaryId: item._id, uploadId: '' }]
 }
 async function selectDiary(item: DiaryPhoto): Promise<void> {
   busy.value = true; message.value = ''; phase.value = '正在读取日记照片…'
   try { await addDiaryPhoto(item) }
   catch (error) { message.value = communityError(error) }
   finally { busy.value = false; phase.value = '' }
-}
-async function loadOriginal(photo: Photo): Promise<void> {
-  busy.value = true; message.value = ''
-  try {
-    const result = await draftRequest<{ src: string }>('communityImage', {
-      postId: postId.value, revisionId: revisionId.value, preview: true, index: photo.keepIndex
-    }, 25000)
-    if (disposed) return
-    const path = await savePreview(result.src)
-    if (disposed) removePreview(path)
-    else photo.path = path
-  } catch (error) { message.value = communityError(error) }
-  finally { busy.value = false }
 }
 function readPhoto(path: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
@@ -194,7 +168,7 @@ function resetUploads(): void {
 async function stagePhoto(photo: Photo): Promise<string> {
   if (photo.uploadId.length > 0) return photo.uploadId
   const payload: UTSJSONObject = {
-    requestId: submitId, postId: postId.value, baseRevision: revisionId.value, slot: photo.slot,
+    requestId: submitId, slot: photo.slot,
     imageSource: photo.source, diaryId: photo.diaryId
   }
   if (photo.source === 'upload') payload['base64'] = await fileBase64(photo.path)
@@ -225,21 +199,17 @@ async function submit(): Promise<void> {
     for (let i = 0; i < photos.value.length; i++) {
       if (disposed) return
       const photo = photos.value[i]
-      if (photo.source === 'keep') {
-        images.push({ keepIndex: photo.keepIndex })
-      } else {
-        pendingPhoto = photo
-        photoNumber = i + 1
-        phase.value = '正在上传照片 ' + photoNumber + '/' + photos.value.length + '…'
-        images.push({ uploadId: await stagePhoto(photo) })
-      }
+      pendingPhoto = photo
+      photoNumber = i + 1
+      phase.value = '正在上传照片 ' + photoNumber + '/' + photos.value.length + '…'
+      images.push({ uploadId: await stagePhoto(photo) })
     }
     if (disposed) return
     pendingPhoto = null
     phase.value = '正在提交审核…'
     submittedDraft = draft
     const value = await draftRequest<{ postId: string, revisionId: string }>('communitySubmitGallery', {
-      postId: postId.value, baseRevision: revisionId.value, requestId: submitId,
+      requestId: submitId,
       title: title.value, body: body.value, images
     }, 25000)
     if (disposed) return
@@ -268,9 +238,8 @@ textarea { min-height: 140px; }
 .choices button { width: auto; margin: 0; }
 .photo-tile { position: relative; width: calc((100% - 16px) / 3); height: 170rpx; border-radius: 10px; overflow: hidden; background: #f4ead8; }
 .photo { width: 100%; height: 100%; }
-.photo-fallback { padding: 0; font-size: 12px; color: #604323; background: #f4ead8; }
 .photo-status { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px; text-align: center; font-size: 11px; }
 .photo-error { color: #fff; background: #823b25; }
 .remove-photo { position: absolute; right: 3px; top: 3px; margin: 0; padding: 0; width: 25px; height: 25px; line-height: 25px; color: white; background: #332b24b3; border-radius: 13px; }
-.remove-photo::after, .photo-fallback::after { border: 0; }
+.remove-photo::after { border: 0; }
 </style>

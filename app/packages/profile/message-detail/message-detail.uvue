@@ -9,10 +9,15 @@
         <text class="heading">{{ detail?.title ?? '' }}</text><text class="muted">{{ formatTime(detail?.createdAt ?? 0) }}</text>
         <view v-if="detail?.friend != null" class="reason"><view class="row"><ProfileAvatar :code="detail?.friend?.code ?? ''" :version="detail?.friend?.avatarVersion ?? ''" /><text class="title">{{ detail?.friend?.nickname ?? '旅伴' }}</text></view><text class="body">{{ friendStatusText(detail?.friend?.status ?? 'unavailable') }}</text></view>
         <view v-if="(detail?.reason ?? '').length > 0" class="reason"><text class="title">审核员处理原因</text><text class="body">{{ detail?.reason ?? '' }}</text></view>
-        <text v-if="detail?.target == null && detail?.friend == null && detail?.profileTarget == null" class="muted">对应内容已删除或当前不可访问，审核结果仍保留在此。</text>
+        <view v-if="isPostShare" class="share">
+          <text class="body">{{ detail?.preview }} 分享了一条帖子。</text>
+          <text v-if="detail?.sharedTitle" class="heading">{{ detail?.sharedTitle }}</text>
+          <text v-if="detail?.target == null" class="muted">这条帖子当前不可查看。</text>
+        </view>
+        <text v-else-if="detail?.target == null && detail?.friend == null && detail?.profileTarget == null" class="muted">对应内容已删除或当前不可访问，审核结果仍保留在此。</text>
       </view>
       <view v-if="readError.length > 0" class="card"><text class="body">{{ readError }}</text><button class="secondary" :disabled="reading" @click="markRead">重试标为已读</button></view>
-      <button v-if="detail != null" class="primary" :disabled="!canOpenRelated" @click="openRelated">{{ relatedLabel }}</button>
+      <button v-if="detail != null && (!isPostShare || canOpenRelated)" class="primary" :disabled="!canOpenRelated" @click="openRelated">{{ relatedLabel }}</button>
     </view>
   </view>
 </template>
@@ -27,8 +32,10 @@ import { refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { openPage } from '@/features/navigation.uts'
 const id = ref(''), detail = ref<NotificationDetail | null>(null)
 const error = ref(''), readError = ref(''), loading = ref(false), reading = ref(false)
+const isPostShare = computed(() => detail.value?.kind === 'community.post.shared')
 const canOpenRelated = computed(() => detail.value?.target != null || detail.value?.profileTarget != null || (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')))
 const relatedLabel = computed(() => {
+  if (isPostShare.value) return '查看帖子'
   if (detail.value?.profileTarget != null) return '查看资料审核结果'
   if (detail.value?.friend != null && detail.value!.kind.startsWith('friend.')) return detail.value!.friend!.status === 'pending' ? '前往处理好友申请' : '查看旅伴'
   if (detail.value?.target == null) return '内容当前不可访问'
@@ -94,4 +101,5 @@ function formatTime(at: number): string { return new Date(at).toLocaleString() }
 <style scoped>
 @import '@/styles/page.css';
 .reason { gap: 10px; padding: 14px; border-radius: 12px; background: #fff0e9; }
+.share { gap: 7px; }
 </style>
