@@ -30,7 +30,13 @@ async page => {
         case 'readMedia': state.mediaReads++; return ok({ src })
         case 'aomiaoStatus': return ok({ claimed: state.aomiaoClaimed === true })
         case 'claimAomiao': state.aomiaoClaimed = true; return ok({ claimed: true })
-        case 'communityFeed': state.feedTabs.push(payload.tab); return ok({ items: [post], next: '' })
+        case 'communityFeed':
+          state.feedTabs.push(payload.tab)
+          if (state.failFeed) {
+            await new Promise(resolve => { state.finishFeed = resolve })
+            return { result: { code: 'SERVICE_UNAVAILABLE' } }
+          }
+          return ok({ items: [post], next: '' })
         case 'communityImage':
           if (payload.postId !== post.id || payload.revisionId !== post.revisionId || payload.preview !== false || payload.index !== 0) return notFound()
           state.imageReads++
@@ -134,6 +140,17 @@ async page => {
   await page.waitForURL('**' + postPath)
   await waitForPhoto()
   if ((await page.evaluate(() => window.__fixture.imageReads)) !== 1) throw Error('Switching feeds or opening post details fetched the same photograph again')
+  await page.evaluate(() => { window.__fixture.failFeed = true })
+  await back()
+  await page.waitForFunction(() => typeof window.__fixture.finishFeed === 'function')
+  const retainedPost = page.locator('.post-card:visible').filter({ hasText: '示例帖子' })
+  if (!await retainedPost.isVisible()) throw Error('Returning from detail hid the loaded list during refresh')
+  await page.evaluate(() => { window.__fixture.failFeed = false; window.__fixture.finishFeed() })
+  await text('重试').waitFor()
+  if (!await retainedPost.isVisible()) throw Error('Failed refresh discarded the loaded list')
+  await text('重试').click()
+  await retainedPost.click()
+  await page.waitForURL('**' + postPath)
   await page.locator('.author-actions').getByText('已通过', { exact: true }).waitFor()
   await page.locator('.author-actions').getByLabel('撤下帖子').waitFor()
   if (await text('编辑最新版本').count() || await page.locator('.comment-input').count()) throw Error('Post detail still exposes edit or an oversized idle composer')

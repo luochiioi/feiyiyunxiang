@@ -13,6 +13,7 @@
       </view>
       <text v-if="message.length > 0" class="body">{{ message }}</text>
       <button v-if="message.length > 0" class="secondary" :disabled="busy" @click="load(retryMore)">{{ retryMore ? '重试加载更多' : '重试' }}</button>
+      <text v-if="busy && !loaded" class="muted">正在加载…</text>
       <template v-if="tab === 'ranking'">
         <view class="card">
           <text class="heading">路线完成榜</text>
@@ -27,7 +28,7 @@
       <template v-else>
         <text v-if="tab === 'mine'" class="muted">这里仅你可见。打开帖子查看审核结果及可用操作。</text>
         <PostCard v-for="post in visiblePosts" :key="post.revisionId" :post="post" :detail="false" :preview="tab === 'mine'" :visible="visible" @open="showPost(post)" />
-        <view v-if="!busy && message.length === 0 && visiblePosts.length === 0 && next.length === 0" class="card"><text class="body">{{ tab === 'mine' ? '还没有发过帖子。' : '暂无帖子。' }}</text></view>
+        <view v-if="loaded && message.length === 0 && visiblePosts.length === 0 && next.length === 0" class="card"><text class="body">{{ emptyMessage }}</text></view>
         <button v-if="next.length > 0 && !retryMore" class="secondary" :disabled="busy" @click="load(true)">加载更多</button>
       </template>
       <button class="primary compose" @click="openPage(composePath)">发帖</button>
@@ -36,7 +37,7 @@
 </template>
 
 <script setup lang="uts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import ProfileAvatar from '@/components/ProfileAvatar.uvue'
 import PostCard from '../components/PostCard.uvue'
@@ -49,9 +50,16 @@ import type { Post, PostPage, Ranking } from '@/features/community/community.uts
 const posts = ref<Post[]>([]), ranks = ref<Ranking[]>([]), tab = ref('latest')
 const next = ref(''), message = ref(''), busy = ref(false), visible = ref(false)
 const mineOnly = ref(false)
-const owner = ref(''), retryMore = ref(false)
-const visiblePosts = computed(() => tab.value === 'latest' || owner.value === session.value?.uid ? posts.value : [])
-const visibleRanks = computed(() => owner.value === session.value?.uid ? ranks.value : [])
+const loaded = ref(false), retryMore = ref(false)
+const visiblePosts = posts, visibleRanks = ranks
+const feedCache = new Map<string, PostPage>()
+let rankingCache: Ranking[] | null = null
+const emptyMessage = computed(() => {
+  if (tab.value === 'friends') return '暂无好友动态。'
+  if (tab.value === 'saved') return '还没有收藏帖子。打开帖子详情，点星标即可收藏。'
+  if (tab.value === 'mine') return '还没有发过帖子。'
+  return '暂无帖子。'
+})
 let sequence = 0
 onLoad(query => {
   mineOnly.value = query['tab'] === 'mine'
@@ -63,30 +71,42 @@ onShow(() => {
   return load(false)
 })
 onHide(() => { visible.value = false; sequence++ })
-function select(value: string): void { if (tab.value !== value) { tab.value = value; load(false) } }
+watch(() => session.value?.uid, uid => {
+  sequence++
+  feedCache.clear()
+  rankingCache = null
+  restore()
+  busy.value = false; message.value = ''; retryMore.value = false
+  if (visible.value && (uid != null || tab.value === 'latest')) load(false)
+  else if (visible.value) message.value = '请先微信登录。'
+}, { flush: 'sync' })
+function restore(): void {
+  const cached = feedCache.get(tab.value)
+  posts.value = cached?.items ?? []
+  next.value = cached?.next ?? ''
+  ranks.value = rankingCache ?? []
+  loaded.value = tab.value === 'ranking' ? rankingCache != null : cached != null
+}
+function select(value: string): void {
+  if (tab.value !== value) { tab.value = value; restore(); load(false) }
+}
 async function load(append: boolean): Promise<void> {
   const call = ++sequence, active = tab.value
   const uid = session.value?.uid
-  if (active !== 'latest' && owner.value !== uid) append = false
   busy.value = true; message.value = ''; retryMore.value = false
-  if (!append) { posts.value = []; ranks.value = []; next.value = '' }
   try {
     if (active === 'ranking') {
       const result = await secured<Ranking[]>('communityRanking')
-      if (call === sequence) {
-        const current = session.value?.uid
-        if (current == null || (uid != null && uid !== current)) throw new Error('ACCOUNT_CHANGED')
-        owner.value = current; ranks.value = result
+      if (call === sequence && uid === session.value?.uid && active === tab.value) {
+        rankingCache = result; restore()
       }
     } else {
       const payload: UTSJSONObject = { tab: active, cursor: append ? next.value : '' }
       const result = active === 'latest' ? await publicRead<PostPage>('communityFeed', payload) : await secured<PostPage>('communityFeed', payload)
-      if (call === sequence) {
-        const current = session.value?.uid
-        if (active !== 'latest' && (current == null || (uid != null && uid !== current))) throw new Error('ACCOUNT_CHANGED')
-        owner.value = current ?? ''
+      if (call === sequence && uid === session.value?.uid && active === tab.value) {
         if (active === 'mine') refreshReviewNotices()
-        posts.value = [...posts.value, ...result.items]; next.value = result.next
+        feedCache.set(active, { items: append ? posts.value.concat(result.items) : result.items, next: result.next } as PostPage)
+        restore()
       }
     }
   } catch (error) { if (call === sequence) { message.value = communityError(error); retryMore.value = append } }
