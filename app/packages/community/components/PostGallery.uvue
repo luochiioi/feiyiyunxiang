@@ -1,14 +1,17 @@
 <template>
   <view v-if="count > 0" class="gallery">
     <view v-for="(path, index) in paths" :key="index" class="photo-frame" :class="frameClass">
-      <image v-if="path.length > 0" class="photo" :src="path" mode="aspectFill" aria-label="帖子照片" @click="openImage(index)" />
+      <image v-if="path.length > 0" class="photo" :src="path" mode="aspectFill" aria-label="帖子照片" @click="openImage(index)" @error="imageFailed(index, path)" />
       <button v-else class="photo placeholder" :disabled="loading[index]" @click.stop="loadImage(index)">{{ loading[index] ? '加载中…' : errors[index] ? '点击重试' : '查看照片' }}</button>
     </view>
   </view>
 </template>
 <script setup lang="uts">
 import { computed, getCurrentInstance, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { session } from '@/features/api.uts'
 import { imageCount, publicRead, removePreview, savePreview, schedulePhoto } from '@/features/community/community.uts'
+import { invalidatePostPhoto, loadPostPhoto, releasePostPhoto, retainPostPhoto } from '@/features/community/post-photo-cache.uts'
+import type { PostPhoto } from '@/features/community/post-photo-cache.uts'
 import type { Post } from '@/features/community/community.uts'
 
 const props = defineProps<{ post: Post, detail: boolean, preview: boolean, visible: boolean }>()
@@ -17,11 +20,17 @@ const count = computed(() => imageCount(props.post))
 const frameClass = computed(() => count.value === 1 ? 'single' : count.value === 2 || count.value === 4 ? 'half' : 'third')
 const paths = ref<string[]>([]), loading = ref<boolean[]>([]), errors = ref<boolean[]>([])
 let observer: IntersectionObserver | null = null, generation = 0, disposed = false
+let sharedPhotos: (PostPhoto | null)[] = []
 
 function clear(): void {
   generation++
   observer?.disconnect(); observer = null
-  paths.value.forEach(path => removePreview(path))
+  paths.value.forEach((path, index) => {
+    const photo = sharedPhotos[index]
+    if (photo != null) releasePostPhoto(photo)
+    else removePreview(path)
+  })
+  sharedPhotos = Array.from({ length: count.value }, () => null)
   paths.value = Array.from({ length: count.value }, () => '')
   loading.value = Array.from({ length: count.value }, () => false)
   errors.value = Array.from({ length: count.value }, () => false)
@@ -40,7 +49,7 @@ function start(): void {
 function loadAll(): void { for (let index = 0; index < count.value; index++) loadImage(index) }
 function reset(): void { clear(); nextTick(() => start()) }
 watch(() => props.visible, value => { if (value) reset(); else clear() })
-watch(count, reset)
+watch(() => [props.post.id, props.post.revisionId, props.post.publicView, props.preview, count.value, session.value?.uid ?? ''].join('/'), reset, { flush: 'sync' })
 onMounted(reset)
 onUnmounted(() => { disposed = true; clear() })
 
@@ -51,7 +60,12 @@ async function loadImage(index: number): Promise<void> {
   loading.value[index] = true
   errors.value[index] = false
   try {
-    await schedulePhoto(async () => {
+    if (props.post.publicView) {
+      const photo = retainPostPhoto(props.post.id, revision, index)
+      sharedPhotos[index] = photo
+      const path = photo.path || await loadPostPhoto(photo)
+      if (current === generation && props.visible) paths.value[index] = path
+    } else await schedulePhoto(async () => {
       if (current !== generation || !props.visible) return
       const image = await publicRead<{ src: string }>('communityImage', {
         postId: props.post.id, revisionId: revision, preview: props.preview, index
@@ -61,8 +75,19 @@ async function loadImage(index: number): Promise<void> {
       if (current === generation && props.visible) paths.value[index] = path
       else removePreview(path)
     })
-  } catch (_) { if (current === generation) errors.value[index] = true }
+  } catch (_) { if (current === generation) imageFailed(index, paths.value[index] ?? '') }
   finally { if (current === generation) loading.value[index] = false }
+}
+function imageFailed(index: number, path: string): void {
+  if (paths.value[index] !== path) return
+  const photo = sharedPhotos[index]
+  if (photo != null) {
+    invalidatePostPhoto(photo)
+    releasePostPhoto(photo)
+    sharedPhotos[index] = null
+  } else removePreview(path)
+  paths.value[index] = ''
+  errors.value[index] = true
 }
 function openImage(index: number): void {
   if (!props.detail || !paths.value[index]) return

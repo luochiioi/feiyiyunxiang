@@ -15,9 +15,10 @@ async page => {
       ...entry, _id: 'older-' + i, title: '旧打卡 ' + i, createdAt: date - (i + 2) * 86400000, mediaId: ''
     }))]
     const post = { id: 'public-post', revisionId: 'approved', title: '示例帖子', body: '这里是公开正文', author: '朋友',
-      status: 'approved', hasImage: false, owner: false, publicView: true, latestRevision: '', commentCount: 0, likeCount: 0 }
+      status: 'approved', hasImage: true, imageCount: 1, owner: false, publicView: true, latestRevision: '', commentCount: 0, likeCount: 0 }
+    const postPhoto = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aiekAAAAASUVORK5CYII='
     const notification = { id: 'shared-1', kind: 'community.post.shared', title: '好友分享了帖子', preview: '分享旅伴', createdAt: date }
-    window.__fixture = { sent: false, read: false, hidden: false, mediaReads: 0, sends: 0,
+    window.__fixture = { sent: false, read: false, hidden: false, mediaReads: 0, imageReads: 0, feedTabs: [], sends: 0,
       liked: false, saved: false, comment: '', shareAttempts: 0 }
     window.__mockCloud = async ({ data: { action, payload = {}, token } }) => {
       const state = window.__fixture
@@ -27,6 +28,11 @@ async page => {
         case 'explorationArchive': return ok(rows)
         case 'explorationArchiveDetail': { const item = rows.find(row => row._id === payload.id); return item ? ok(item) : notFound() }
         case 'readMedia': state.mediaReads++; return ok({ src })
+        case 'communityFeed': state.feedTabs.push(payload.tab); return ok({ items: [post], next: '' })
+        case 'communityImage':
+          if (payload.postId !== post.id || payload.revisionId !== post.revisionId || payload.preview !== false || payload.index !== 0) return notFound()
+          state.imageReads++
+          return ok({ src: postPhoto })
         case 'communityPost': return state.hidden ? notFound() : ok({
           ...post, owner: token === 'sender', latestRevision: token === 'sender' ? post.revisionId : '',
           liked: state.liked, saved: state.saved, likeCount: Number(state.liked)
@@ -97,7 +103,17 @@ async page => {
   })
   if (!listPosition) throw Error('Archive lost its previous scroll position')
   const postPath = '/packages/community/community-post/community-post?postId=public-post'
-  await go(postPath)
+  await go('/packages/community/community/community')
+  const waitForPhoto = () => page.waitForFunction(() => [...document.querySelectorAll('.gallery img')]
+    .some(photo => photo.clientWidth > 0 && photo.naturalWidth > 0))
+  await waitForPhoto()
+  await text('好友').click()
+  await page.waitForFunction(() => window.__fixture.feedTabs.includes('friends'))
+  await waitForPhoto()
+  await page.locator('.post-card:visible').filter({ hasText: '示例帖子' }).click()
+  await page.waitForURL('**' + postPath)
+  await waitForPhoto()
+  if ((await page.evaluate(() => window.__fixture.imageReads)) !== 1) throw Error('Switching feeds or opening post details fetched the same photograph again')
   await page.locator('.author-actions').getByText('已通过', { exact: true }).waitFor()
   await page.locator('.author-actions').getByLabel('撤下帖子').waitFor()
   if (await text('编辑最新版本').count() || await page.locator('.comment-input').count()) throw Error('Post detail still exposes edit or an oversized idle composer')
@@ -138,5 +154,5 @@ async page => {
   await go('/packages/profile/message-detail/message-detail?id=shared-1')
   await text('这条帖子当前不可查看。').waitFor()
   if (await text('查看帖子').count()) throw Error('An unavailable post still had a link')
-  return 'Verified archive, post actions, compact comment composer, and friend share retry and message link'
+  return 'Verified archive, shared post photos across feeds and detail, post actions, and friend share'
 }

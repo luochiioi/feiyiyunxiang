@@ -38,23 +38,45 @@ export function schedulePhoto(work: () => Promise<void>): Promise<void> {
   })
 }
 
-export function savePreview(src: string): Promise<string> {
+const previewPrefix = 'fy-community-preview-'
+const cachePrefix = 'fy-community-cache-'
+let cacheCleanup: Promise<void> | null = null
+
+export function savePreview(src: string, shared: boolean = false): Promise<string> {
   const prefix = src.startsWith('data:image/png;base64,') ? 'data:image/png;base64,' : 'data:image/jpeg;base64,'
   if (!src.startsWith(prefix)) return Promise.reject(new Error('PHOTO_UNAVAILABLE'))
   const extension = prefix.includes('png') ? '.png' : '.jpg'
-  const path = uni.env.USER_DATA_PATH + '/fy-community-preview-' + requestId() + extension
-  return new Promise<string>((resolve, reject) => {
-    uni.getFileSystemManager().writeFile({
+  // #ifdef WEB
+  return Promise.resolve(src)
+  // #endif
+  // #ifndef WEB
+  const directory = uni.env.USER_DATA_PATH
+  const fs = uni.getFileSystemManager()
+  if (shared && cacheCleanup == null) cacheCleanup = new Promise<void>(resolve => {
+    fs.readdir({ dirPath: directory, success: result => {
+      const stale = result.files.filter(file => file.startsWith(cachePrefix))
+      Promise.all(stale.map(file => new Promise<void>(done => {
+        fs.unlink({ filePath: directory + '/' + file, complete: () => done() })
+      }))).then(() => resolve())
+    }, fail: () => resolve() })
+  })
+  const path = directory + '/' + (shared ? cachePrefix : previewPrefix) + requestId() + extension
+  return (shared ? cacheCleanup! : Promise.resolve()).then(() => new Promise<string>((resolve, reject) => {
+    fs.writeFile({
       filePath: path, data: src.slice(prefix.length), encoding: 'base64',
       success: () => resolve(path), fail: () => reject(new Error('PHOTO_UNAVAILABLE'))
     })
-  })
+  }))
+  // #endif
 }
 
 export function removePreview(path: string): void {
-  if (path.startsWith(uni.env.USER_DATA_PATH + '/fy-community-preview-')) {
+  // #ifndef WEB
+  const directory = uni.env.USER_DATA_PATH + '/'
+  if (path.startsWith(directory + previewPrefix) || path.startsWith(directory + cachePrefix)) {
     uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} })
   }
+  // #endif
 }
 
 export async function publicRead<T>(action: string, payload: UTSJSONObject, timeout = 60000): Promise<T> {
