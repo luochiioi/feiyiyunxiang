@@ -30,5 +30,45 @@
       ],
       "MgoIsUnique": false
     }
+  },
+  {
+    "IndexName": "recipient_kind_order",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "recipientUid",
+          "Direction": "1"
+        },
+        {
+          "Name": "kind",
+          "Direction": "1"
+        },
+        {
+          "Name": "order",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "recipient_readAt_order",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "recipientUid",
+          "Direction": "1"
+        },
+        {
+          "Name": "readAt",
+          "Direction": "1"
+        },
+        {
+          "Name": "order",
+          "Direction": "-1"
+        }
+      ],
+      "MgoIsUnique": false
+    }
   }
 ]

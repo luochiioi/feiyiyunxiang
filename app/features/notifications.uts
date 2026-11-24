@@ -6,7 +6,7 @@ export type NotificationTarget = { postId: string, revisionId: string, commentId
 export type FriendNotification = { nickname: string, status: string, code?: string, avatarVersion?: string }
 type ProfileTarget = { revisionId: string }
 export type NotificationDetail = { id: string, kind: string, title: string, preview: string, createdAt: number, read: boolean, reason: string, target: NotificationTarget | null, friend?: FriendNotification | null, profileTarget?: ProfileTarget | null, sharedTitle?: string }
-export type NotificationPage = { items: NotificationItem[], next: string }
+export type NotificationPage = { items: NotificationItem[], next: string, appliedFilter?: string }
 const owner = ref(''), unread = ref(0)
 let sequence = 0
 watch(() => session.value?.uid, () => { sequence++; owner.value = ''; unread.value = 0; if (session.value != null) refreshNotificationsSummary() }, { flush: 'sync' })
@@ -20,8 +20,10 @@ export async function refreshNotificationsSummary(): Promise<void> {
     owner.value = uid; unread.value = result.unread
   } catch (_) { /* Preserve known unread state; retry on next page show. */ }
 }
-export async function listNotifications(cursor: string): Promise<NotificationPage> {
-  return await secured<NotificationPage>('notificationsList', { cursor })
+export async function listNotifications(cursor: string, filter = 'all'): Promise<NotificationPage> {
+  const payload: UTSJSONObject = { cursor }
+  if (filter !== 'all') payload['filter'] = filter
+  return await secured<NotificationPage>('notificationsList', payload)
 }
 export async function loadNotification(id: string): Promise<NotificationDetail> {
   return await secured<NotificationDetail>('notificationDetail', { id })
