@@ -28,6 +28,8 @@ async page => {
         case 'explorationArchive': return ok(rows)
         case 'explorationArchiveDetail': { const item = rows.find(row => row._id === payload.id); return item ? ok(item) : notFound() }
         case 'readMedia': state.mediaReads++; return ok({ src })
+        case 'aomiaoStatus': return ok({ claimed: state.aomiaoClaimed === true })
+        case 'claimAomiao': state.aomiaoClaimed = true; return ok({ claimed: true })
         case 'communityFeed': state.feedTabs.push(payload.tab); return ok({ items: [post], next: '' })
         case 'communityImage':
           if (payload.postId !== post.id || payload.revisionId !== post.revisionId || payload.preview !== false || payload.index !== 0) return notFound()
@@ -35,7 +37,7 @@ async page => {
           return ok({ src: postPhoto })
         case 'communityPost': return state.hidden ? notFound() : ok({
           ...post, owner: token === 'sender', latestRevision: token === 'sender' ? post.revisionId : '',
-          liked: state.liked, saved: state.saved, likeCount: Number(state.liked)
+          liked: state.liked, saved: state.saved, likeCount: Number(state.liked), favoriteCount: 2 + Number(state.saved)
         })
         case 'communityReaction':
           if (payload.kind === 'like') state.liked = payload.active
@@ -102,6 +104,24 @@ async page => {
     return box.top >= 0 && box.bottom <= innerHeight
   })
   if (!listPosition) throw Error('Archive lost its previous scroll position')
+
+  await go('/packages/profile/account/account')
+  await text('编辑资料').waitFor()
+  const verifyAomiaoPlacement = async label => {
+    if (!await text(label).evaluate(pet => {
+      const top = label => [...document.querySelectorAll('.content uni-text, .content uni-button')]
+        .find(element => element.textContent.trim() === label)?.getBoundingClientRect().top
+      return top('编辑资料') < pet.getBoundingClientRect().top && pet.getBoundingClientRect().bottom < top('消息')
+    })) throw Error('The Aomiao card splits the account shortcuts or is above Edit Profile')
+  }
+  await verifyAomiaoPlacement('领取你的澳喵')
+  await text('领取澳喵').click()
+  await text('我的澳喵').waitFor()
+  await verifyAomiaoPlacement('我的澳喵')
+  if (!await text('消息').evaluate(message => message.closest('.card')?.textContent.includes('步数中心'))) {
+    throw Error('Account shortcuts are split across cards')
+  }
+
   const postPath = '/packages/community/community-post/community-post?postId=public-post'
   await go('/packages/community/community/community')
   const waitForPhoto = () => page.waitForFunction(() => [...document.querySelectorAll('.gallery img')]
@@ -124,8 +144,17 @@ async page => {
   }
   await page.getByLabel('点赞', { exact: true }).click()
   await page.getByLabel('取消点赞', { exact: true }).waitFor()
+  const favoriteCount = async (label, count) => {
+    const displayed = await page.getByLabel(label, { exact: true }).innerText()
+    if (displayed.trim() !== count) throw Error('Favorite count expected ' + count + ', got ' + displayed)
+  }
+  await favoriteCount('收藏', '2')
   await page.getByLabel('收藏', { exact: true }).click()
   await page.getByLabel('取消收藏', { exact: true }).waitFor()
+  await favoriteCount('取消收藏', '3')
+  await page.getByLabel('取消收藏', { exact: true }).click()
+  await page.getByLabel('收藏', { exact: true }).waitFor()
+  await favoriteCount('收藏', '2')
   await text('写评论…').click()
   await page.locator('.comment-input textarea').fill('评论验收')
   await text('收起').click()
@@ -154,5 +183,5 @@ async page => {
   await go('/packages/profile/message-detail/message-detail?id=shared-1')
   await text('这条帖子当前不可查看。').waitFor()
   if (await text('查看帖子').count()) throw Error('An unavailable post still had a link')
-  return 'Verified archive, shared post photos across feeds and detail, post actions, and friend share'
+  return 'Verified Aomiao and shortcuts, favorite counts, archive, post actions, photo reuse, and friend share'
 }

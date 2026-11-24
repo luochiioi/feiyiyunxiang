@@ -101,6 +101,30 @@ function fixture() {
   return { repo, community, media, service, cloud, post, approve, mediaKey, files, failNextCommit: () => { failCommit = true }, loseNextResponse: () => { loseResponse = true }, conflicts: () => conflicts, tick: value => { clock += value } }
 }
 
+test('public post detail counts active favorites from distinct users, including existing records', async () => {
+  const f = fixture(), c = f.community
+  const post = await f.post()
+  const other = await f.post(author, { requestId: 'other-favorites' })
+  await f.approve(post)
+  await f.approve(other)
+  const react = (user, target, kind, active = true) => c.communityReaction(user, { ...target, kind, active })
+  await f.repo.put('fy-community-reactions', key(friend.uid, post.postId, 'favorite'), {
+    uid: friend.uid, postId: post.postId, kind: 'favorite', active: true, order: ''
+  })
+  await react(stranger, post, 'like')
+  await react(stranger, other, 'favorite')
+  assert.equal((await c.communityPost(null, post)).favoriteCount, 1)
+  await react(stranger, post, 'favorite')
+  await react(stranger, post, 'favorite')
+  const detail = await c.communityPost(stranger, post)
+  assert.equal(detail.saved, true)
+  assert.equal(detail.favoriteCount, 2)
+  await react(stranger, post, 'favorite', false)
+  assert.equal((await c.communityPost(stranger, post)).favoriteCount, 1)
+  await react(friend, post, 'favorite', false)
+  assert.equal((await c.communityPost(null, post)).favoriteCount, 0)
+})
+
 test('a public post share creates a private and retry-safe friend message that opens the public post', async () => {
   const f = fixture(), c = f.community
   const messages = createNotificationService({ repo: f.repo })

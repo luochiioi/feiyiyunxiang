@@ -4,7 +4,7 @@ export type Post = {
   id: string, revisionId: string, latestRevision: string, title: string, body?: string, author: string,
   authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string,
   hasImage: boolean, imageCount?: number, owner: boolean, publicView: boolean, reviewUnread?: boolean, hasPublicVersion?: boolean, status: string, reason: string,
-  commentCount: number, likeCount: number, liked?: boolean, saved?: boolean
+  commentCount: number, likeCount: number, favoriteCount?: number, liked?: boolean, saved?: boolean
 }
 export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string, authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string }
 export type PostPage = { items: Post[], next: string }

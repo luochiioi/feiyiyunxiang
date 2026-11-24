@@ -28,7 +28,8 @@ function gateway({configured=true,validCode=true,wechatError=40029,privateStorag
           ? value.values.includes(row[key]) : row[key] === value))
         .sort((left, right) => String(left[field]).localeCompare(String(right[field])) * (direction === 'asc' ? 1 : -1))
        return { data: data.slice(0, size) }
-      }
+      },
+      async count() { return { total: (await query.limit(Infinity).get()).data.length } }
      }
      return query
     }

@@ -22,5 +22,16 @@
       ],
       "MgoIsUnique": false
     }
+  },
+  {
+    "IndexName": "postId_kind_active",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "postId", "Direction": "1" },
+        { "Name": "kind", "Direction": "1" },
+        { "Name": "active", "Direction": "1" }
+      ],
+      "MgoIsUnique": false
+    }
   }
 ]

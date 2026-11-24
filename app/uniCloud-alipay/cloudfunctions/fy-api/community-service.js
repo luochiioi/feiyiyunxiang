@@ -400,8 +400,11 @@ function createCommunityService({ repo, media, now = Date.now }) {
       const view = { ...baseView(post, version, u, author), body: version.body }
       if (!view.publicView) return { ...view, liked: false, saved: false }
       const state = async kind => u?.uid && (await repo.get(reactions, key(u.uid, post._id, kind)))?.active === true
-      const [liked, saved] = await Promise.all([state('like'), state('favorite')])
-      return { ...view, liked: !!liked, saved: !!saved }
+      const [liked, saved, favoriteCount] = await Promise.all([
+        state('like'), state('favorite'),
+        repo.count(reactions, { postId: post._id, kind: 'favorite', active: true })
+      ])
+      return { ...view, liked: !!liked, saved: !!saved, favoriteCount }
     },
 
     async communityImage(u, p) { return readImage(u, p, false) },

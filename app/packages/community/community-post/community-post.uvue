@@ -87,6 +87,7 @@
               </button>
               <button class="icon-button" :disabled="busy" :aria-label="post.saved ? '取消收藏' : '收藏'" :aria-pressed="post.saved === true" @click="react('favorite')">
                 <image class="interaction-icon" :src="post.saved ? '/packages/community/static/post/bookmark-on.png' : '/packages/community/static/post/bookmark.png'" mode="aspectFit" />
+                <text v-if="post.favoriteCount != null" class="interaction-count">{{ post.favoriteCount }}</text>
               </button>
               <button class="icon-button" aria-label="查看评论" @click="goToComments">
                 <image class="interaction-icon" src="/packages/community/static/post/comments.png" mode="aspectFit" />
