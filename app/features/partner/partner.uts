@@ -23,6 +23,24 @@ export type PkView = {
 }
 type InviteResult = { id: string }
 
+export function selectedCoopTasks(options: CoopTask[], chosen: string[] | null): CoopTask[] {
+  if (chosen == null) return options
+  const selected = options.filter(task => chosen.includes(task.id))
+  return selected.length > 0 ? selected : options
+}
+export function toggleCoopTask(selected: CoopTask[], id: string): string[] {
+  const ids = selected.map(task => task.id)
+  if (!ids.includes(id)) return [...ids, id]
+  if (ids.length === 1) {
+    uni.showToast({ title: '至少保留一项文化任务', icon: 'none' })
+    return ids
+  }
+  return ids.filter(item => item !== id)
+}
+export function coopTaskText(tasks: CoopTask[], emptyText = '全部文化任务'): string {
+  return tasks.length === 0 ? emptyText : tasks.map(task => task.title).join('、')
+}
+
 export function loadFriends(): Promise<UTSJSONObject[]> { return secured<UTSJSONObject[]>('friends') }
 export function loadAssignment(): Promise<UTSJSONObject | null> { return secured<UTSJSONObject | null>('assignment') }
 export function loadCoop(teamId: string): Promise<CoopView> { return secured<CoopView>('coopStatus', { teamId }) }
@@ -33,7 +51,9 @@ export function choosePkEgg(matchId: string, eggId: string): Promise<UTSJSONObje
   return secured<UTSJSONObject>('chooseEgg', { matchId, eggId })
 }
 export function startCoop(code: string, routeId: string, seat: string, activities: string[]): Promise<InviteResult> {
-  return secured<InviteResult>('inviteCoop', { code, routeId, seat, activities, requestId: requestId() })
+  const payload: UTSJSONObject = { code, routeId, seat, requestId: requestId() }
+  if (activities.length > 0) payload['activities'] = activities
+  return secured<InviteResult>('inviteCoop', payload)
 }
 export function startPk(code: string, routeId: string): Promise<InviteResult> {
   return secured<InviteResult>('invitePk', { code, routeId, requestId: requestId() })
@@ -53,7 +73,9 @@ export function answerFriendRequest(requestId: string, accept: boolean): Promise
   return secured<UTSJSONObject>('respondFriend', { requestId, accept })
 }
 export function answerCoop(teamId: string, accept: boolean, activities: string[]): Promise<UTSJSONObject> {
-  return secured<UTSJSONObject>('respondCoop', { teamId, accept, activities })
+  const payload: UTSJSONObject = { teamId, accept }
+  if (!accept || activities.length > 0) payload['activities'] = activities
+  return secured<UTSJSONObject>('respondCoop', payload)
 }
 export function answerPk(matchId: string, accept: boolean): Promise<UTSJSONObject> {
   return secured<UTSJSONObject>('respondPk', { matchId, accept })
