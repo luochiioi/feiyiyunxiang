@@ -12,13 +12,15 @@ export type RunProgress = { runId: string, routeId: string, version: string, pur
 export const published = shallowRef<PublishedRoute[]>([])
 export const activeRun = shallowRef<RunProgress | null>(null)
 export const catalogError = shallowRef(false)
-export async function refreshCatalog(): Promise<void> {
-  if (demoEnabled) return
+export async function refreshCatalog(): Promise<boolean> {
+  if (demoEnabled) return true
+  let loaded = false
   try {
     const routes = await api<PublishedRoute[]>('catalog')
     const official = routes.filter(route => !route.testOnly)
     published.value = process.env.NODE_ENV === 'development' && official.length === 0 ? routes : official
     catalogError.value = false
+    loaded = true
   } catch (_) { catalogError.value = true }
   if (session.value != null) {
     const uid = session.value!.uid
@@ -40,6 +42,7 @@ export async function refreshCatalog(): Promise<void> {
       } catch (_) { if (session.value == null) activeRun.value = null }
     }
   } else { activeRun.value = null }
+  return loaded
 }
 export async function loadRun(routeId: string, runId: string): Promise<RunProgress> {
   const progress = await secured<RunProgress>('progress', { runId })
