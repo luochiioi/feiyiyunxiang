@@ -71,6 +71,8 @@
             <view v-if="detailFailed" class="tools"><text class="muted">未能读取详情。</text><button :disabled="busy" @click="retryDetail">重试详情</button></view>
             <template v-if="detail != null">
               <text class="heading">{{ detail?.author }} · {{ statusName(detail?.status ?? '') }}</text>
+              <text v-if="isReportGroup() && !detail?.reportedRevisionId" class="muted">旧举报未记录版本，无法确认当时的帖子内容。以下版本仅供参考。</text>
+              <text v-if="isReportGroup() && currentVersion == null" class="muted">帖子当前无公开版本。</text>
               <view class="versions">
                 <view v-if="currentVersion != null && currentVersion?.id !== selectedVersion?.id" class="version">
                   <text class="heading">当前公开版</text>
@@ -82,7 +84,8 @@
                   </template>
                 </view>
                 <view class="version">
-                  <text class="heading">{{ detail?.reportedRevisionId ? '举报指向版本' : isReportGroup() ? '参考版本（旧举报未记录版本）' : '所选版本' }} · {{ statusName(selectedVersion?.status ?? '') }}</text>
+                  <text class="heading">{{ selectedVersionLabel }}</text>
+                  <text class="muted">{{ statusName(selectedVersion?.status ?? '') }}</text>
                   <text class="muted">{{ selectedVersion?.id }}</text>
                   <text>{{ selectedVersion?.title }}</text><text class="record">{{ selectedVersion?.body }}</text>
                   <text v-if="selectedVersion?.reason" class="muted">{{ selectedVersion?.reason }}</text>
@@ -95,18 +98,28 @@
               <text class="heading">评论 · {{ comment?.author }} · {{ statusName(comment?.status ?? '') }}</text>
               <text class="record">{{ comment?.body }}</text>
             </template>
-            <view v-if="hasContentActions || target().length > 0" class="high-impact">
-              <text class="heading">内容与账户处置</text>
-              <textarea v-model="reason" :disabled="busy" :maxlength="300" placeholder="下架、举报处理和禁言须填写原因" />
+            <view v-if="hasContentActions" class="high-impact">
+              <text class="heading">内容处置</text>
+              <textarea v-model="reason" :disabled="busy" :maxlength="300" placeholder="填写内容处置原因" />
               <view class="tools">
-              <button v-if="detail != null && detail?.current != null" :disabled="busy" @click="reviewPost('remove')">下架当前公开版</button>
-              <button v-if="comment != null && comment?.status === 'public'" :disabled="busy" @click="reviewComment('remove')">移除评论</button>
-              <button v-if="detail?.reportStatus === 'open'" :disabled="busy" @click="resolveReport">结束举报处理</button>
+                <button v-if="currentVersion != null" :disabled="busy" @click="reviewPost('remove')">下架当前公开版</button>
+                <button v-if="comment?.status === 'public'" :disabled="busy" @click="reviewComment('remove')">移除评论</button>
               </view>
-              <view v-if="target().length > 0" class="tools">
-              <view class="duration"><text class="muted">禁言时长（分钟）</text><input v-model="minutes" type="number" :disabled="busy" /></view>
-              <button :disabled="busy" @click="mute(false)">{{ group === 'mutes' ? '更新禁言时长' : comment != null ? '禁言评论作者' : '禁言帖子作者' }}</button>
-              <button :disabled="busy" @click="mute(true)">解除禁言</button>
+            </view>
+            <view v-if="detail?.reportStatus === 'open'" class="high-impact">
+              <text class="heading">举报结案</text>
+              <text class="muted">结案只记录处理结果及原因。</text>
+              <textarea v-model="resolutionReason" :disabled="busy" :maxlength="300" placeholder="填写结案原因" />
+              <view class="tools"><button :disabled="busy" @click="resolveReport">{{ resolveLabel }}</button></view>
+            </view>
+            <view v-if="target().length > 0 && !detailFailed" class="high-impact">
+              <text class="heading">账户处罚</text>
+              <text class="muted">{{ group === 'mutes' ? '针对账户' : comment != null ? '针对评论作者' : '针对帖子作者' }} · {{ targetName() }}</text>
+              <textarea v-model="accountReason" :disabled="busy" :maxlength="300" placeholder="填写账户处罚原因" />
+              <view class="tools">
+                <view class="duration"><text class="muted">禁言时长（分钟）</text><input v-model="minutes" type="number" :disabled="busy" /></view>
+                <button :disabled="busy" @click="mute(false)">{{ group === 'mutes' ? '更新禁言时长' : comment != null ? '禁言评论作者' : '禁言帖子作者' }}</button>
+                <button :disabled="busy" @click="mute(true)">解除禁言</button>
               </view>
             </view>
           </template>
@@ -169,6 +182,19 @@ const busy = ref(false), message = ref(''), receipt = ref(''), rows = ref<Row[]>
 const selected = ref<Row | null>(null), detail = ref<Detail | null>(null), comment = ref<Row | null>(null)
 const currentVersion = computed(() => detail.value?.current ?? null)
 const selectedVersion = computed(() => detail.value?.selected ?? null)
+const selectedVersionLabel = computed(() => {
+  const current = currentVersion.value != null && currentVersion.value.id === selectedVersion.value?.id
+  if (isReportGroup()) {
+    if (detail.value?.reportedRevisionId) return current ? '当前公开版 · 举报指向版本' : '举报指向版本'
+    return current ? '当前公开版（供参考）' : '参考版本'
+  }
+  return current ? '当前公开版' : '所选版本'
+})
+const resolveLabel = computed(() => {
+  const publicPost = detail.value?.status === 'public' && currentVersion.value != null
+  const publicObject = publicPost && (!selected.value?.commentId || comment.value?.status === 'public')
+  return publicObject ? '保留内容并结案' : '记录结果并结案'
+})
 function countImages(version: Revision | null): number { return version?.imageCount ?? (version?.hasImage === true ? 1 : 0) }
 const detailFailed = ref(false)
 const queueState = ref('loading')
@@ -177,10 +203,11 @@ const canReviewPost = computed(() => group.value === 'pending' && detail.value !
   detail.value.selected.status === 'pending' && detail.value.status !== 'removed' && detail.value.status !== 'deleted')
 const canReviewComment = computed(() => group.value === 'comments' && comment.value?.status === 'pending')
 const canApprove = computed(() => !busy.value && (canReviewPost.value || (canReviewComment.value && currentVersion.value != null)))
-const hasContentActions = computed(() => currentVersion.value != null || comment.value?.status === 'public' || detail.value?.reportStatus === 'open')
+const hasContentActions = computed(() => currentVersion.value != null || comment.value?.status === 'public')
 const rejecting = ref(false), rejectionReason = ref(''), reviewFinished = ref(false)
 let continuation: Row | null = null
 const reason = ref(''), minutes = ref('60'), auditText = ref('')
+const resolutionReason = ref(''), accountReason = ref('')
 const policy = ref<Policy | null>(null), rules = ref<Rule[]>([])
 const minSeconds = ref('10'), maxPerWindow = ref('20'), duplicateSeconds = ref('300')
 onMounted(() => { reload() })
@@ -226,8 +253,10 @@ function setRuleAction(index: number, action: number): void {
   }
 }
 function target(): string { return comment.value?.targetUid ?? detail.value?.targetUid ?? selected.value?.targetUid ?? '' }
+function targetName(): string { return comment.value?.author ?? detail.value?.author ?? selected.value?.author ?? '旅伴' }
 function clearDetail(): void {
   selected.value = null; detail.value = null; comment.value = null; reason.value = ''; minutes.value = '60'
+  resolutionReason.value = ''; accountReason.value = ''
   auditText.value = ''; detailFailed.value = false; reviewFinished.value = false; cancelReject()
 }
 function cancelReject(): void { rejecting.value = false; rejectionReason.value = '' }
@@ -373,12 +402,13 @@ async function afterDecision(advance: boolean): Promise<void> {
     return
   }
   await refreshAfterChange('已记录处理结果。', async () => {
-    if (group.value === 'reports' && row != null) {
-      await loadSelection(row)
-      if (detailFailed.value) message.value = '详情暂未刷新，请重试详情。'
-    }
+    if (isReportGroup() && row != null) await refreshReport(row)
     else { clearDetail(); await load(false) }
   })
+}
+async function refreshReport(row: Row): Promise<void> {
+  await loadSelection(row)
+  if (detailFailed.value) message.value = '处理结果已记录，详情暂未刷新，请重试详情。'
 }
 async function refreshAfterChange(success: string, refresh: () => Promise<void>): Promise<void> {
   receipt.value = success
@@ -395,8 +425,9 @@ function resolveReport(): void {
     if (row == null || item?.reportStatus !== 'open') return
     const subject = comment.value != null ? '评论：' + (comment.value?.body ?? '').slice(0, 50) : '帖子：' + (item.selected.title || '无标题')
     const version = item.reportedRevisionId || '旧举报未记录版本'
-    if (!await confirm('结束举报处理', subject + '\n版本：' + version + '\n这一步只记录处理结果。', true)) return
-    await api<UTSJSONObject>('communityResolveReport', { reportId: selected.value?.id ?? '', reason: reason.value })
+    const note = resolutionReason.value.trim()
+    if (!await confirm(resolveLabel.value, subject + '\n版本：' + version + '\n这一步只记录处理结果，内容和账户状态维持现状。', true, note)) return
+    await api<UTSJSONObject>('communityResolveReport', { reportId: row.id, reason: note })
     refreshModerationOverview(true)
     clearDetail()
     await refreshAfterChange('举报已处理。', () => load(false))
@@ -404,15 +435,19 @@ function resolveReport(): void {
 }
 function mute(release: boolean): void {
   task(async () => {
-    if (!release && Number(minutes.value) <= 0) throw new Error('INVALID_DURATION')
-    const label = comment.value?.author ?? detail.value?.author ?? selected.value?.author ?? '旅伴'
-    if (!await confirm(release ? '解除禁言' : '设置禁言', label + (release ? '' : ' · ' + minutes.value + ' 分钟'), true)) return
-    const value = await api<{ until: number }>('communityMute', { targetUid: target(), minutes: release ? 0 : Number(minutes.value), reason: reason.value })
+    const duration = release ? 0 : Number(minutes.value)
+    if (!release && (!Number.isInteger(duration) || duration < 1 || duration > 43200)) throw new Error('INVALID_DURATION')
+    const note = accountReason.value.trim(), row = selected.value
+    if (!await confirm(release ? '解除禁言' : '设置禁言', targetName() + (release ? '' : ' · ' + duration + ' 分钟'), true, note)) return
+    const value = await api<{ until: number }>('communityMute', { targetUid: target(), minutes: duration, reason: note })
     const success = value.until > 0 ? '已禁言至 ' + new Date(value.until).toLocaleString() : '已解除禁言。'
     if (group.value === 'mutes') {
       clearDetail()
       await refreshAfterChange(success, () => load(false))
-    } else { receipt.value = success; reason.value = '' }
+    } else if (isReportGroup() && row != null) {
+      receipt.value = success
+      await refreshReport(row)
+    } else { receipt.value = success; accountReason.value = '' }
   })
 }
 function seedPolicy(): void {
