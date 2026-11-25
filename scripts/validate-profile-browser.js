@@ -50,6 +50,13 @@ async (page) => {
       queueMicrotask(() => this.dispatchEvent(new Event('change', { bubbles: true })))
     }
     const candidate = { ...rejected, revisionId: 'admin-case', nickname: '申请审核昵称', status: 'pending', hasAvatar: true, reason: '', createdAt: Date.now() }
+    const defaultCandidate = { ...candidate, revisionId: 'default-avatar', nickname: '默认头像申请', hasAvatar: false }
+    const disabledCandidate = { ...defaultCandidate, revisionId: 'disabled-case', nickname: '停用账户申请' }
+    const accounts = [
+      { ...approved, id: 'account-A', status: 0 },
+      { id: 'account-B', nickname: '旅伴', code: 'MUTE2345', status: 0, muteUntil: Date.now() + 3600000 },
+      { id: 'account-C', nickname: '停用账户', code: 'WXYZ2345', status: 1, suspendedByOps: true }
+    ]
     window.__profileFixture = { name, read: false, pending: null, failAvatar: true, lost: true, writes: [], uploads: [], avatarContents: [], actions: [],
       adminDecision: '', failQueue: false, failSelected: true, adminWrites: 0 }
     window.__mockCloud = async ({ data }) => {
@@ -59,22 +66,43 @@ async (page) => {
       const fail = result => ({ result: { code: result, data: null } })
       switch (action) {
         case 'catalog': return ok([])
-        case 'adminLogin': return ok({ uid: 'local-reviewer', username: payload.username, token: 'local-admin', expiresAt: Date.now() + 3600000, admin: payload.username !== 'fixture-review-only' })
-        case 'communityOverview': return ok({ pendingPosts: 1, pendingComments: 1, openReports: 1, publishedPosts: 0, pendingProfiles: fixture.adminDecision ? 0 : 1 })
+        case 'adminLogin':
+          fixture.asAdmin = payload.username !== 'fixture-review-only'
+          return ok({ uid: 'local-reviewer', username: payload.username, token: 'local-admin', expiresAt: Date.now() + 3600000, admin: fixture.asAdmin })
+        case 'communityOverview':
+          if (fixture.failOverview) { fixture.failOverview = false; throw Error('OVERVIEW_READ_FAILED') }
+          return ok({ pendingPosts: 1, pendingComments: 1, openReports: 0, publishedPosts: 0,
+            pendingProfiles: fixture.missingProfiles ? undefined : fixture.adminDecision ? 0 : 1,
+            ...(fixture.asAdmin ? { activeAccounts: 3, activeCoops: 0, activePk: 0 } : {}) })
         case 'communityReviewList': return ok({ items: [], next: '' })
-        case 'communityUsers': return ok({ items: [
-          { ...approved, id: 'account-A', status: 0 },
-          { id: 'account-B', nickname: '旅伴', code: '', status: 0 },
-          { id: 'account-C', nickname: '停用账户', code: 'WXYZ2345', status: 1, suspendedByOps: true }
-        ], next: '' })
-        case 'communityUserDetail': return ok({ ...approved, id: 'account-A', status: 0, friendCount: 0, postCount: 0, commentCount: 0, reportCount: 0, pendingPosts: 0, publishedPosts: 0, pendingComments: 0, publicComments: 0, openReports: 0, resolvedReports: 0 })
+        case 'communityUsers':
+          if (fixture.failAccounts) { fixture.failAccounts = false; throw Error('ACCOUNTS_READ_FAILED') }
+          return ok({ items: accounts.filter(row => !payload.code || row.code === payload.code), next: '' })
+        case 'communityUserDetail':
+          if (fixture.failAccountDetail) { fixture.failAccountDetail = false; throw Error('ACCOUNT_DETAIL_READ_FAILED') }
+          return ok({ ...accounts.find(row => row.id === payload.targetUid), friendCount: 0, postCount: 0, commentCount: 0, reportCount: 0, pendingPosts: 0, publishedPosts: 0, pendingComments: 0, publicComments: 0, openReports: 0, resolvedReports: 0 })
+        case 'communityAccountStatus': {
+          const row = accounts.find(row => row.id === payload.targetUid)
+          row.status = payload.suspend ? 1 : 0
+          row.suspendedByOps = payload.suspend
+          fixture.failAccounts = true
+          fixture.failAccountDetail = true
+          return ok({})
+        }
         case 'drafts': return ok([])
         case 'profileReviewList':
           if (fixture.failQueue) { fixture.failQueue = false; throw Error('QUEUE_READ_FAILED') }
-          return ok({ items: fixture.adminDecision ? [] : [candidate], next: '' })
-        case 'profileReviewDetail': return ok({ current: approved, selected: candidate, accountActive: true })
+          return ok({ items: fixture.adminDecision ? [] : [candidate, defaultCandidate, disabledCandidate], next: '' })
+        case 'profileReviewDetail':
+          return ok({ current: approved, selected: [candidate, defaultCandidate, disabledCandidate].find(row => row.revisionId === payload.revisionId),
+            accountActive: payload.revisionId !== disabledCandidate.revisionId })
         case 'profileReviewAvatar':
           if (!payload.current && fixture.failSelected) { fixture.failSelected = false; return fail('PHOTO_UNAVAILABLE') }
+          if (!payload.current && fixture.delaySelected) {
+            await new Promise(resolve => { fixture.finishSelected = resolve })
+            fixture.delaySelected = false
+          }
+          if (!payload.current && fixture.brokenSelected) { fixture.brokenSelected = false; return ok({ src: 'data:image/png;base64,AAAA' }) }
           return ok({ src: payload.current ? png : proposedPng })
         case 'profileReview':
           fixture.adminWrites++
@@ -129,7 +157,7 @@ async (page) => {
   page.setDefaultTimeout(10000)
   const go = route => page.goto(origin + '/#' + route)
   const visible = label => page.getByText(label, { exact: true }).last()
-  const screenshot = (name, fullPage = true) => page.screenshot({ path: 'docs/validation/evidence/profile-and-my-page/' + name + '.png', fullPage })
+  const screenshot = (name, fullPage = true) => page.screenshot({ path: '.superpowers/profile-browser-' + name + '.png', fullPage })
   const approvedAvatar = scope => scope.locator('.profile-avatar img[src^="data:image/"]').first()
   const back = () => page.locator('.app-page-header-return:visible').click()
   const account = '/packages/profile/account/account'
@@ -266,6 +294,37 @@ async (page) => {
   await page.getByRole('textbox').nth(0).fill('local-reviewer')
   await page.getByRole('textbox').nth(1).fill('fixture-password')
   await visible('登录工作台').click()
+  const todo = page.locator('.overview-tasks')
+  const metrics = page.locator('.overview-statistics')
+  await todo.getByText('待审帖子', { exact: true }).waitFor()
+  if (await todo.locator('uni-button').count() !== 4 || await metrics.locator('uni-button').count()) throw Error('Tasks and read-only statistics are mixed')
+  await todo.locator('uni-button').filter({ hasText: '待处理举报' }).getByText('已清空', { exact: true }).waitFor()
+  await metrics.locator('.metric').filter({ hasText: '启用路线' }).getByText('—', { exact: true }).waitFor()
+  await page.evaluate(() => { window.__profileFixture.failOverview = true })
+  await visible('刷新').click()
+  await visible('刷新失败，保留上次读取的指标。').waitFor()
+  await todo.getByText('待审帖子', { exact: true }).waitFor()
+  await page.evaluate(() => { window.__profileFixture.missingProfiles = true })
+  await visible('重试刷新').click()
+  await todo.locator('uni-button').filter({ hasText: '待审资料' }).getByText('暂无数据', { exact: true }).waitFor()
+  await page.evaluate(() => { window.__profileFixture.missingProfiles = false })
+  await visible('刷新').click()
+  for (const [label, group] of [['待审帖子', 'pending'], ['待审评论', 'comments'], ['待处理举报', 'reports'], ['待审资料', 'profiles']]) {
+    const button = todo.locator('uni-button').filter({ hasText: label })
+    await button.focus()
+    if (!await button.evaluate(control => control === document.activeElement)) throw Error('Cannot focus the ' + label + ' task')
+    await button.press('Enter')
+    if (group === 'profiles') {
+      await page.locator('.profile-review').waitFor()
+      if (await page.locator('.governance').isVisible()) throw Error('Profile review opened in community governance')
+    } else {
+      await page.locator('.tabs .selected').getByText(group === 'reports' ? '待处理' : label, { exact: true }).waitFor()
+    }
+    await page.locator('.sidebar-nav').getByText('运营工作台', { exact: true }).click()
+  }
+  await page.setViewportSize({ width: 768, height: 900 })
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw Error('Overview overflows at 768px')
+  await page.setViewportSize({ width: 1440, height: 900 })
   await visible('账号设置').click()
   await visible('修改管理员登录信息').waitFor()
   await visible('路线与博物馆').click()
@@ -293,18 +352,72 @@ async (page) => {
     }))
     if (rows.some(row => Math.abs(row.right) > 1 || row.centerDelta > 1)) throw Error('Account details buttons do not align on each row at ' + width)
   }
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.locator('.account-row').first().getByText('详情', { exact: true }).click()
   await visible('探索非遗文化').waitFor()
+  const accountActions = page.locator('.account-operations')
+  if (await page.locator('.ops textarea').count()) throw Error('Account action draft is displayed before selecting an action')
+  await visible('禁言').click()
   await visible('禁言时长（分钟）').waitFor()
+  await accountActions.locator('textarea').fill('旧账户的操作原因')
+  await visible('取消').click()
+  await visible('禁言').click()
+  if (await accountActions.locator('textarea').inputValue()) throw Error('Cancelling kept the previous account action reason')
+  await page.locator('.account-row').nth(1).getByText('详情', { exact: true }).click()
+  await visible('解除禁言').waitFor()
+  if (await accountActions.locator('textarea').count()) throw Error('Switching accounts retained the previous action')
+  await page.locator('.account-row').nth(2).getByText('详情', { exact: true }).click()
+  await visible('恢复账户').waitFor()
+  if (await accountActions.getByText('停用账户', { exact: true }).count()) throw Error('An operator-disabled account offers suspend')
+  await page.locator('.main input').first().fill('ABCD2345')
+  await visible('查找').click()
+  await page.waitForFunction(() => document.querySelectorAll('.account-row').length === 1)
+  await page.locator('.account-row').first().getByText('详情', { exact: true }).click()
+  await visible('探索非遗文化').waitFor()
+  await visible('待审帖子（0）').click()
+  await page.getByText(/当前筛选用户 .*ABCD2345/).waitFor()
+  await visible('返回用户管理').click()
+  await visible('探索非遗文化').waitFor()
+  if (await page.locator('.account-row').count() !== 1) throw Error('Returning from review changed the account search')
   await screenshot('admin-user-detail')
+  await accountActions.getByText('停用账户', { exact: true }).click()
+  await accountActions.locator('textarea').fill('模拟账户停用')
+  await visible('确认停用').click()
+  await page.getByText(/ABCD2345.*现有会话将撤销/s).last().waitFor()
+  await visible('确定').click()
+  await visible('账户已停用，会话已撤销。').waitFor()
+  await visible('重试账户详情').click()
+  await visible('恢复账户').waitFor()
+  await visible('重试账户列表').click()
+  if (await page.evaluate(() => window.__profileFixture.actions.filter(action => action === 'communityAccountStatus').length) !== 1) throw Error('Account read retries repeated a confirmed write')
   await page.locator('.user-tabs .nav-dot').waitFor()
   await visible('资料待审').click()
   await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).click()
   await visible('当前公开资料').waitFor()
+  await visible('重试申请头像').waitFor()
+  const approve = () => page.locator('.decision-actions').getByText('通过资料', { exact: true })
+  const approvalDisabled = () => approve().evaluate(button => button.hasAttribute('disabled'))
+  if (!await approvalDisabled()) throw Error('An unreadable application avatar can be approved')
+  await page.evaluate(() => { window.__profileFixture.brokenSelected = true })
+  await visible('重试申请头像').click()
+  await visible('申请头像无法读取').waitFor()
+  if (!await approvalDisabled()) throw Error('Image decode failure unlocked application approval')
+  await page.evaluate(() => { window.__profileFixture.delaySelected = true })
+  await visible('重试申请头像').click()
+  await page.waitForFunction(() => typeof window.__profileFixture.finishSelected === 'function')
+  await page.locator('.queue-item').filter({ hasText: '默认头像申请' }).click()
+  await visible('默认头像').waitFor()
+  if (await approvalDisabled()) throw Error('Default avatar application is blocked')
+  await page.locator('.queue-item').filter({ hasText: '停用账户申请' }).click()
+  await visible('账号停用中，恢复后可继续审核。').waitFor()
+  await page.evaluate(() => window.__profileFixture.finishSelected())
+  if (await approve().count()) throw Error('A late avatar enabled approval on a disabled account')
+  await page.evaluate(() => { window.__profileFixture.failSelected = true })
+  await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).click()
   await visible('重试申请头像').click()
   await visible('重试申请头像').waitFor({ state: 'hidden' })
-  await page.waitForFunction(() => document.querySelectorAll('.comparison img[src^="data:image/"]').length === 2)
+  await page.waitForFunction(() => [...document.querySelectorAll('.comparison img[src^="data:image/"]')].filter(image => image.naturalWidth > 0).length === 2)
+  if (await approvalDisabled()) throw Error('Successful avatar retry did not unlock approval')
   await screenshot('admin-review')
   await page.setViewportSize({ width: 768, height: 900 })
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw Error('Admin review overflows at tablet width')
@@ -328,6 +441,8 @@ async (page) => {
   await page.getByRole('textbox').nth(0).fill('fixture-review-only')
   await page.getByRole('textbox').nth(1).fill('fixture-password')
   await visible('登录工作台').click()
+  await todo.getByText('待审资料', { exact: true }).waitFor()
+  if (await metrics.getByText('正常账户', { exact: true }).count()) throw Error('Review-only overview exposes admin statistics')
   await profileDot.waitFor()
   await sidebar.getByText('用户管理', { exact: true }).click()
   await page.locator('.queue-item').filter({ hasText: '申请审核昵称' }).waitFor()
@@ -335,5 +450,5 @@ async (page) => {
     throw Error('Review-only access opened the accounts list')
   }
   if (uncaught.length > 0) throw Error(uncaught.join('; '))
-  return 'Verified gesture crop, 256px avatar and retry, owner-only preview, isolated steps navigation, moderation badges and access'
+  return 'Verified 256px avatar crop, private profile preview, dashboard queues, account operations, avatar approval gate and moderation badges'
 }

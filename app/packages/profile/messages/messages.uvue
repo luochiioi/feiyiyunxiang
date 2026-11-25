@@ -4,13 +4,16 @@
     <view class="content">
       <view v-if="session == null" class="card"><text class="body">微信登录后查看本人的消息。</text><button class="primary" @click="signIn">微信登录</button></view>
       <template v-else>
-        <view class="card"><text class="muted">查看好友分享、好友申请和审核结果。</text><button class="secondary" @click="openMine">我的帖子</button></view>
+        <view class="row filters" aria-label="消息分类">
+          <button v-for="option in filters" :key="option.id" class="secondary" :class="{ active: filter === option.id }"
+            :aria-pressed="filter === option.id" @click="selectFilter(option.id)">{{ option.label }}</button>
+        </view>
         <view v-for="item in items" :key="item.id" class="card" @click="openMessage(item.id)">
           <view class="row spread"><text class="heading">{{ item.title }}</text><text v-if="!item.read" class="unread">未读</text></view>
           <text v-if="item.preview.length > 0" class="body">{{ item.preview }}</text><text class="muted">{{ formatTime(item.createdAt) }}</text>
         </view>
         <text v-if="loaded && items.length === 0 && error.length === 0" class="muted">暂无消息</text>
-        <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button class="secondary" :disabled="loading" @click="retryLoad">重试加载</button></view>
+        <view v-if="error.length > 0" class="card"><text class="body">{{ error }}</text><button v-if="!unsupported" class="secondary" :disabled="loading" @click="retryLoad">重试加载</button></view>
         <button v-else-if="cursor.length > 0" class="secondary" :disabled="loading" @click="loadMessages(false)">加载更多</button>
         <text v-if="loading" class="muted">正在读取消息…</text>
       </template>
@@ -23,36 +26,52 @@ import { ref, watch } from 'vue'
 import { session, login } from '@/features/api.uts'
 import { listNotifications, refreshNotificationsSummary, NotificationItem } from '@/features/notifications.uts'
 import { openPage } from '@/features/navigation.uts'
-import { myPostsPath } from '@/features/community/community.uts'
 const items = ref<NotificationItem[]>([]), cursor = ref(''), error = ref('')
-const loading = ref(false), loaded = ref(false)
+const loading = ref(false), loaded = ref(false), unsupported = ref(false)
+const filter = ref('all')
+const filters = [{ id: 'all', label: '全部' }, { id: 'friends', label: '好友' },
+  { id: 'review', label: '审核' }, { id: 'unread', label: '未读' }]
 let sequence = 0
 const retryRestart = ref(true)
-function reset(): void { sequence++; items.value = []; cursor.value = ''; error.value = ''; loading.value = false; loaded.value = false }
-watch(() => session.value?.uid, () => { reset(); if (session.value != null) loadMessages(true) }, { flush: 'sync' })
+function reset(): void {
+  sequence++; resetItems(); error.value = ''; loading.value = false; unsupported.value = false
+}
+watch(() => session.value?.uid, () => { filter.value = 'all'; reset(); if (session.value != null) loadMessages(true) }, { flush: 'sync' })
 onShow(() => { loadMessages(true); refreshNotificationsSummary() })
+onHide(() => { sequence++; loading.value = false })
+function selectFilter(value: string): void {
+  if (filter.value === value) return
+  filter.value = value; reset(); loadMessages(true)
+}
 async function loadMessages(restart: boolean): Promise<void> {
   const uid = session.value?.uid
   if (uid == null) { reset(); return }
   if (loading.value) return
-  const request = ++sequence
-  loading.value = true; error.value = ''; retryRestart.value = restart
+  const request = ++sequence, active = filter.value
+  loading.value = true; error.value = ''; retryRestart.value = restart; unsupported.value = false
   try {
-    const result = await listNotifications(restart ? '' : cursor.value)
-    if (request !== sequence || uid !== session.value?.uid) return
+    const result = await listNotifications(restart ? '' : cursor.value, active)
+    if (request !== sequence || uid !== session.value?.uid || active !== filter.value) return
+    if (active !== 'all' && result.appliedFilter !== active) {
+      unsupported.value = true; resetItems()
+      error.value = '消息分类暂不可用，请切回全部。'
+      return
+    }
     items.value = restart ? result.items : items.value.concat(result.items)
     cursor.value = result.next; loaded.value = true
   } catch (_) {
     if (request === sequence && uid === session.value?.uid) error.value = '消息暂时无法读取，请重试。'
   } finally { if (request === sequence && uid === session.value?.uid) loading.value = false }
 }
+function resetItems(): void { items.value = []; cursor.value = ''; loaded.value = false }
 async function retryLoad(): Promise<void> { await loadMessages(retryRestart.value) }
 async function signIn(): Promise<void> { try { await login(); await loadMessages(true); await refreshNotificationsSummary() } catch (_) { uni.showToast({ title: '登录未完成，请重试', icon: 'none' }) } }
-function openMine(): void { openPage(myPostsPath) }
 function openMessage(id: string): void { openPage('/packages/profile/message-detail/message-detail?id=' + encodeURIComponent(id)) }
 function formatTime(at: number): string { return new Date(at).toLocaleString() }
 </script>
 <style scoped>
 @import '@/styles/page.css';
 .unread { color: #c73535; font-size: 12px; }
+.filters .secondary { flex: 1; }
+.filters .active { background: #426240; color: #fff; }
 </style>

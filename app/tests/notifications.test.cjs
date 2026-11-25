@@ -1,6 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { createNotificationService, writeNotification, markNotificationRead } = require('../uniCloud-alipay/cloudfunctions/fy-api/notification-service')
+const { createNotificationService, writeNotification, writePostShare, markNotificationRead } = require('../uniCloud-alipay/cloudfunctions/fy-api/notification-service')
 const A = { uid: 'A' }, B = { uid: 'B' }
 function fixture() {
   const rows = new Map(); let counts = 0
@@ -10,12 +10,39 @@ function fixture() {
   })
   const repo = { ...access(rows),
     async tx(fn) { const copy=new Map(rows); const result=await fn(access(copy)); rows.clear(); for(const [k,v] of copy) rows.set(k,v); return result },
-    async page(c,q,{before,size}) { return [...rows].filter(([k,v])=>k.startsWith(c+'/')&&Object.entries(q).every(([a,b])=>v[a]===b)&&(!before||v.order<before)).map(([k,v])=>({...v,_id:k.slice(c.length+1)})).sort((a,b)=>b.order.localeCompare(a.order)).slice(0,size) },
+    async page(c,q,{before,size}) { return [...rows].filter(([k,v])=>k.startsWith(c+'/')&&Object.entries(q).every(([a,b])=>Array.isArray(b)?b.includes(v[a]):v[a]===b)&&(!before||v.order<before)).map(([k,v])=>({...v,_id:k.slice(c.length+1)})).sort((a,b)=>b.order.localeCompare(a.order)).slice(0,size) },
     async count(c,q) { counts++; return [...rows].filter(([k,v])=>k.startsWith(c+'/')&&Object.entries(q).every(([a,b])=>v[a]===b)).length }
   }
   return {repo, rows, counts:()=>counts, service:createNotificationService({repo,now:()=>1784000000010})}
 }
 const event = (n=0, extra={}) => ({recipientUid:'A', kind:'community.post.rejected', postId:'post'+n,revisionId:'version'+n,commentId:'',reason:'修改原因',createdAt:1784000000000,...extra})
+test('message categories paginate matching rows and unread excludes a message after opening it', async () => {
+  const { repo, service } = fixture()
+  for (let n = 0; n < 24; n++) {
+    await writeNotification(repo, event(n))
+    await writePostShare(repo, { ...event(n), senderUid: 'B', actorNickname: 'Friend' })
+  }
+  await writeNotification(repo, event(99, { recipientUid: 'B' }))
+  for (const [filter, kind] of [['friends', 'community.post.shared'], ['review', 'community.post.rejected']]) {
+    const first = await service.notificationsList(A, { filter, recipientUid: 'B' })
+    const second = await service.notificationsList(A, { filter, cursor: first.next })
+    assert.equal(first.appliedFilter, filter)
+    assert.equal(first.items.length, 20)
+    assert.equal(second.items.length, 4)
+    assert.equal(second.next, '')
+    const combined = first.items.concat(second.items)
+    assert.equal(new Set(combined.map(item => item.id)).size, 24)
+    assert.ok(combined.every(item => item.kind === kind))
+  }
+  const unread = await service.notificationsList(A, { filter: 'unread' })
+  const { id } = unread.items[0]
+  await service.notificationRead(A, { id })
+  assert.ok(!(await service.notificationsList(A, { filter: 'unread' })).items.some(item => item.id === id))
+  assert.equal((await service.notificationsList(A)).items.find(item => item.id === id).read, true)
+  assert.equal((await service.notificationsList(B, { filter: 'friends' })).items.length, 0)
+  assert.deepEqual(await service.notificationsList(A, { filter: 'all' }), await service.notificationsList(A))
+  await assert.rejects(service.notificationsList(A, { filter: 'other' }), /INVALID_REQUEST/)
+})
 test('notification pages are stable for same millisecond and insertion between pages; summary uses recipient count', async()=>{
  const f=fixture(); for(let n=0;n<45;n++) await writeNotification(f.repo,event(n))
  let page=await f.service.notificationsList(A,{recipientUid:'B'}); assert.equal(page.items.length,20)

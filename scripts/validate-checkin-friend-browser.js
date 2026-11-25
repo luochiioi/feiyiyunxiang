@@ -17,9 +17,11 @@ async page => {
     const post = { id: 'public-post', revisionId: 'approved', title: '示例帖子', body: '这里是公开正文', author: '朋友',
       status: 'approved', hasImage: true, imageCount: 1, owner: false, publicView: true, latestRevision: '', commentCount: 0, likeCount: 0 }
     const postPhoto = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aiekAAAAASUVORK5CYII='
+    const rejected = { ...post, id: 'my-rejected', revisionId: 'rejected-version', latestRevision: 'rejected-version',
+      title: '我的未通过帖子', reason: '请补充故事出处', owner: true, status: 'rejected', hasImage: false, imageCount: 0, publicView: false }
     const notification = { id: 'shared-1', kind: 'community.post.shared', title: '好友分享了帖子', preview: '分享旅伴', createdAt: date }
     window.__fixture = { sent: false, read: false, hidden: false, mediaReads: 0, imageReads: 0, feedTabs: [], sends: 0,
-      liked: false, saved: false, comment: '', shareAttempts: 0 }
+      liked: false, saved: false, comment: '', shareAttempts: 0, checkPagination: location.search.includes('paginationFixture=1') }
     window.__mockCloud = async ({ data: { action, payload = {}, token } }) => {
       const state = window.__fixture
       const ok = data => ({ result: { code: 'OK', data } })
@@ -30,12 +32,47 @@ async page => {
         case 'readMedia': state.mediaReads++; return ok({ src })
         case 'aomiaoStatus': return ok({ claimed: state.aomiaoClaimed === true })
         case 'claimAomiao': state.aomiaoClaimed = true; return ok({ claimed: true })
-        case 'communityFeed': state.feedTabs.push(payload.tab); return ok({ items: [post], next: '' })
+        case 'communityFeed':
+          state.feedTabs.push(payload.tab)
+          if (state.failFeed) {
+            await new Promise(resolve => { state.finishFeed = resolve })
+            return { result: { code: 'SERVICE_UNAVAILABLE' } }
+          }
+          if (state.checkPagination) {
+            const entry = { ...post, hasImage: false, imageCount: 0 }
+            if (payload.tab === 'friends') {
+              if (!state.finishOldFriends) {
+                await new Promise(resolve => { state.finishOldFriends = resolve })
+                return ok({ items: [{ ...entry, title: '迟到的好友帖子' }], next: '' })
+              }
+              return ok({ items: [], next: '' })
+            }
+            if (payload.cursor) {
+              if (!state.appendFailed) {
+                state.appendFailed = true
+                return { result: { code: 'SERVICE_UNAVAILABLE' } }
+              }
+              return ok({ items: [{ ...entry, revisionId: 'page-2', title: '第二页帖子' }], next: '' })
+            }
+            if (!state.finishInitialFeed) await new Promise(resolve => { state.finishInitialFeed = resolve })
+            return ok({ items: [{ ...entry, title: '第一页帖子' }], next: 'page-2' })
+          }
+          if (payload.tab === 'saved') return ok({ items: [], next: '' })
+          if (payload.tab === 'mine') {
+            if (token !== 'sender') return ok({ items: [], next: '' })
+            if (payload.statusFilter === 'rejected' && !payload.cursor) return ok({ items: [], next: 'scan-page-2', appliedStatusFilter: 'rejected' })
+            if (payload.statusFilter === 'inactive') return ok({ items: [], next: '', appliedStatusFilter: 'inactive' })
+            if (payload.statusFilter === 'pending') return ok({ items: [rejected], next: '' })
+            return ok({ items: [rejected], next: '', appliedStatusFilter: payload.statusFilter })
+          }
+          return ok({ items: [post], next: '' })
         case 'communityImage':
           if (payload.postId !== post.id || payload.revisionId !== post.revisionId || payload.preview !== false || payload.index !== 0) return notFound()
           state.imageReads++
           return ok({ src: postPhoto })
-        case 'communityPost': return state.hidden ? notFound() : ok({
+        case 'communityPost': return payload.postId === rejected.id
+          ? token === 'sender' && payload.revisionId === rejected.revisionId ? ok(rejected) : notFound()
+          : state.hidden ? notFound() : ok({
           ...post, owner: token === 'sender', latestRevision: token === 'sender' ? post.revisionId : '',
           liked: state.liked, saved: state.saved, likeCount: Number(state.liked), favoriteCount: 2 + Number(state.saved)
         })
@@ -56,7 +93,15 @@ async page => {
           state.sent = true
           return ok({ alreadyShared: false })
         case 'notificationsSummary': return ok({ unread: Number(state.sent && token === 'receiver' && !state.read) })
-        case 'notificationsList': return ok({ items: state.sent && token === 'receiver' ? [{ ...notification, read: state.read }] : [], next: '' })
+        case 'notificationsList': {
+          if (payload.filter === 'review' && state.delayReview) {
+            await new Promise(resolve => { state.finishReview = resolve })
+            return ok({ items: [{ ...notification, title: '迟到的审核通知' }], next: '', appliedFilter: 'review' })
+          }
+          const show = state.sent && token === 'receiver' && (payload.filter == null ||
+            payload.filter === 'friends' || (payload.filter === 'unread' && !state.read))
+          return ok({ items: show ? [{ ...notification, read: state.read }] : [], next: '', appliedFilter: payload.filter })
+        }
         case 'notificationDetail':
           return state.sent && token === 'receiver' ? ok({ ...notification, read: state.read, reason: '',
             sharedTitle: state.hidden ? '' : post.title,
@@ -123,10 +168,31 @@ async page => {
   }
 
   const postPath = '/packages/community/community-post/community-post?postId=public-post'
+  await text('我的帖子').click()
+  await text('未通过').click()
+  await text('继续查找').click()
+  await page.locator('.post-card:visible').filter({ hasText: '我的未通过帖子' }).click()
+  await text('请补充故事出处').waitFor()
+  await back()
+  await text('已下架或撤下').click()
+  await text('该状态下暂无帖子。').waitFor()
+  await text('待审核').click()
+  await text('状态筛选暂不可用，请切回全部。').waitFor()
+  if (await text('我的未通过帖子').isVisible()) throw Error('An old API response bypassed status filtering')
+  await text('全部').click()
+  await text('我的未通过帖子').waitFor()
+  await user('receiver')
+  await text('还没有发过帖子。').waitFor()
+  if (await text('我的未通过帖子').isVisible()) throw Error('The new account saw the previous account’s posts')
+  await user('sender')
   await go('/packages/community/community/community')
   const waitForPhoto = () => page.waitForFunction(() => [...document.querySelectorAll('.gallery img')]
     .some(photo => photo.clientWidth > 0 && photo.naturalWidth > 0))
   await waitForPhoto()
+  await page.locator('.filters').getByText('我的帖子', { exact: true }).click()
+  await text('未通过').waitFor()
+  await text('我的收藏').click()
+  await text('还没有收藏帖子。打开帖子详情，点星标即可收藏。').waitFor()
   await text('好友').click()
   await page.waitForFunction(() => window.__fixture.feedTabs.includes('friends'))
   await waitForPhoto()
@@ -134,6 +200,17 @@ async page => {
   await page.waitForURL('**' + postPath)
   await waitForPhoto()
   if ((await page.evaluate(() => window.__fixture.imageReads)) !== 1) throw Error('Switching feeds or opening post details fetched the same photograph again')
+  await page.evaluate(() => { window.__fixture.failFeed = true })
+  await back()
+  await page.waitForFunction(() => typeof window.__fixture.finishFeed === 'function')
+  const retainedPost = page.locator('.post-card:visible').filter({ hasText: '示例帖子' })
+  if (!await retainedPost.isVisible()) throw Error('Returning from detail hid the loaded list during refresh')
+  await page.evaluate(() => { window.__fixture.failFeed = false; window.__fixture.finishFeed() })
+  await text('重试').waitFor()
+  if (!await retainedPost.isVisible()) throw Error('Failed refresh discarded the loaded list')
+  await text('重试').click()
+  await retainedPost.click()
+  await page.waitForURL('**' + postPath)
   await page.locator('.author-actions').getByText('已通过', { exact: true }).waitFor()
   await page.locator('.author-actions').getByLabel('撤下帖子').waitFor()
   if (await text('编辑最新版本').count() || await page.locator('.comment-input').count()) throw Error('Post detail still exposes edit or an oversized idle composer')
@@ -173,15 +250,50 @@ async page => {
   await text('发送给好友').click()
   await text('已发送给好友').waitFor()
   await user('receiver')
-  await go('/packages/profile/messages/messages')
+  await go('/packages/profile/account/account')
+  await user('receiver')
+  await text('消息').click()
+  await page.locator('.filters').getByText('好友', { exact: true }).click()
   await text('好友分享了帖子').click()
   await text('查看帖子').click()
   await text('这里是公开正文').waitFor()
   const { read, sends } = await page.evaluate(() => window.__fixture)
   if (!read || sends !== 1) throw Error('Friend message read or send count did not match')
+  await back()
+  await back()
+  await page.locator('.filters').getByText('未读', { exact: true }).click()
+  await text('暂无消息').waitFor()
+  await page.evaluate(() => { window.__fixture.delayReview = true })
+  await page.locator('.filters').getByText('审核', { exact: true }).click()
+  await page.waitForFunction(() => typeof window.__fixture.finishReview === 'function')
+  await page.locator('.filters').getByText('好友', { exact: true }).click()
+  await text('好友分享了帖子').waitFor()
+  await user('sender')
+  await page.evaluate(() => window.__fixture.finishReview())
+  await text('暂无消息').waitFor()
+  if (await text('迟到的审核通知').isVisible() || await text('好友分享了帖子').isVisible()) throw Error('A late message response crossed account or category')
+  await user('receiver')
   await page.evaluate(() => { window.__fixture.hidden = true })
   await go('/packages/profile/message-detail/message-detail?id=shared-1')
   await text('这条帖子当前不可查看。').waitFor()
   if (await text('查看帖子').count()) throw Error('An unavailable post still had a link')
-  return 'Verified Aomiao and shortcuts, favorite counts, archive, post actions, photo reuse, and friend share'
+  await page.goto(origin + '/?paginationFixture=1#/packages/community/community/community')
+  await text('正在加载…').waitFor()
+  await page.waitForFunction(() => typeof window.__fixture.finishInitialFeed === 'function')
+  await page.evaluate(() => window.__fixture.finishInitialFeed())
+  await text('第一页帖子').waitFor()
+  await user('receiver')
+  await page.locator('.filters').getByText('好友', { exact: true }).click()
+  await page.waitForFunction(() => typeof window.__fixture.finishOldFriends === 'function')
+  await text('最新').click()
+  await text('第一页帖子').waitFor()
+  await page.evaluate(() => window.__fixture.finishOldFriends())
+  await text('加载更多').click()
+  await text('重试加载更多').waitFor()
+  if (!await text('第一页帖子').isVisible() || await text('迟到的好友帖子').isVisible()) throw Error('Pagination failure or an old tab response replaced the current cards')
+  await text('重试加载更多').click()
+  await text('第二页帖子').waitFor()
+  await page.locator('.filters').getByText('好友', { exact: true }).click()
+  await text('暂无好友动态。').waitFor()
+  return 'Verified community refresh, photo reuse, post status pages and owner isolation, favorite counts, archive, and friend share with message filters'
 }

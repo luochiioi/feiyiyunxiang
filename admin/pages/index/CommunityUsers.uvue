@@ -41,26 +41,46 @@
           <text class="muted">文化兴趣 {{ selected?.interests?.join(' · ') || '未填写' }}</text>
         </view>
         <text>好友 {{ selected?.friendCount }} · 帖子共 {{ selected?.postCount }} · 评论共 {{ selected?.commentCount }} · 被举报共 {{ selected?.reportCount }}</text>
-        <view class="tools">
-          <button :disabled="busy" @click="review('pending')">待审帖子（{{ selected?.pendingPosts }}）</button>
-          <button :disabled="busy" @click="review('published')">公开帖子（{{ selected?.publishedPosts }}）</button>
-          <button :disabled="busy" @click="review('comments')">待审评论（{{ selected?.pendingComments }}）</button>
-          <button :disabled="busy" @click="review('publicComments')">公开评论（{{ selected?.publicComments }}）</button>
-          <button :disabled="busy" @click="review('reports')">待处理举报（{{ selected?.openReports }}）</button>
-          <button :disabled="busy" @click="review('resolvedReports')">已处理举报（{{ selected?.resolvedReports }}）</button>
-          <button :disabled="busy" @click="review('mutes')">禁言记录</button>
-          <button :disabled="busy" @click="review('audit')">审计记录</button>
+        <view class="detail-group">
+          <text class="heading">内容</text>
+          <view class="tools">
+            <button :disabled="busy" @click="review('pending')">待审帖子（{{ selected?.pendingPosts }}）</button>
+            <button :disabled="busy" @click="review('published')">公开帖子（{{ selected?.publishedPosts }}）</button>
+            <button :disabled="busy" @click="review('comments')">待审评论（{{ selected?.pendingComments }}）</button>
+            <button :disabled="busy" @click="review('publicComments')">公开评论（{{ selected?.publicComments }}）</button>
+          </view>
         </view>
-        <text class="muted">停用会撤销会话并暂停微信登录。已公开内容可在社区审核中处理。</text>
-        <textarea :disabled="busy" v-model="reason" :maxlength="300" placeholder="输入停用、恢复或禁言原因" />
-        <view class="tools">
-          <button v-if="selected?.status === 0" :disabled="busy" @click="setStatus(true)">停用账户</button>
-          <button v-if="selected?.suspendedByOps && selected?.status === 1" :disabled="busy" @click="setStatus(false)">恢复账户</button>
+        <view class="detail-group">
+          <text class="heading">举报</text>
+          <view class="tools">
+            <button :disabled="busy" @click="review('reports')">待处理举报（{{ selected?.openReports }}）</button>
+            <button :disabled="busy" @click="review('resolvedReports')">已处理举报（{{ selected?.resolvedReports }}）</button>
+          </view>
         </view>
-        <view class="tools">
-          <view class="duration"><text class="muted">禁言时长（分钟）</text><input :disabled="busy" v-model="minutes" type="number" /></view>
-          <button :disabled="busy" @click="mute(false)">禁言</button>
-          <button v-if="muted" :disabled="busy" @click="mute(true)">解除禁言</button>
+        <view class="detail-group">
+          <text class="heading">操作记录</text>
+          <view class="tools">
+            <button :disabled="busy" @click="review('mutes')">禁言记录</button>
+            <button :disabled="busy" @click="review('audit')">审计记录</button>
+          </view>
+        </view>
+        <view class="detail-group account-operations">
+          <text class="heading">账户操作</text>
+          <view v-if="operation.length === 0" class="tools">
+            <button v-if="selected?.status === 0" :disabled="busy" @click="operation = 'suspend'">停用账户</button>
+            <button v-if="selected?.suspendedByOps && selected?.status === 1" :disabled="busy" @click="operation = 'restore'">恢复账户</button>
+            <button :disabled="busy" @click="operation = 'mute'">{{ muted ? '调整禁言' : '禁言' }}</button>
+            <button v-if="muted" :disabled="busy" @click="operation = 'release'">解除禁言</button>
+          </view>
+          <template v-else>
+            <text class="muted">{{ operationDescription }}</text>
+            <view v-if="operation === 'mute'" class="duration"><text class="muted">禁言时长（分钟）</text><input :disabled="busy" v-model="minutes" type="number" /></view>
+            <textarea :disabled="busy" v-model="reason" :maxlength="300" placeholder="填写本次操作原因" />
+            <view class="tools">
+              <button :disabled="busy" @click="resetOperation">取消</button>
+              <button :disabled="busy" class="primary" @click="submitOperation">{{ operationAction }}</button>
+            </view>
+          </template>
         </view>
       </view>
     </view>
@@ -78,8 +98,20 @@ const emit = defineEmits<{ (event: 'review', group: string, uid: string, label: 
 const users = ref<Account[]>([]), selected = ref<AccountDetail | null>(null)
 const code = ref(''), searchCode = ref(''), status = ref(''), next = ref('')
 const reason = ref(''), minutes = ref('60'), busy = ref(false), message = ref(''), receipt = ref('')
+const operation = ref('')
 const selectedId = ref(''), detailFailed = ref(false), listState = ref('loading')
 const muted = computed(() => (selected.value?.muteUntil ?? 0) > Date.now())
+const operationAction = computed(() => {
+  if (operation.value === 'suspend') return '确认停用'
+  if (operation.value === 'restore') return '确认恢复'
+  return operation.value === 'mute' ? '确认禁言' : '确认解除禁言'
+})
+const operationDescription = computed(() => {
+  if (operation.value === 'suspend') return '现有会话将撤销，账户将无法通过微信登录。'
+  if (operation.value === 'restore') return '账户可重新通过微信登录。'
+  if (operation.value === 'mute') return '禁言期间，账户无法发帖或评论。'
+  return '解除后，账户可按当前社区规则发帖和评论。'
+})
 watch(() => props.visible, visible => { if (visible && selectedId.value.length > 0) retryDetail() })
 onMounted(() => { filter('') })
 
@@ -133,8 +165,9 @@ async function load(append: boolean, pages = 1): Promise<void> {
 }
 function resetSelection(): void {
   selectedId.value = ''; selected.value = null; detailFailed.value = false
-  reason.value = ''; minutes.value = '60'; receipt.value = ''
+  resetOperation(); receipt.value = ''
 }
+function resetOperation(): void { operation.value = ''; reason.value = ''; minutes.value = '60' }
 function resetList(): void { resetSelection(); users.value = []; next.value = ''; listState.value = 'loading' }
 function search(): void {
   work(async () => {
@@ -164,7 +197,10 @@ function retryDetail(): void {
 }
 function review(group: string): void {
   const user = selected.value
-  if (user != null) emit('review', group, user.id, user.code ? user.nickname + ' · ' + user.code : user.nickname)
+  if (user != null) {
+    resetOperation()
+    emit('review', group, user.id, user.code ? user.nickname + ' · ' + user.code : user.nickname)
+  }
 }
 function confirm(title: string, user: AccountDetail, note: string, details: string): Promise<boolean> {
   return new Promise<boolean>(resolve => {
@@ -174,15 +210,19 @@ function confirm(title: string, user: AccountDetail, note: string, details: stri
   })
 }
 async function refreshAfterWrite(id: string, result: string): Promise<void> {
-  receipt.value = result; reason.value = ''; message.value = ''
+  receipt.value = result; resetOperation(); message.value = ''
   await Promise.all([loadDetail(id), refreshLoadedPages().catch(() => {})])
+}
+function submitOperation(): void {
+  if (operation.value === 'suspend' || operation.value === 'restore') setStatus(operation.value === 'suspend')
+  else if (operation.value === 'mute' || operation.value === 'release') mute(operation.value === 'release')
 }
 function setStatus(suspend: boolean): void {
   const user = selected.value, note = reason.value.trim()
   if (user == null) return
   work(async () => {
     if (note.length === 0) throw new Error('INVALID_CONTENT')
-    if (!await confirm(suspend ? '停用此账户' : '恢复此账户', user, note, '\n现有会话将撤销。')) return
+    if (!await confirm(suspend ? '停用此账户' : '恢复此账户', user, note, '\n' + operationDescription.value)) { resetOperation(); return }
     receipt.value = ''
     await api<UTSJSONObject>('communityAccountStatus', { targetUid: user.id, suspend, reason: note })
     await refreshAfterWrite(user.id, suspend ? '账户已停用，会话已撤销。' : '账户已恢复，请重新登录。')
@@ -194,7 +234,8 @@ function mute(release: boolean): void {
   work(async () => {
     if (note.length === 0) throw new Error('INVALID_CONTENT')
     if (!release && (!Number.isInteger(duration) || duration < 1 || duration > 43200)) throw new Error('INVALID_DURATION')
-    if (!await confirm(release ? '解除此账户的禁言' : '禁言此账户', user, note, release ? '' : ' · ' + duration + ' 分钟')) return
+    const impact = '\n' + operationDescription.value + (release ? '' : '\n时长：' + duration + ' 分钟')
+    if (!await confirm(release ? '解除此账户的禁言' : '禁言此账户', user, note, impact)) { resetOperation(); return }
     receipt.value = ''
     const result = await api<{ until: number }>('communityMute', { targetUid: user.id, reason: note, minutes: duration })
     await refreshAfterWrite(user.id, release ? '已解除禁言。' : '已禁言至 ' + new Date(result.until).toLocaleString())
@@ -211,8 +252,11 @@ function mute(release: boolean): void {
 .account-meta { overflow-wrap: anywhere; line-height: 1.4; }
 .account-detail { flex-shrink: 0; }
 .panel { background: #fffef7; border-radius: 12px; padding: 16px; }
-.account-list { width: 280px; }
-.inspector { flex: 1; min-width: 330px; }
+.account-list { width: 280px; max-width:100%; box-sizing:border-box; }
+.inspector { flex: 1; min-width: min(330px, 100%); box-sizing:border-box; overflow-wrap:anywhere; }
+.detail-group { display:flex; flex-direction:column; gap:8px; border-top:1px solid #e7e8dd; padding-top:10px; }
+.detail-group .tools { column-gap:8px; }
+.account-operations { background:#f2f5ed; border:0; border-radius:8px; padding:12px; }
 button { margin: 0; }
 .tools input { width: 180px; }
 .profile-summary,.duration { display:flex; flex-direction:column; gap:4px; }

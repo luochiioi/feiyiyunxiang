@@ -7,7 +7,7 @@ export type Post = {
   commentCount: number, likeCount: number, favoriteCount?: number, liked?: boolean, saved?: boolean
 }
 export type Comment = { id: string, parentId: string, author: string, body: string, status: string, reason?: string, authorCode?: string, authorAvatar?: string, authorAvatarVersion?: string }
-export type PostPage = { items: Post[], next: string }
+export type PostPage = { items: Post[], next: string, appliedStatusFilter?: string }
 export type CommentPage = { items: Comment[], next: string, mine: Comment[] }
 export type Ranking = { code: string, nickname: string, count: number, rank: number, mine: boolean, avatarVersion?: string }
 export type DiaryPhoto = { _id: string, title: string, createdAt: number, mediaId: string }

@@ -27,7 +27,7 @@
       </view>
       <template v-else>
         <template v-if="section !== 'routes'">
-          <CommunityOverview v-if="section === 'overview'" @review="openQueue" />
+          <CommunityOverview v-if="section === 'overview'" :show-account-metrics="session?.admin === true" @review="openQueue" />
           <view v-if="section === 'users' && session?.admin === true" class="toolbar user-tabs">
             <button :class="{ active: userTab === 'accounts' }" @click="userTab = 'accounts'">账户列表</button>
             <button :class="{ active: userTab === 'profiles' }" @click="userTab = 'profiles'">资料待审<view v-if="hasProfileWork" class="nav-dot" aria-label="有待审资料" /></button>

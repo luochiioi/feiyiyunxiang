@@ -1,30 +1,67 @@
 <template>
   <view class="ops">
     <view class="tools"><button :disabled="busy" @click="refreshModerationOverview()">{{ busy ? '正在刷新…' : message.length > 0 ? '重试刷新' : '刷新' }}</button></view>
-    <text v-if="message.length > 0" class="muted">{{ message }}</text>
-    <view v-if="overview != null" class="metrics">
-      <button class="metric" @click="emit('review', 'pending')"><text>待审帖子</text><text class="value">{{ overview?.pendingPosts }}</text></button>
-      <button class="metric" @click="emit('review', 'comments')"><text>待审评论</text><text class="value">{{ overview?.pendingComments }}</text></button>
-      <button class="metric" @click="emit('review', 'reports')"><text>待处理举报</text><text class="value">{{ overview?.openReports }}</text></button>
-      <button v-if="overview?.pendingProfiles != null" class="metric" @click="emit('review', 'profiles')"><text>待审资料</text><text class="value">{{ overview?.pendingProfiles }}</text></button>
-      <button class="metric" @click="emit('review', 'published')"><text>公开帖子</text><text class="value">{{ overview?.publishedPosts }}</text></button>
-      <template v-if="overview?.activeAccounts != null">
-        <view class="metric"><text>正常账户</text><text class="value">{{ overview?.activeAccounts }}</text></view>
-        <view class="metric"><text>启用路线</text><text class="value">{{ overview?.activeRoutes }}</text></view>
-        <view class="metric"><text>进行中合作</text><text class="value">{{ overview?.activeCoops }}</text></view>
-        <view class="metric"><text>准备中或进行中的 PK</text><text class="value">{{ overview?.activePk }}</text></view>
-      </template>
-    </view>
+    <text v-if="message.length > 0" class="muted" role="status">{{ message }}</text>
+    <template v-if="overview != null">
+      <view class="overview-tasks">
+        <text class="heading">待办</text>
+        <view class="metrics">
+          <button v-for="task in tasks" :key="task.id" class="metric task" role="button" tabindex="0"
+            @click="open(task.id)" @keydown="openWithKey($event, task.id)">
+            <text>{{ task.label }}</text>
+            <text class="value">{{ task.count ?? '—' }}</text>
+            <view class="task-foot"><text>{{ taskStatus(task.count) }}</text><text aria-hidden="true">›</text></view>
+          </button>
+        </view>
+      </view>
+      <view class="overview-statistics">
+        <text class="heading">统计</text>
+        <view class="metrics">
+          <view v-for="stat in statistics" :key="stat.label" class="metric"><text>{{ stat.label }}</text><text class="value">{{ stat.count ?? '—' }}</text></view>
+        </view>
+      </view>
+    </template>
   </view>
 </template>
 <script setup lang="uts">
+import { computed } from 'vue'
 import { moderationOverview as overview, overviewLoading as busy, overviewError as message, refreshModerationOverview } from '@/features/moderation-overview.uts'
+const props = defineProps<{ showAccountMetrics: boolean }>()
 const emit = defineEmits<{ (event: 'review', group: string): void }>()
+const tasks = computed(() => [
+  { id: 'pending', label: '待审帖子', count: overview.value?.pendingPosts },
+  { id: 'comments', label: '待审评论', count: overview.value?.pendingComments },
+  { id: 'profiles', label: '待审资料', count: overview.value?.pendingProfiles },
+  { id: 'reports', label: '待处理举报', count: overview.value?.openReports }
+])
+const statistics = computed(() => {
+  const posts = { label: '公开帖子', count: overview.value?.publishedPosts }
+  if (!props.showAccountMetrics) return [posts]
+  return [posts, { label: '正常账户', count: overview.value?.activeAccounts },
+    { label: '启用路线', count: overview.value?.activeRoutes }, { label: '进行中合作', count: overview.value?.activeCoops },
+    { label: '准备中或进行中的 PK', count: overview.value?.activePk }]
+})
+function open(group: string): void { emit('review', group) }
+function openWithKey(event: KeyboardEvent, group: string): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  open(group)
+}
+function taskStatus(count: number | null): string {
+  return count == null ? '暂无数据' : count > 0 ? '待处理' : '已清空'
+}
 </script>
 <style scoped>
-.ops { display: flex; flex-direction: column; gap: 14px; }
-.tools, .metrics { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
-.metric { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; background: #fffef7; padding: 16px; border-radius: 12px; min-width: 145px; margin: 0; border: 1px solid #e1e7d7; }
+.ops, .overview-tasks, .overview-statistics { display:flex; flex-direction:column; gap:12px; }
+.ops { gap:20px; }
+.metrics { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(145px, 100%), 1fr)); gap:12px; }
+.metric { display:flex; flex-direction:column; gap:8px; align-items:flex-start; min-width:0; padding:14px; border-radius:12px; margin:0; border:1px solid #e1e7d7; line-height:1.45; background:#fffef7; }
+.task { background:#e9f1e6; text-align:left; border-color:#c8dac8; }
+.task::after { border:none; }
+.task:hover { background:#dfeadb; }
+.task:focus-visible { outline:2px solid #426240; outline-offset:2px; }
+.task-foot { display:flex; flex-direction:row; justify-content:space-between; align-items:center; width:100%; font-size:13px; color:#43554a; }
+.overview-statistics { padding-top:14px; border-top:1px solid #d9e2d7; }
 .value { font-size: 24px; font-weight: 700; color: #304c37; }
 .muted { color: #675d50; }
 </style>

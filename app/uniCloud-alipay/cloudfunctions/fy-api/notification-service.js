@@ -67,7 +67,22 @@ function createNotificationService({repo,now=Date.now}) {
   return version
  }
  return {
-  async notificationsList(u,p={}) { member(u);validateCursor(p.cursor);const rows=await repo.page(collection,{recipientUid:u.uid},{field:'order',before:p.cursor||null,size:21});return {items:rows.slice(0,20).map(view),next:rows.length>20?rows[19].order:''} },
+  async notificationsList(u, p = {}) {
+   member(u)
+   validateCursor(p.cursor)
+   const filter = p.filter === undefined ? 'all' : p.filter
+   const query = { recipientUid: u.uid }
+   switch (filter) {
+    case 'all': break
+    case 'friends': query.kind = [...Object.keys(friendTitles), postShareKind]; break
+    case 'review': query.kind = [...Object.keys(titles), ...Object.keys(profileTitles)]; break
+    case 'unread': query.readAt = 0; break
+    default: fail('INVALID_REQUEST')
+   }
+   const rows = await repo.page(collection, query, { field: 'order', before: p.cursor || null, size: 21 })
+   return { items: rows.slice(0, 20).map(view), next: rows.length > 20 ? rows[19].order : '',
+    ...(filter === 'all' ? {} : { appliedFilter: filter }) }
+  },
   async notificationsSummary(u) { member(u);return {unread:await repo.count(collection,{recipientUid:u.uid,readAt:0})} },
   async notificationDetail(u,p) {
    const row=await own(u,p.id)
