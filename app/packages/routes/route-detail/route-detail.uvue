@@ -57,7 +57,7 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import DemoNotice from '@/components/DemoNotice.uvue'
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ProgressBar from '@/components/ProgressBar.uvue'
 import { activeRun, findRoute, listNodes, loadRun, published, refreshCatalog, startRoute, summarizeRoute } from '@/features/exploration/catalog.uts'
 import type { RunProgress } from '@/features/exploration/catalog.uts'
@@ -69,6 +69,12 @@ const runId = ref<string | null>(null)
 const progress = ref<RunProgress | null>(null)
 const busy = ref(false)
 const readState = ref('idle')
+let accountEpoch = 0
+watch(() => session.value?.uid, () => {
+  accountEpoch++
+  progress.value = null
+  if (runId.value != null && readState.value === 'ready') readState.value = 'failed'
+}, { flush: 'sync' })
 onLoad(query => {
   id.value = decodePageId(query['routeId'] ?? null)
   runId.value = decodePageId(query['runId'] ?? null)
@@ -103,7 +109,11 @@ async function load(): Promise<void> {
   try {
     if (runId.value != null) {
       if (id.value == null) throw new Error('NOT_FOUND')
-      progress.value = await loadRun(id.value!, runId.value!)
+      const uid = session.value?.uid
+      const epoch = accountEpoch
+      const value = await loadRun(id.value!, runId.value!)
+      if (uid != null && epoch !== accountEpoch) throw new Error('SESSION_CHANGED')
+      progress.value = value
       readState.value = 'ready'
       return
     }
@@ -116,14 +126,9 @@ async function load(): Promise<void> {
 }
 async function loadSoloProgress(): Promise<void> {
   if (id.value == null || session.value == null) { progress.value = null; return }
-  const uid = session.value!.uid
-  try {
-    const value = await api<RunProgress | null>('routeProgress', { routeId: id.value! })
-    if (session.value?.uid === uid) progress.value = value
-  } catch (error) {
-    if (session.value?.uid !== uid) progress.value = null
-    throw error
-  }
+  const epoch = accountEpoch
+  const value = await api<RunProgress | null>('routeProgress', { routeId: id.value! })
+  if (epoch === accountEpoch) progress.value = value
 }
 async function selectViewedRun(): Promise<boolean> {
   if (busy.value) return false

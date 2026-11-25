@@ -1,5 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
+const { isDeepStrictEqual } = require('node:util')
 const { createPartnershipService } = require('../uniCloud-alipay/cloudfunctions/fy-api/partnership-service')
 
 function setup() {
@@ -296,6 +297,27 @@ test('teams saved before task selection still need every seat task', async () =>
   assert.equal((await f.p.settleCoop(f.b, { teamId: f.team.id })).alreadySettled, false)
 })
 
+test('a legacy invitation with no seat options can be accepted and read back', async () => {
+  const f = await coopReady(false)
+  const team = await f.repo.get('fy-teams', f.team.id)
+  const snapshot = await f.repo.get('fy-versions', team.version)
+  const legacyVersion = 'legacy-hunan-version'
+  await f.repo.put('fy-versions', legacyVersion, { ...snapshot, culture: {}, nodes: snapshot.nodes.slice(1) })
+  await f.repo.put('fy-teams', f.team.id, { ...team, memberRoutes: {
+    [f.a.uid]: { region: 'macau', routeId: team.routeId, version: team.version },
+    [f.b.uid]: { region: 'hunan', routeId: 'legacy-hunan', version: legacyVersion }
+  } })
+  const request = { teamId: f.team.id, accept: true }
+  assert.deepEqual((await f.p.myCoop(f.b)).myTaskOptions, [])
+  await assert.rejects(f.p.respondCoop(f.b, { ...request, activities: [] }), /INVALID_TASKS/)
+  await f.p.respondCoop(f.b, request)
+  const visible = await f.p.myCoop(f.b)
+  assert.equal(visible.status, 'active')
+  assert.deepEqual(visible.myTasks, [])
+  assert.equal(visible.myProgress.total, 1)
+  assert.deepEqual((await f.p.myCoop(f.a)).partnerTasks, [])
+})
+
 async function pkStarted(start = true, draft = coopDraft) {
   const f = await ready()
   f.service = createService({ repo: f.repo, now: () => f.now(), allowTestContent: true })
@@ -324,6 +346,7 @@ for (const [label, act] of [
     f.advance(24 * 3600 * 1000)
     await assert.rejects(act(f, f.match.id), /EXPIRED/)
     assert.equal((await f.repo.get('fy-matches', f.match.id)).status, 'expired')
+    await assert.rejects(act(f, f.match.id), /EXPIRED/)
     assert.equal(await f.p.myPk(f.a), null)
     assert.equal(await f.p.myPk(f.b), null)
     const [sender, code] = label === 'decline' ? [f.a, f.codes.b] : [f.b, f.codes.a]
@@ -353,6 +376,59 @@ for (const status of ['invited', 'preparing']) {
     assert.equal(await f.p.assignment(f.a), null)
   })
 }
+
+test('forfeiting an expired preparation leaves a replacement PK and both players unpenalized', async () => {
+  const f = await pkStarted(false)
+  await f.p.respondPk(f.b, { matchId: f.match.id, accept: true })
+  f.advance(24 * 3600 * 1000)
+  const next = await f.p.invitePk(f.b, { code: f.codes.a, routeId: 'combined', requestId: 'next-pk' })
+  await assert.rejects(f.p.forfeitPk(f.a, { matchId: f.match.id }), /EXPIRED/)
+  assert.equal((await f.repo.get('fy-matches', f.match.id)).status, 'expired')
+  for (const user of [f.a, f.b]) {
+    assert.equal((await f.p.myPk(user)).id, next.id)
+    assert.equal(await f.p.assignment(user), null)
+  }
+})
+
+test('a PK readiness transaction crossing the deadline cannot commit alongside a replacement', async () => {
+  const f = await pkStarted(false)
+  await f.p.respondPk(f.b, { matchId: f.match.id, accept: true })
+  await f.p.readyPk(f.a, { matchId: f.match.id })
+  let reachedWrite, finishWrite
+  const paused = new Promise(resolve => { reachedWrite = resolve })
+  const resume = new Promise(resolve => { finishWrite = resolve })
+  const optimisticRepo = { ...f.repo, async tx(work) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const writes = []
+      const value = await work({ ...f.repo, async put(collection, id, next) {
+        writes.push({ collection, id, next, previous: await f.repo.get(collection, id) })
+        if (collection === 'fy-matches' && next.status === 'running') { reachedWrite(); await resume }
+      } })
+      const committed = await f.repo.tx(async db => {
+        for (const write of writes) {
+          if (!isDeepStrictEqual(await db.get(write.collection, write.id), write.previous)) return false
+        }
+        for (const { collection, id, next } of writes) await db.put(collection, id, next)
+        return true
+      })
+      if (committed) return value
+    }
+    throw new Error('TRANSACTION_CONFLICT')
+  } }
+  const service = createPartnershipService({ repo: optimisticRepo, now: f.now })
+  f.advance(24 * 3600 * 1000 - 1)
+  const finalReady = service.readyPk(f.b, { matchId: f.match.id })
+  const result = assert.rejects(finalReady, /EXPIRED/)
+  await paused
+  let next
+  try {
+    f.advance(1)
+    next = await service.invitePk(f.b, { code: f.codes.a, routeId: 'combined', requestId: 'next-pk' })
+  } finally { finishWrite() }
+  await result
+  assert.equal((await f.p.myPk(f.a)).id, next.id)
+  assert.equal((await f.p.myPk(f.b)).id, next.id)
+})
 
 test('PK discovery exposes only the running member run and keeps solo progress separate', async () => {
   const f = await pkStarted(false)

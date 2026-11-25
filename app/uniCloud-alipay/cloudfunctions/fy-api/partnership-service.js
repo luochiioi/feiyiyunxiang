@@ -33,7 +33,7 @@ function createPartnershipService({ repo, now = Date.now }) {
     if (!run) fail('NOT_FOUND')
     const seat = seatOf(team, uid)
     const nodes = seatNodes(run, seat)
-    const activities = taskSelection(run.snapshot, seat, team.tasks?.[uid])
+    const activities = storedTaskSelection(run.snapshot, seat, team.tasks?.[uid])
     const completed = completedActivities(run)
     return {
       done: nodes.filter(id => checks.some(check => check.nodeId === id)).length +
@@ -54,8 +54,8 @@ function createPartnershipService({ repo, now = Date.now }) {
     const partnerSnapshot = remote == null ? snapshot : await repo.get('fy-versions', remote.version)
     const view = { id: team._id, status, mySeat: mine, partnerSeat: otherSeat, routeId: local?.routeId ?? team.routeId, version: local?.version ?? team.version,
       invitedByMe: team.invitedBy === uid, myRunId: team.runs?.[uid] ?? null, partner: team.invitedBy == null ? partnerProfile : card(partnerProfile),
-      myTasks: taskLabels(snapshot, taskSelection(snapshot, mine, team.tasks?.[uid])),
-      partnerTasks: taskLabels(partnerSnapshot, taskSelection(partnerSnapshot, otherSeat, team.tasks?.[other])),
+      myTasks: taskLabels(snapshot, storedTaskSelection(snapshot, mine, team.tasks?.[uid])),
+      partnerTasks: taskLabels(partnerSnapshot, storedTaskSelection(partnerSnapshot, otherSeat, team.tasks?.[other])),
       myTaskOptions: taskLabels(snapshot, seatActivitiesOf(snapshot, mine)) }
     if (team.status === 'active') {
       const [myProgress, partnerProgress] = await Promise.all([seatProgress(team, uid), seatProgress(team, other)])
@@ -332,7 +332,7 @@ function createPartnershipService({ repo, now = Date.now }) {
           const checks = await db.list('fy-checkins', { runId: team.runs[uid], uid })
           const seat = seatOf(team, uid)
           const nodesDone = seatNodes(run, seat).every(id => checks.some(check => check.nodeId === id))
-          const cultureDone = taskSelection(run.snapshot, seat, team.tasks?.[uid]).every(id => run.culture?.[id])
+          const cultureDone = storedTaskSelection(run.snapshot, seat, team.tasks?.[uid]).every(id => run.culture?.[id])
           if (!nodesDone || !cultureDone) fail('NOT_READY')
         }
         const macauUid = team.members.find(uid => seatOf(team, uid) === 'macau')
@@ -400,6 +400,11 @@ function taskSelection(snapshot, seat, picked) {
   if (!Array.isArray(picked) || picked.length === 0 || new Set(picked).size !== picked.length ||
     !picked.every(id => options.includes(id))) fail('INVALID_TASKS')
   return picked
+}
+
+function storedTaskSelection(snapshot, seat, picked) {
+  // A legacy seat with no options can save an empty server-generated default.
+  return taskSelection(snapshot, seat, Array.isArray(picked) && picked.length === 0 ? null : picked)
 }
 
 function taskLabels(snapshot, ids) {
