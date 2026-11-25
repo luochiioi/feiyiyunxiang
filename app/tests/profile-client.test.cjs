@@ -3,6 +3,86 @@ const assert = require('node:assert/strict')
 const { clientScript } = require('./helpers/client-script.cjs')
 const { fixture, alice, input } = require('./helpers/profile-fixture.cjs')
 
+function accountFixture() {
+  const accountA = { uid: 'A', token: 'old-token', expiresAt: Date.now() + 60000 }
+  const accountB = { uid: 'B', token: 'new-token', expiresAt: Date.now() + 60000 }
+  const storage = new Map([['fy-session', JSON.stringify(accountA)]])
+  const calls = [], toasts = []
+  let complete, fail
+  const uni = {
+    getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, value),
+    removeStorageSync: key => storage.delete(key), showToast: ({ title }) => toasts.push(title),
+    login: ({ success }) => success({ code: 'B-code' })
+  }
+  const apiScript = clientScript('features/api.uts', { uni, setTimeout, clearTimeout, uniCloud: {
+    callFunction: request => {
+      calls.push(request)
+      if (request.data.action === 'logout') return new Promise((resolve, reject) => { complete = resolve; fail = reject })
+      return Promise.resolve({ result: { code: 'OK', data: request.data.action === 'wxLogin' ? accountB : { claimed: true } } })
+    }
+  } })
+  const myProfile = { value: { nickname: 'A profile' } }
+  const myPendingProfile = { value: { nickname: 'A pending' } }
+  const activeRun = { value: { runId: 'A run' } }
+  const page = clientScript('packages/profile/account/account.uvue', {
+    uni, session: apiScript.run('session'), api: apiScript.run('api'), secured: apiScript.run('secured'),
+    clearSession: () => { apiScript.run('clearSession()'); page.change() },
+    login: async () => { await apiScript.run('login()'); page.change() },
+    revokeSession: token => apiScript.run('revokeSession')(token),
+    showError: () => apiScript.run('showError()'),
+    activeRun, myProfile, myPendingProfile,
+    forgetMyProfile: () => { myProfile.value = null; myPendingProfile.value = null },
+    refreshMyProfile: async () => { myProfile.value = { nickname: 'B profile' } },
+    refreshReviewNotices: async () => {}, refreshNotificationsSummary: async () => {}
+  })
+  page.run('role.value = { claimed: true }; owner.value = "A"')
+  return {
+    page, storage, calls, toasts, myProfile, myPendingProfile, activeRun,
+    finish(outcome) {
+      if (outcome === 'network' || outcome === 'timeout') fail(Error(outcome))
+      else complete({ result: { code: outcome, data: {} } })
+    }
+  }
+}
+
+for (const outcome of ['OK', 'SERVICE_UNAVAILABLE', 'network', 'timeout']) {
+  test(`logout clears local account immediately while the remote result is ${outcome}`, async () => {
+    const f = accountFixture()
+    const pending = f.page.run('signOut()')
+    try {
+      assert.equal(f.storage.has('fy-session'), false)
+      assert.equal(f.myProfile.value, null)
+      assert.equal(f.myPendingProfile.value, null)
+      assert.equal(f.activeRun.value, null)
+      assert.equal(f.page.run('role.value'), null)
+      assert.equal(f.page.run('busy.value'), false)
+      assert.equal(f.calls.length, 1)
+      assert.equal(f.calls[0].data.token, 'old-token')
+      assert.equal(f.calls[0].data.action, 'logout')
+      assert.ok(f.calls[0].timeout <= 10000)
+    } finally { f.finish(outcome); await pending }
+    assert.equal(f.page.run('session.value'), null)
+    assert.equal(f.storage.has('fy-session'), false)
+    assert.deepEqual(f.toasts, outcome === 'OK' ? [] : ['已退出本机，暂未确认服务器会话撤销'])
+  })
+}
+
+for (const outcome of ['OK', 'AUTH_REQUIRED', 'network']) {
+  test(`a late logout result ${outcome} leaves the next login intact`, async () => {
+    const f = accountFixture()
+    const pending = f.page.run('signOut()')
+    try {
+      await f.page.run('signIn()')
+      assert.equal(JSON.parse(f.storage.get('fy-session')).token, 'new-token')
+    } finally { f.finish(outcome); await pending }
+    assert.equal(f.myProfile.value.nickname, 'B profile')
+    assert.equal(f.page.run('session.value.uid'), 'B')
+    assert.equal(f.page.run('aomiao.value.claimed'), true)
+    assert.equal(f.page.run('busy.value'), false)
+    assert.deepEqual(f.toasts, ['微信登录成功'])
+  })
+}
+
 test('confirmed pending profile is immediately visible to its owner and clears on authoritative read or account switch', async () => {
   const approved = { nickname: '公开昵称', pending: null }
   const session = { value: { uid: 'A', expiresAt: Date.now() + 3600000 } }

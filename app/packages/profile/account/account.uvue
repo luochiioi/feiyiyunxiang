@@ -53,7 +53,7 @@
         <view class="row spread divider menu-row" @click="showPrivacy"><text class="body">隐私保护指引</text><text class="arrow">›</text></view>
         <!-- #endif -->
       </view>
-      <button v-if="session != null" class="secondary" :disabled="busy" @click="signOut">退出登录</button>
+      <button v-if="session != null" class="secondary" @click="signOut">退出登录</button>
     </view>
   </view>
 </template>
@@ -66,8 +66,8 @@ import { forgetMyProfile, myPendingProfile, myProfile, profileEditPath, refreshM
 import { stepsPath } from '@/features/steps.uts'
 
 import { openPage } from '@/features/navigation.uts'
-import { computed, ref } from 'vue'
-import { session, login, api, secured, clearSession, showError } from '@/features/api.uts'
+import { computed, ref, watch } from 'vue'
+import { session, login, secured, clearSession, revokeSession, showError } from '@/features/api.uts'
 import { hasUnreadReview, refreshReviewNotices } from '@/features/community/review-notices.uts'
 import { hasUnreadNotifications, refreshNotificationsSummary } from '@/features/notifications.uts'
 import { myPostsPath } from '@/features/community/community.uts'
@@ -83,6 +83,9 @@ const tags = computed(() => {
 })
 const role = ref<Aomiao | null>(null)
 const owner = ref('')
+let logoutRevision = 0
+let aomiaoRequest = 0
+watch(() => session.value?.uid, () => { if (session.value != null) logoutRevision++ }, { flush: 'sync' })
 const aomiao = computed(() => session.value?.uid === owner.value ? role.value : null)
 onShow(() => { if (session.value != null) { loadAomiao(); readProfile() }; refreshReviewNotices(); refreshNotificationsSummary() })
 
@@ -102,15 +105,16 @@ async function updateAomiao(action: string): Promise<void> {
   busy.value = true
   roleError.value = ''
   const uid = session.value?.uid
+  const request = ++aomiaoRequest
   try {
     const value = await secured<Aomiao>(action)
-    if (uid != null && session.value?.uid === uid) {
+    if (request === aomiaoRequest && uid != null && session.value?.uid === uid) {
       owner.value = uid
       role.value = value
     }
   } catch (_) {
-    roleError.value = '澳喵暂时无法同步，请重试。'
-  } finally { busy.value = false }
+    if (request === aomiaoRequest) roleError.value = '澳喵暂时无法同步，请重试。'
+  } finally { if (request === aomiaoRequest) busy.value = false }
 }
 async function loadAomiao(): Promise<void> { await updateAomiao('aomiaoStatus') }
 async function claim(): Promise<void> { await updateAomiao('claimAomiao') }
@@ -134,17 +138,25 @@ function showPrivacy(): void {
   // #endif
 }
 async function signOut(): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+  const token = session.value?.token
+  if (token == null) return
+  const revision = ++logoutRevision
+  aomiaoRequest++
+  forgetMyProfile()
+  clearSession()
+  activeRun.value = null
+  role.value = null
+  owner.value = ''
+  roleError.value = ''
+  profileFailed.value = false
+  busy.value = false
   try {
-    await api<UTSJSONObject>('logout')
-    forgetMyProfile()
-    clearSession()
-    activeRun.value = null
-    role.value = null
-    owner.value = ''
-    roleError.value = ''
-  } catch (_) { showError() } finally { busy.value = false }
+    await revokeSession(token)
+  } catch (_) {
+    if (session.value == null && revision === logoutRevision) {
+      uni.showToast({ title: '已退出本机，暂未确认服务器会话撤销', icon: 'none' })
+    }
+  }
 }
 </script>
 

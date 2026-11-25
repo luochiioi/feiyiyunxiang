@@ -4,6 +4,10 @@
     <view class="content">
       <DemoNotice />
 
+      <view v-if="readState === 'failed'" class="card">
+        <text class="body">{{ loadError }}</text>
+        <button class="secondary" @click="load">重试</button>
+      </view>
       <template v-if="route != null">
         <view class="card">
           <image class="cover" src="/packages/routes/static/silk-cover.jpg" mode="aspectFill" />
@@ -41,11 +45,10 @@
           <text v-for="section in routeSections.slice(1)" :key="section" class="body">{{ section }}</text>
         </view>
       </template>
-      <view v-else-if="runId != null" class="card">
-        <text class="body">{{ loading ? '正在读取探索进度…' : '暂时无法读取这次探索。' }}</text>
-        <button v-if="!loading" class="secondary" @click="load">重试</button>
+      <view v-else-if="readState === 'idle' || readState === 'loading'" class="card">
+        <text class="body">{{ runId == null ? '正在读取路线…' : '正在读取探索进度…' }}</text>
       </view>
-      <view v-else class="card"><text class="body">找不到这条路线。</text><button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看路线列表</button></view>
+      <view v-else-if="readState === 'ready'" class="card"><text class="body">找不到这条路线。</text><button class="secondary" @click="openPage('/packages/routes/routes/routes')">查看路线列表</button></view>
     </view>
   </view>
 </template>
@@ -54,7 +57,7 @@
 import AppPageHeader from '@/components/AppPageHeader.uvue'
 import DemoNotice from '@/components/DemoNotice.uvue'
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ProgressBar from '@/components/ProgressBar.uvue'
 import { activeRun, findRoute, listNodes, loadRun, published, refreshCatalog, startRoute, summarizeRoute } from '@/features/exploration/catalog.uts'
 import type { RunProgress } from '@/features/exploration/catalog.uts'
@@ -65,7 +68,13 @@ const id = ref<string | null>(null)
 const runId = ref<string | null>(null)
 const progress = ref<RunProgress | null>(null)
 const busy = ref(false)
-const loading = ref(false)
+const readState = ref('idle')
+let accountEpoch = 0
+watch(() => session.value?.uid, () => {
+  accountEpoch++
+  progress.value = null
+  if (runId.value != null && readState.value === 'ready') readState.value = 'failed'
+}, { flush: 'sync' })
 onLoad(query => {
   id.value = decodePageId(query['routeId'] ?? null)
   runId.value = decodePageId(query['runId'] ?? null)
@@ -74,6 +83,10 @@ const content = computed(() => progress.value?.snapshot ?? (runId.value == null 
 const route = computed(() => {
   if (content.value != null) return summarizeRoute(content.value!, progress.value)
   return runId.value == null ? findRoute(id.value) : null
+})
+const loadError = computed(() => {
+  if (runId.value != null) return '暂时无法读取这次探索。'
+  return route.value == null ? '路线暂时无法加载。' : '路线暂时无法刷新，仍可查看已加载的内容。'
 })
 const routeSections = computed(() => (route.value?.description ?? '').split('\n\n'))
 const activities = computed(() => content.value?.activities ?? [])
@@ -91,22 +104,31 @@ const nodes = computed(() => {
 })
 onShow(() => { load() })
 async function load(): Promise<void> {
-  if (loading.value) return
-  if (runId.value != null) {
-    if (id.value == null) return
-    loading.value = true
-    try { progress.value = await loadRun(id.value!, runId.value!) }
-    catch (_) { progress.value = null }
-    finally { loading.value = false }
-    return
-  }
-  await refreshCatalog()
-  if (id.value == null || session.value == null) { progress.value = null; return }
-  const uid = session.value!.uid
+  if (readState.value === 'loading') return
+  readState.value = 'loading'
   try {
-    const value = await api<RunProgress | null>('routeProgress', { routeId: id.value! })
-    if (session.value?.uid === uid) progress.value = value
-  } catch (_) { if (session.value?.uid !== uid) progress.value = null }
+    if (runId.value != null) {
+      if (id.value == null) throw new Error('NOT_FOUND')
+      const uid = session.value?.uid
+      const epoch = accountEpoch
+      const value = await loadRun(id.value!, runId.value!)
+      if (uid != null && epoch !== accountEpoch) throw new Error('SESSION_CHANGED')
+      progress.value = value
+      readState.value = 'ready'
+      return
+    }
+    const loaded = await refreshCatalog()
+    await loadSoloProgress()
+    readState.value = loaded ? 'ready' : 'failed'
+  } catch (_) {
+    readState.value = 'failed'
+  }
+}
+async function loadSoloProgress(): Promise<void> {
+  if (id.value == null || session.value == null) { progress.value = null; return }
+  const epoch = accountEpoch
+  const value = await api<RunProgress | null>('routeProgress', { routeId: id.value! })
+  if (epoch === accountEpoch) progress.value = value
 }
 async function selectViewedRun(): Promise<boolean> {
   if (busy.value) return false
